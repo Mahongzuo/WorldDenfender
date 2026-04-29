@@ -1,0 +1,242 @@
+﻿/* ========================================
+   categories.css — 关卡选择页样式
+   ======================================== */
+
+/* ---- Page shell ---- */
+.cat-page {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    background-color: var(--paper);
+    /* 轻微暖色渐变，接近旧纸/墙皮质感，减轻一片平白 */
+    background-image:
+        radial-gradient(ellipse 130% 70% at 12% 8%, rgba(184, 150, 90, 0.07) 0%, transparent 52%),
+        radial-gradient(ellipse 90% 55% at 88% 92%, rgba(90, 70, 50, 0.05) 0%, transparent 48%),
+        linear-gradient(175deg, rgba(255, 252, 245, 0.12) 0%, transparent 42%);
+    color: var(--ink);
+    font-family: inherit;
+}
+
+/* ---- Header ---- */
+.cat-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 18px 28px;
+    border-bottom: 1px solid var(--border-ink);
+    background: var(--paper);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.cat-back {
+    flex-shrink: 0;
+    font-size: 13px;
+    color: var(--ochre);
+    text-decoration: none;
+    letter-spacing: 2px;
+    padding: 5px 12px;
+    border: 1px solid rgba(184,150,90,0.35);
+    border-radius: 3px;
+    transition: background 0.18s ease, color 0.18s ease;
+}
+
+.cat-back:hover {
+    background: rgba(184,150,90,0.12);
+    color: var(--ink);
+}
+
+.cat-location-name {
+    font-size: 18px;
+    letter-spacing: 4px;
+    color: var(--ink);
+    font-weight: bold;
+}
+
+/* ---- Body ---- */
+.cat-body {
+    flex: 1;
+    padding: 24px 28px;
+    max-width: 1100px;
+    margin: 0 auto;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.cat-count {
+    font-size: 12px;
+    color: var(--ink-faint, #888);
+    letter-spacing: 2px;
+    margin-bottom: 20px;
+}
+
+/* ---- Level card grid ---- */
+.lv-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 20px;
+}
+
+/* ---- Individual level card ---- */
+.lv-card {
+    background: var(--paper-elev);
+    border: 1px solid var(--border-ink);
+    border-radius: 6px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    box-shadow: 1px 2px 6px var(--shadow-ink, rgba(60,50,40,0.10));
+    transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+
+.lv-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 2px 5px 16px var(--shadow-ink, rgba(60,50,40,0.14));
+    border-color: var(--ochre);
+}
+
+/* top row: status badge + mode badges */
+.lv-card-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.lv-status {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 2px;
+    letter-spacing: 1px;
+}
+
+.lv-status.designed {
+    color: var(--mountain, #7a9e8e);
+    background: rgba(122,158,142,0.12);
+    border: 1px solid rgba(122,158,142,0.3);
+}
+
+.lv-status.needs-work {
+    color: var(--ochre, #b8965a);
+    background: rgba(184,150,90,0.10);
+    border: 1px solid rgba(184,150,90,0.3);
+}
+
+.lv-status.default {
+    color: var(--ink-faint, #888);
+    background: rgba(80,70,60,0.07);
+    border: 1px solid var(--border-ink);
+}
+
+.lv-modes {
+    display: flex;
+    gap: 5px;
+    flex-wrap: wrap;
+}
+
+.mode-badge {
+    font-size: 11px;
+    padding: 2px 9px;
+    border-radius: 2px;
+    letter-spacing: 1px;
+}
+
+.badge-td {
+    color: var(--cinnabar, #c04040);
+    background: rgba(192,64,64,0.08);
+    border: 1px solid rgba(192,64,64,0.3);
+}
+
+.badge-exp {
+    color: var(--water-blue, #3a6080);
+    background: rgba(58,96,128,0.08);
+    border: 1px solid rgba(58,96,128,0.3);
+}
+
+/* card body */
+.lv-name {
+    font-size: 17px;
+    font-weight: bold;
+    color: var(--ink);
+    letter-spacing: 2px;
+    line-height: 1.35;
+}
+
+.lv-region {
+    font-size: 12px;
+    color: var(--ink-faint, #888);
+    letter-spacing: 1px;
+}
+
+.lv-stars {
+    font-size: 13px;
+    color: var(--ochre, #b8965a);
+    letter-spacing: 2px;
+}
+
+.lv-desc {
+    font-size: 12px;
+    color: var(--ink-light, #555);
+    line-height: 1.6;
+    flex: 1;
+}
+
+/* start button */
+.lv-start-btn {
+    margin-top: 8px;
+    padding: 9px 0;
+    background: var(--cinnabar, #c04040);
+    color: #fff;
+    border: none;
+    border-radius: 3px;
+    letter-spacing: 4px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.18s ease, transform 0.12s ease;
+}
+
+.lv-start-btn:hover {
+    background: #a83030;
+    transform: translateY(-1px);
+}
+
+.lv-start-btn:active {
+    transform: translateY(0);
+}
+
+/* ---- Default-level notice ---- */
+.lv-default-notice {
+    grid-column: 1 / -1;
+    padding: 12px 16px;
+    border: 1px dashed rgba(184,150,90,0.4);
+    border-radius: 4px;
+    color: var(--ochre, #b8965a);
+    font-size: 13px;
+    letter-spacing: 2px;
+    background: rgba(184,150,90,0.06);
+}
+
+/* ---- Error state ---- */
+.lv-error {
+    grid-column: 1 / -1;
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--cinnabar, #c04040);
+    font-size: 15px;
+    letter-spacing: 3px;
+}
+
+html[data-theme="dark"] .cat-page {
+    background-color: var(--paper);
+    background-image:
+        radial-gradient(ellipse 130% 70% at 12% 8%, rgba(196, 160, 96, 0.06) 0%, transparent 52%),
+        radial-gradient(ellipse 90% 55% at 88% 92%, rgba(90, 138, 184, 0.05) 0%, transparent 48%),
+        linear-gradient(175deg, rgba(40, 48, 58, 0.2) 0%, transparent 42%);
+}
+
+html[data-theme="dark"] .cat-header {
+    background: var(--paper);
+    border-bottom-color: var(--border-ink);
+}

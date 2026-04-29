@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Three.js addons 内部使用 import … from 'three'，必须用 import map 解析裸模块名 -->
+    <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/",
+        "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/",
+        "3d-tiles-renderer": "https://cdn.jsdelivr.net/npm/3d-tiles-renderer@0.4.24/build/index.js",
+        "3d-tiles-renderer/core": "https://cdn.jsdelivr.net/npm/3d-tiles-renderer@0.4.24/build/index.core.js",
+        "3d-tiles-renderer/core/plugins": "https://cdn.jsdelivr.net/npm/3d-tiles-renderer@0.4.24/build/index.core-plugins.js",
+        "3d-tiles-renderer/three": "https://cdn.jsdelivr.net/npm/3d-tiles-renderer@0.4.24/build/index.three.js",
+        "3d-tiles-renderer/three/plugins": "https://cdn.jsdelivr.net/npm/3d-tiles-renderer@0.4.24/build/index.three-plugins.js"
+      }
+    }
+    </script>
+    <title>地球守卫 · 关卡引擎编辑器</title>
+    <script src="../common/js/ui-theme.js"></script>
+    <link rel="stylesheet" href="../common/css/style.css">
+    <link rel="stylesheet" href="level-editor.css">
+</head>
+<body class="editor-page">
+    <div class="engine-shell">
+        <header class="engine-topbar panel-surface">
+            <div class="brand-block">
+                <div class="eyebrow">Earth Guardian · Level Engine</div>
+                <h1>国家 / 城市关卡编辑器</h1>
+                <p id="levelSummary">自动生成关卡骨架，自由布置塔防与第三人称探索地图。</p>
+            </div>
+
+            <div class="workspace-switch panel-surface" id="workbenchTabs" aria-label="编辑器工作台切换">
+                <button class="workspace-button active" data-workbench="level">关卡编辑器</button>
+                <button class="workspace-button" data-workbench="gameplay">卡片/玩法编辑器</button>
+                <button class="workspace-button" data-workbench="model">模型编辑器</button>
+            </div>
+
+            <div class="topbar-actions">
+                <button id="btnGenerateRegions" class="action-button">生成国家/城市关卡</button>
+                <button id="btnCreateLevel" class="action-button">新建关卡</button>
+                <button id="btnReload" class="action-button">重新载入</button>
+                <button id="btnExport" class="action-button">导出 JSON</button>
+                <button id="btnSave" class="action-button accent">保存到项目</button>
+                <a class="action-button ghost-link" href="home.html">返回首页</a>
+            </div>
+        </header>
+
+        <aside class="region-panel panel-surface">
+            <div class="panel-head">
+                <div>
+                    <div class="eyebrow">Region Library</div>
+                    <h2>国家 / 中国城市</h2>
+                </div>
+            </div>
+
+            <label class="field-block">
+                <span>搜索关卡</span>
+                <input id="levelSearch" type="search" placeholder="国家、城市、关卡名">
+            </label>
+
+            <div class="filter-row" id="statusFilters">
+                <button class="filter-chip active" data-status-filter="all">全部</button>
+                <button class="filter-chip" data-status-filter="draft">未设计</button>
+                <button class="filter-chip" data-status-filter="designed">已设计</button>
+                <button class="filter-chip" data-status-filter="needs-work">需完善</button>
+            </div>
+
+            <div id="levelTree" class="level-tree" aria-live="polite"></div>
+        </aside>
+
+        <main class="viewport-panel panel-surface">
+            <section id="levelWorkbench" class="workbench-surface">
+            <section class="level-strip">
+                <div>
+                    <div class="eyebrow">Current Level</div>
+                    <h2 id="currentLevelName">请选择关卡</h2>
+                    <p id="currentLevelMeta">地图尺寸、道路、敌人出口和 Actor 会保存到项目 JSON。</p>
+                </div>
+                <div id="overviewStats" class="overview-stats"></div>
+            </section>
+
+            <section class="mode-ribbon mode-ribbon--split" aria-label="布局与预览">
+                <div class="mode-ribbon-inner" id="editorModeTabs" aria-label="关卡模式">
+                    <button class="mode-button active" data-editor-mode="defense">塔防布局</button>
+                    <button class="mode-button" data-editor-mode="explore">探索布局</button>
+                </div>
+                <div class="mode-ribbon-inner view-mode-tabs" id="viewportViewTabs" role="tablist" aria-label="视口视图">
+                    <button type="button" class="mode-button secondary active" data-view-mode="board" role="tab" aria-selected="true">棋盘布局</button>
+                    <button type="button" class="mode-button secondary" data-view-mode="preview" role="tab">关卡预览</button>
+                </div>
+            </section>
+
+            <section class="tool-ribbon" id="editorToolRibbon" aria-label="地图编辑工具">
+                <button class="tool-button active" data-tool="select">选择/拖拽</button>
+                <button class="tool-button" data-tool="road">道路</button>
+                <button class="tool-button" data-tool="obstacle">障碍</button>
+                <button class="tool-button" data-tool="spawn">敌人出口</button>
+                <button class="tool-button" data-tool="path">敌人路径</button>
+                <button class="tool-button" data-tool="buildSlot">塔位</button>
+                <button class="tool-button" data-tool="objective">防守目标</button>
+                <button class="tool-button" data-tool="explorePoint">探索点</button>
+                <button class="tool-button" data-tool="actor">模型 Actor</button>
+                <button class="tool-button danger" data-tool="erase">橡皮擦</button>
+            </section>
+
+            <section class="map-stage-wrap" id="mapStageWrap">
+                <div id="boardViewport" class="board-viewport">
+                    <div id="mapStage" class="map-stage" role="application" aria-label="关卡地图画布">
+                        <div id="mapGrid" class="map-grid"></div>
+                    </div>
+                </div>
+
+                <div id="previewStageWrap" class="preview-stage-wrap view-hidden" aria-hidden="true">
+                    <div class="preview-split">
+                        <div id="previewHost" class="preview-host"></div>
+                        <div class="preview-toolbar-overlay" id="previewToolbarOverlay">
+                            <div class="preview-toolbar-inner panel-surface">
+                                <span class="preview-toolbar-label">三维操作</span>
+                                <button type="button" class="mini-button preview-tool-btn active" id="previewGizmoTranslate" title="位移 (快捷键 W)">移动</button>
+                                <button type="button" class="mini-button preview-tool-btn" id="previewGizmoRotate" title="旋转">旋转</button>
+                                <button type="button" class="mini-button preview-tool-btn" id="previewGizmoScale" title="缩放">缩放</button>
+                                <button type="button" class="mini-button" id="previewFocusSelection" title="相机聚焦到所选对象">聚焦</button>
+                            </div>
+                        </div>
+                    </div>
+                    <aside class="content-browser panel-surface" id="contentBrowser" aria-label="内容浏览器">
+                        <div class="content-browser-head">
+                            <div>
+                                <div class="eyebrow">Content</div>
+                                <strong class="content-browser-title">项目模型</strong>
+                            </div>
+                            <button type="button" class="mini-button" id="contentBrowserReload" title="扫描 public/GameModels 并刷新列表">刷新</button>
+                        </div>
+                        <p class="content-browser-hint">扫描项目 <code>public/GameModels</code> 下的 .glb / .gltf / .obj；拖入关卡预览场景。右侧「上传模型」会写入同一目录。先点击下方卡片选型，再在下方查看三维预览。</p>
+                        <div id="contentBrowserList" class="content-browser-list"></div>
+                        <div id="contentBrowserPreviewHost" class="content-browser-mini-preview-host" aria-label="项目模型预览"></div>
+                    </aside>
+                </div>
+
+                <div class="stage-hint" id="stageHint">
+                    <span id="activeToolLabel">当前工具：选择/拖拽</span>
+                    <span id="stageHintExtra">点击格子放置，拖拽已有 Actor 移动，右侧可精确编辑属性。</span>
+                </div>
+            </section>
+            </section>
+
+            <section id="gameplayWorkbench" class="workbench-surface view-hidden" aria-hidden="true">
+                <section class="level-strip gameplay-strip">
+                    <div>
+                        <div class="eyebrow">Gameplay Library</div>
+                        <h2 id="gameplayCityTitle">请选择带城市信息的关卡</h2>
+                        <p id="gameplayCityMeta">为当前关卡维护敌人、防御塔、卡片、角色、技能与项目内资源文件。</p>
+                    </div>
+                    <div id="gameplayOverviewStats" class="overview-stats"></div>
+                </section>
+
+                <section class="mode-ribbon mode-ribbon--split gameplay-ribbon" aria-label="玩法资源筛选">
+                    <div class="mode-ribbon-inner" id="gameplayResourceTabs" aria-label="玩法资源类型">
+                        <button class="mode-button active" data-gameplay-tab="enemies">敌人</button>
+                        <button class="mode-button" data-gameplay-tab="towers">防御塔</button>
+                        <button class="mode-button" data-gameplay-tab="cards">卡片</button>
+                        <button class="mode-button" data-gameplay-tab="characters">角色</button>
+                        <button class="mode-button" data-gameplay-tab="skills">技能</button>
+                    </div>
+                    <div class="mode-ribbon-inner gameplay-search-wrap">
+                        <label class="field-block gameplay-search-field">
+                            <span>资源搜索</span>
+                            <input id="gameplaySearch" type="search" placeholder="资源名 / 标签 / 简介">
+                        </label>
+                    </div>
+                </section>
+
+                <section class="gameplay-layout">
+                    <div class="gameplay-column gameplay-column-list panel-surface">
+                        <div class="panel-head panel-head-tight">
+                            <div>
+                                <div class="eyebrow">City Assets</div>
+                                <h2>城市资源列表</h2>
+                            </div>
+                            <button id="btnCreateGameplayEntry" class="mini-button">新增条目</button>
+                        </div>
+                        <div id="gameplayEntryList" class="compact-list"></div>
+                    </div>
+
+                    <div class="gameplay-column gameplay-column-editor panel-surface">
+                        <div class="panel-head panel-head-tight">
+                            <div>
+                                <div class="eyebrow">Editor</div>
+                                <h2 id="gameplayEditorTitle">资源详情</h2>
+                            </div>
+                            <div class="gameplay-editor-actions">
+                                <span id="gameplayEditorHint" class="panel-tag">城市玩法配置</span>
+                                <button id="btnMoveGameplayUp" type="button" class="mini-button">上移</button>
+                                <button id="btnMoveGameplayDown" type="button" class="mini-button">下移</button>
+                                <button id="btnDuplicateGameplayEntry" type="button" class="mini-button">复制</button>
+                                <button id="btnDeleteGameplayEntry" type="button" class="mini-button danger">删除</button>
+                            </div>
+                        </div>
+                        <section class="gameplay-preview-surface panel-surface">
+                            <div class="panel-head panel-head-tight">
+                                <div>
+                                    <div class="eyebrow">Preview</div>
+                                    <h2 id="gameplayPreviewTitle">资源预览</h2>
+                                </div>
+                                <span id="gameplayPreviewMeta" class="panel-tag">未选择资源</span>
+                            </div>
+                            <div id="gameplayAssetPreviewEmpty" class="empty-state">当前条目还没有绑定可预览的图片或模型。</div>
+                            <img id="gameplayAssetPreviewImage" class="gameplay-asset-preview-image view-hidden" alt="资源缩略图预览">
+                            <div id="gameplayAssetPreviewHost" class="gameplay-asset-preview-host view-hidden" aria-label="模型预览"></div>
+                        </section>
+                        <form id="gameplayEditorForm" class="gameplay-form">
+                            <div class="form-grid two">
+                                <label class="field-block">
+                                    <span>资源名</span>
+                                    <input id="gameplayName" name="name" type="text" placeholder="例如：寒霜守卫">
+                                </label>
+                                <label class="field-block">
+                                    <span>资源 ID</span>
+                                    <input id="gameplayId" name="id" type="text" placeholder="自动生成或手动覆盖">
+                                </label>
+                                <label class="field-block">
+                                    <span>标签</span>
+                                    <input id="gameplayTags" name="tags" type="text" placeholder="逗号分隔，例如：boss, elite">
+                                </label>
+                                <label class="field-block">
+                                    <span>稀有度 / 状态</span>
+                                    <input id="gameplayRarity" name="rarity" type="text" placeholder="common / elite / boss / hero">
+                                </label>
+                            </div>
+                            <label class="field-block">
+                                <span>简介</span>
+                                <textarea id="gameplaySummary" name="summary" rows="3" placeholder="描述该敌人、角色或技能的功能定位"></textarea>
+                            </label>
+                            <div id="gameplayStatGrid" class="form-grid three"></div>
+                        </form>
+                    </div>
+                </section>
+            </section>
+
+            <section id="modelWorkbench" class="workbench-surface view-hidden" aria-hidden="true">
+                <section class="level-strip model-strip">
+                    <div>
+                        <div class="eyebrow">Model Library</div>
+                        <h2 id="modelEditorTitle">模型资源库</h2>
+                        <p id="modelEditorMeta">按类型浏览和管理项目中的所有三维模型，支持上传替换。</p>
+                    </div>
+                    <div id="modelOverviewStats" class="overview-stats"></div>
+                </section>
+
+                <section class="mode-ribbon mode-ribbon--split model-ribbon" aria-label="模型分类筛选">
+                    <div class="mode-ribbon-inner" id="modelCategoryTabs" aria-label="模型分类">
+                        <button class="mode-button active" data-model-category="all">全部</button>
+                        <button class="mode-button" data-model-category="Enemy">敌人</button>
+                        <button class="mode-button" data-model-category="Tower">防御塔</button>
+                        <button class="mode-button" data-model-category="Buildings">建筑</button>
+                        <button class="mode-button" data-model-category="Props">地形/阻挡物/地板</button>
+                        <button class="mode-button" data-model-category="Charactor">角色</button>
+                    </div>
+                    <div class="mode-ribbon-inner model-search-wrap">
+                        <label class="field-block model-search-field">
+                            <span>模型搜索</span>
+                            <input id="modelSearch" type="search" placeholder="模型名 / 路径">
+                        </label>
+                    </div>
+                </section>
+
+                <section class="gameplay-layout">
+                    <div class="gameplay-column gameplay-column-list panel-surface">
+                        <div class="panel-head panel-head-tight">
+                            <div>
+                                <div class="eyebrow">Model List</div>
+                                <h2>模型列表</h2>
+                            </div>
+                            <span id="modelListCount" class="panel-tag"></span>
+                        </div>
+                        <div id="modelEntryList" class="compact-list"></div>
+                    </div>
+                    <div class="gameplay-column gameplay-column-editor panel-surface">
+                        <div class="panel-head panel-head-tight">
+                            <div>
+                                <div class="eyebrow">Preview & Details</div>
+                                <h2 id="modelDetailTitle">模型详情</h2>
+                            </div>
+                            <span id="modelDetailMeta" class="panel-tag">未选择</span>
+                        </div>
+                        <section class="gameplay-preview-surface panel-surface">
+                            <div class="panel-head panel-head-tight">
+                                <div>
+                                    <div class="eyebrow">Preview</div>
+                                    <h2>三维预览</h2>
+                                </div>
+                                <span id="modelPreviewMeta" class="panel-tag">未绑定模型</span>
+                            </div>
+                            <div id="modelPreviewEmpty" class="empty-state">请在左侧列表选择一个模型以预览。</div>
+                            <div id="modelPreviewHost" class="gameplay-asset-preview-host view-hidden" aria-label="模型预览"></div>
+                        </section>
+                        <form id="modelEditorForm" class="gameplay-form">
+                            <div class="form-grid two">
+                                <label class="field-block">
+                                    <span>模型名称</span>
+                                    <input id="modelDetailName" type="text" readonly>
+                                </label>
+                                <label class="field-block">
+                                    <span>所在分类</span>
+                                    <input id="modelDetailCategory" type="text" readonly>
+                                </label>
+                            </div>
+                            <label class="field-block">
+                                <span>文件路径</span>
+                                <input id="modelDetailPath" type="text" readonly>
+                            </label>
+                            <div class="section-title-row" style="margin-top:12px;">
+                                <h3>替换模型</h3>
+                                <label class="mini-button upload-button">
+                                    上传新模型
+                                    <input id="modelUploadReplace" type="file" accept=".glb,.gltf,.obj,.fbx,.dae,.stl">
+                                </label>
+                            </div>
+                            <p class="section-hint">上传后会覆盖当前模型文件，保持同名同路径；新文件将保存到 <code>public/GameModels/分类目录/</code>。</p>
+                        </form>
+                    </div>
+                </section>
+            </section>
+        </main>
+
+        <aside class="inspector-panel panel-surface">
+            <div class="panel-head">
+                <div>
+                    <div class="eyebrow">Inspector</div>
+                    <h2>属性与 Actor</h2>
+                </div>
+            </div>
+
+            <div id="levelInspectorWorkspace">
+
+            <section class="inspector-section">
+                <h3>关卡基础</h3>
+                <div class="form-grid two">
+                    <label class="field-block">
+                        <span>关卡名</span>
+                        <input id="fieldLevelName" type="text">
+                    </label>
+                    <label class="field-block">
+                        <span>状态</span>
+                        <select id="fieldStatus">
+                            <option value="draft">未设计</option>
+                            <option value="designed">已设计</option>
+                            <option value="needs-work">需完善</option>
+                        </select>
+                    </label>
+                    <label class="field-block">
+                        <span>国家</span>
+                        <input id="fieldCountry" type="text">
+                    </label>
+                    <label class="field-block">
+                        <span>城市</span>
+                        <input id="fieldCity" type="text">
+                    </label>
+                    <label class="field-block">
+                        <span>难度</span>
+                        <input id="fieldDifficulty" type="number" min="1" max="5">
+                    </label>
+                </div>
+                <label class="field-block">
+                    <span>简介</span>
+                    <textarea id="fieldDescription" rows="3"></textarea>
+                </label>
+            </section>
+
+            <section class="inspector-section game-asset-section" id="gameAssetSection" aria-label="游戏运行时模型">
+                <h3>塔防单位替换模型与缩放</h3>
+                <p class="section-hint">与主游戏内建造栏一致，保存后新游戏/读档时从项目配置加载；存档内覆盖设置仍以存档为准。</p>
+                <div id="towerModelList" class="game-asset-tower-list"></div>
+
+                <h3>探索：掉落与角色</h3>
+                <label class="game-asset-upload">
+                    替换探索掉落道具模型
+                    <input type="file" id="gaPropFile" data-ga="propModel" accept=".glb,.gltf,.obj,model/gltf-binary,model/gltf+json" />
+                </label>
+                <label class="field-block game-asset-scale">
+                    <span>掉落道具缩放</span>
+                    <input type="number" id="gaPropScale" class="ga-scale-input" data-ga-scale="moneyDrop" min="0.1" max="8" step="0.1" value="1" />
+                </label>
+                <label class="game-asset-upload">
+                    替换探索角色模型
+                    <input type="file" id="gaPlayerFile" data-ga="playerModel" accept=".glb,.gltf,.obj,model/gltf-binary,model/gltf+json" />
+                </label>
+                <label class="field-block game-asset-scale">
+                    <span>角色模型缩放</span>
+                    <input type="number" id="gaPlayerScale" class="ga-scale-input" data-ga-scale="player" min="0.1" max="8" step="0.1" value="1" />
+                </label>
+
+                <h3>探索：出生点变换（米 / 度）</h3>
+                <p class="section-hint">相对探索路径起点的平移(世界米) 与 欧拉角(度)，YXZ 顺序；Y 可修正部分模型前向与引擎不一致。角色移动中朝向由 WASD+镜头决定，本处为初始站立与每帧在「模型本地」上的旋修。</p>
+                <div class="form-grid three">
+                    <label class="field-block"><span>位置 X</span><input type="number" id="gaOffX" class="ga-pt" data-ga-pt="ox" step="0.05" value="0" /></label>
+                    <label class="field-block"><span>位置 Y</span><input type="number" id="gaOffY" class="ga-pt" data-ga-pt="oy" step="0.05" value="0" /></label>
+                    <label class="field-block"><span>位置 Z</span><input type="number" id="gaOffZ" class="ga-pt" data-ga-pt="oz" step="0.05" value="0" /></label>
+                </div>
+                <div class="form-grid three">
+                    <label class="field-block"><span>旋转 X (°)</span><input type="number" id="gaRotX" class="ga-pt" data-ga-pt="rx" step="0.5" value="0" /></label>
+                    <label class="field-block"><span>旋转 Y (°)</span><input type="number" id="gaRotY" class="ga-pt" data-ga-pt="ry" step="0.5" value="0" /></label>
+                    <label class="field-block"><span>旋转 Z (°)</span><input type="number" id="gaRotZ" class="ga-pt" data-ga-pt="rz" step="0.5" value="0" /></label>
+                </div>
+
+                <div class="animation-editor-block">
+                    <span class="anim-kicker">Mixamo 动画编辑器</span>
+                    <div class="anim-upload-grid">
+                        <label class="anim-btn">闲置 (Idle)<input type="file" data-ga-anim="idle" accept=".glb,.gltf" /></label>
+                        <label class="anim-btn">行走 (Walk)<input type="file" data-ga-anim="walk" accept=".glb,.gltf" /></label>
+                        <label class="anim-btn">跑步 (Run)<input type="file" data-ga-anim="run" accept=".glb,.gltf" /></label>
+                    </div>
+                </div>
+            </section>
+
+            <section class="inspector-section">
+                <div class="section-title-row">
+                    <h3>地图尺寸</h3>
+                    <button id="btnResizeMap" class="mini-button">应用尺寸</button>
+                </div>
+                <div class="form-grid three">
+                    <label class="field-block">
+                        <span>宽</span>
+                        <input id="fieldGridCols" type="number" min="8" max="80">
+                    </label>
+                    <label class="field-block">
+                        <span>高</span>
+                        <input id="fieldGridRows" type="number" min="8" max="80">
+                    </label>
+                    <label class="field-block">
+                        <span>格子尺寸</span>
+                        <input id="fieldTileSize" type="number" min="1" max="10" step="0.5">
+                    </label>
+                </div>
+            </section>
+
+            <section class="inspector-section">
+                <h3>真实地图</h3>
+                <p class="section-hint">启用后，游戏和 3D 预览会用 Cesium ion 3D Tiles 作为城市底板；未配置 token 时自动回退到格子地图。世界国家关卡会随项目加载自动套用首都/地标经纬度；若在 JSON 的 <code>extensions.manualWorldGeoPin</code> 设为 <code>true</code> 则固定当前坐标不再被自动覆盖。</p>
+                <label class="field-block">
+                    <span>启用真实地图</span>
+                    <select id="fieldGeoEnabled">
+                        <option value="false">关闭</option>
+                        <option value="true">开启</option>
+                    </select>
+                </label>
+                <div class="form-grid two">
+                    <label class="field-block"><span>纬度</span><input id="fieldGeoLat" type="number" step="0.000001"></label>
+                    <label class="field-block"><span>经度</span><input id="fieldGeoLon" type="number" step="0.000001"></label>
+                </div>
+                <div class="form-grid three">
+                    <label class="field-block"><span>高度(米)</span><input id="fieldGeoHeight" type="number" step="1"></label>
+                    <label class="field-block"><span>范围(米)</span><input id="fieldGeoExtent" type="number" step="50"></label>
+                    <label class="field-block"><span>旋转(°)</span><input id="fieldGeoRotation" type="number" step="1"></label>
+                </div>
+                <div class="form-grid two">
+                    <label class="field-block"><span>Y 偏移(米)</span><input id="fieldGeoYOffset" type="number" step="1"></label>
+                    <label class="field-block"><span>棋盘高度(米)</span><input id="fieldGeoBoardHeight" type="number" step="1" min="0" placeholder="32"></label>
+                </div>
+                <div class="form-grid two">
+                    <label class="field-block"><span>Cesium ion Asset ID</span><input id="fieldGeoAssetId" type="text" placeholder="2275207"></label>
+                </div>
+            </section>
+
+            <section class="inspector-section">
+                <div class="section-title-row">
+                    <h3>选中对象</h3>
+                    <button id="btnDeleteSelection" class="mini-button danger">删除</button>
+                </div>
+                <div id="selectionInspector" class="selection-inspector empty-state">未选择对象。</div>
+            </section>
+
+            <section class="inspector-section view-hidden" id="previewSceneOutlineSection" aria-label="关卡预览场景大纲">
+                <h3>预览场景大纲</h3>
+                <p class="section-hint">仅在「关卡预览」下列出已放置的 Actor；点击可选中，配合工具栏 Gizmo 编辑。</p>
+                <div id="previewSceneOutlineList" class="preview-scene-outline-list"></div>
+            </section>
+
+            <section class="inspector-section">
+                <div class="section-title-row">
+                    <h3>Actor 模板库</h3>
+                    <button id="btnCreateActorTemplate" class="mini-button">新增模板</button>
+                </div>
+                <div id="actorPalette" class="actor-palette"></div>
+            </section>
+
+            <section class="inspector-section">
+                <div class="section-title-row">
+                    <h3>敌人与波次</h3>
+                    <button id="btnAddWave" class="mini-button">新增波次</button>
+                </div>
+                <p class="section-hint">每波可单独替换外观模型与缩放；未覆盖时使用下方「关卡」enemyTypes / 玩法库敌人的模型设定。</p>
+                <div id="waveList" class="compact-list"></div>
+            </section>
+
+            <section class="inspector-section">
+                <div class="section-title-row">
+                    <h3>模型资产</h3>
+                    <label class="mini-button upload-button">
+                        上传模型
+                        <input id="modelUpload" type="file" accept=".glb,.gltf,.obj,.fbx,.dae,.stl">
+                    </label>
+                </div>
+                <p class="section-hint">写入项目 <code>public/GameModels/</code>，开发服务器启动后可在下方「关卡预览 · 项目模型」中拖拽使用。</p>
+                <div id="modelAssetList" class="compact-list"></div>
+            </section>
+            </div>
+
+            <div id="gameplayInspectorWorkspace" class="view-hidden" aria-hidden="true">
+                <section class="inspector-section">
+                    <h3>城市玩法库</h3>
+                    <p class="section-hint" id="gameplayInspectorMeta">先从左侧关卡树选择一个城市关卡，再在这里维护该城市专属的敌人、角色和技能。</p>
+                    <div id="gameplaySelectionMeta" class="compact-list"></div>
+                </section>
+
+                <section class="inspector-section">
+                    <div class="section-title-row">
+                        <h3>项目资源文件</h3>
+                        <label class="mini-button upload-button">
+                            上传资源
+                            <input id="gameplayAssetUpload" type="file" accept=".glb,.gltf,.obj,.fbx,.dae,.stl,.png,.jpg,.jpeg,.webp">
+                        </label>
+                    </div>
+                    <div class="form-grid two">
+                        <label class="field-block">
+                            <span>资产名称</span>
+                            <input id="gameplayAssetName" type="text" placeholder="例如：寒霜守卫">
+                        </label>
+                        <label class="field-block">
+                            <span>保存分类</span>
+                            <select id="gameplayAssetType">
+                                <option value="Enemies">Enemies / 敌人</option>
+                                <option value="Characters">Characters / 角色</option>
+                                <option value="Skills">Skills / 技能</option>
+                            </select>
+                        </label>
+                    </div>
+                    <p class="section-hint">新资源会写入 public/Arts/资源分类/城市名/ 下，文件名自动按“城市名-资产名”生成。</p>
+                    <div id="gameplayAssetList" class="compact-list"></div>
+                </section>
+            </div>
+
+            <div id="modelInspectorWorkspace" class="view-hidden" aria-hidden="true">
+                <section class="inspector-section">
+                    <h3>模型库概览</h3>
+                    <p class="section-hint">所有模型按目录自动分类，扫描自 <code>public/GameModels</code>。点击下方分类可快速筛选。</p>
+                    <div id="modelInspectorStats" class="compact-list"></div>
+                </section>
+                <section class="inspector-section">
+                    <div class="section-title-row">
+                        <h3>上传新模型</h3>
+                        <label class="mini-button upload-button">
+                            上传
+                            <input id="modelInspectorUpload" type="file" accept=".glb,.gltf,.obj,.fbx,.dae,.stl">
+                        </label>
+                    </div>
+                    <div class="form-grid two">
+                        <label class="field-block">
+                            <span>模型名称</span>
+                            <input id="modelInspectorUploadName" type="text" placeholder="例如：新怪物">
+                        </label>
+                        <label class="field-block">
+                            <span>保存分类</span>
+                            <select id="modelInspectorUploadCategory">
+                                <option value="Enemy">Enemy / 敌人</option>
+                                <option value="Tower">Tower / 防御塔</option>
+                                <option value="Buildings">Buildings / 建筑</option>
+                                <option value="Props">Props / 地形/阻挡物/地板</option>
+                                <option value="Charactor">Charactor / 角色</option>
+                            </select>
+                        </label>
+                    </div>
+                    <p class="section-hint">新模型会写入 <code>public/GameModels/分类目录/</code>，扫描后自动出现在列表中。</p>
+                </section>
+            </div>
+        </aside>
+    </div>
+
+    <div id="statusDock" class="status-dock">
+        <span id="statusBadge" class="status-badge idle">准备就绪</span>
+        <span id="statusText">正在初始化关卡编辑器…</span>
+    </div>
+
+    <script src="../common/js/country-geo-presets.js"></script>
+    <script src="level-editor.js"></script>
+</body>
+</html>

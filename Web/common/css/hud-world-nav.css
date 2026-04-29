@@ -1,0 +1,40 @@
+/* 关卡内 Web HUD：统一「返回主菜单」（右上角；北京等用 --tl 放左上角避免挡信息卡） */
+.wo-exit-menu {
+  position: fixed;
+  top: 10px;
+  right: 10px;
+  left: auto;
+  z-index: 10050;
+  pointer-events: auto;
+}
+
+.wo-exit-menu--tl {
+  left: 10px;
+  right: auto;
+}
+
+.wo-exit-menu button {
+  cursor: pointer;
+  font-size: 12px;
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid rgba(58, 96, 128, 0.85);
+  background: rgba(233, 226, 212, 0.92);
+  color: #2c2c2c;
+  font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+}
+
+.wo-exit-menu button:hover {
+  background: #e8e0d0;
+}
+
+.wo-exit-menu--dark button {
+  border-color: rgba(255, 255, 255, 0.35);
+  background: rgba(30, 25, 40, 0.75);
+  color: #f4efe4;
+}
+
+.wo-exit-menu--dark button:hover {
+  background: rgba(50, 45, 60, 0.9);
+}

@@ -1,0 +1,152 @@
+/* ========================================
+   China City Selection — 城市选关专用样式
+   ======================================== */
+
+/* --- 城市标记点 --- */
+.city-marker {
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.city-marker-dot {
+    transition: all 0.3s ease;
+    filter: drop-shadow(0 0 3px rgba(192, 64, 64, 0.4));
+}
+
+.city-marker:hover .city-marker-dot {
+    filter: drop-shadow(0 0 8px rgba(192, 64, 64, 0.7));
+}
+
+.city-marker-ring {
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.city-marker:hover .city-marker-ring {
+    opacity: 1;
+}
+
+.city-marker-label {
+    pointer-events: none;
+    font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans SC", SimHei, sans-serif;
+    font-weight: 600;
+    transition: all 0.3s ease;
+}
+
+.city-marker:hover .city-marker-label {
+    fill: var(--cinnabar) !important;
+}
+
+.city-marker-sublabel {
+    pointer-events: none;
+    font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans SC", SimHei, sans-serif;
+    font-weight: 400;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.city-marker:hover .city-marker-sublabel {
+    opacity: 1;
+}
+
+/* --- 脉冲动画 --- */
+@keyframes cityPulse {
+    0%   { r: 5;  opacity: 0.6; }
+    50%  { r: 9;  opacity: 0.2; }
+    100% { r: 5;  opacity: 0.6; }
+}
+
+.city-marker-pulse {
+    animation: cityPulse 2s ease-in-out infinite;
+}
+
+/* --- 装饰省份弱化 --- */
+.land-dim {
+    fill: var(--mountain);
+    stroke: var(--paper);
+    stroke-width: 0.4;
+    opacity: 0.3;
+    cursor: default;
+    pointer-events: none;
+    transition: none;
+}
+
+/* --- 目标省份高亮 --- */
+.land-target {
+    fill: var(--mountain-deep);
+    stroke: var(--paper);
+    stroke-width: 0.6;
+    cursor: pointer;
+    opacity: 0.65;
+    transition: fill 0.25s ease, opacity 0.25s ease, filter 0.25s ease;
+}
+
+.land-target:hover {
+    fill: var(--cinnabar);
+    opacity: 0.85;
+    stroke: var(--ochre);
+    stroke-width: 0.8;
+    filter: drop-shadow(0 0 6px rgba(192, 64, 64, 0.35));
+}
+
+.land-target.active {
+    fill: var(--water-blue);
+    opacity: 1;
+    stroke: var(--ochre);
+    stroke-width: 1;
+    filter: drop-shadow(0 0 8px rgba(58, 96, 128, 0.4));
+}
+
+.city-picker {
+    position: fixed;
+    right: 28px;
+    top: 110px;
+    z-index: 200;
+    display: grid;
+    gap: 8px;
+    min-width: 220px;
+    padding: 14px;
+    border: 1px solid var(--border-ink);
+    border-left: 4px solid var(--cinnabar);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--paper) 94%, white 6%);
+    box-shadow: 2px 8px 24px var(--shadow-ink);
+}
+
+.city-picker-title {
+    color: var(--ink);
+    font-size: 13px;
+    letter-spacing: 2px;
+    opacity: 0.72;
+}
+
+.city-picker-option {
+    display: grid;
+    gap: 3px;
+    width: 100%;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 8px;
+    padding: 10px 12px;
+    color: var(--ink);
+    background: var(--paper);
+    cursor: pointer;
+    text-align: left;
+    transition: border-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
+}
+
+.city-picker-option strong {
+    font-size: 16px;
+    letter-spacing: 3px;
+}
+
+.city-picker-option span {
+    font-size: 12px;
+    letter-spacing: 1px;
+    opacity: 0.68;
+}
+
+.city-picker-option:hover {
+    color: var(--cinnabar);
+    border-color: var(--cinnabar);
+    transform: translateX(-2px);
+}

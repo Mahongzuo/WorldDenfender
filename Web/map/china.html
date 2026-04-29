@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>地球守卫 · 中华大地</title>
+    <script src="../common/js/ui-theme.js"></script>
+    <link rel="stylesheet" href="../common/css/style.css">
+</head>
+<body class="fade-in">
+    <div class="map-container">
+        <div class="cloud-ornament top-left"></div>
+        <div class="cloud-ornament top-right"></div>
+        <div class="cloud-ornament bottom-left"></div>
+        <div class="cloud-ornament bottom-right"></div>
+        <div class="map-border"></div>
+        <div class="map-border-inner"></div>
+
+        <h1 class="map-title">中 华 大 地</h1>
+        <div class="map-subtitle">选择省份 · 查看城市</div>
+
+        <div class="nav-buttons">
+            <button class="back-btn" style="position:static" onclick="window.location.href='world.html'">◁ 返回世界地图</button>
+            <a href="home.html" class="home-nav-btn">◈ 主菜单</a>
+        </div>
+
+        <svg id="mapSvg" class="map-svg" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
+            <rect class="ocean" width="100%" height="100%" />
+        </svg>
+
+        <div class="tooltip" id="tooltip">
+            <div class="tip-name"></div>
+            <div class="tip-sub"></div>
+            <div class="tip-hint"></div>
+        </div>
+
+        <div class="loading" id="loading">载入中</div>
+    </div>
+
+    <script src="../data/china-data.js"></script>
+    <script src="../common/js/ue-bridge.js"></script>
+    <script src="shared/map-renderer.js"></script>
+    <script src="shared/map-viewport.js"></script>
+    <script src="china-map.js"></script>
+</body>
+</html>

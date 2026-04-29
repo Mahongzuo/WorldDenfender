@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>地球守卫 · AI入侵</title>
+    <script src="../common/js/ui-theme.js"></script>
+    <link rel="stylesheet" href="../common/css/style.css">
+    <link rel="stylesheet" href="home.css">
+</head>
+<body>
+    <div class="home-page">
+        <div class="home-bg"></div>
+        <div class="home-glow"></div>
+        <div class="cloud-ornament top-right"></div>
+        <div class="cloud-ornament bottom-right"></div>
+        <div class="map-border"></div>
+
+        <div class="home-left">
+            <div class="home-brand">
+                <div class="home-title">地球守卫</div>
+                <div class="home-title-en">AI 入 侵</div>
+                <div class="home-accent-line"></div>
+            </div>
+
+            <nav class="home-menu">
+                <a href="china.html" class="home-menu-item highlight">
+                    城市选关
+                    <span class="menu-sub">地图选择</span>
+                </a>
+                <a href="#" class="home-menu-item highlight" id="btnRandom" onclick="onRandomStart(); return false;">
+                    随机开始
+                    <span class="menu-sub">随缘一战</span>
+                </a>
+                <a href="level-editor.html" class="home-menu-item">
+                    关卡编辑器
+                    <span class="menu-sub">自定义创作</span>
+                </a>
+                <div class="menu-divider"></div>
+                <a href="#" class="home-menu-item" onclick="onSettings(); return false;">
+                    设&#x3000;置
+                </a>
+                <div class="menu-divider"></div>
+                <a href="#" class="home-menu-item" onclick="onAbout(); return false;">
+                    关于游戏
+                </a>
+            </nav>
+        </div>
+
+        <div class="home-footer">守护人类最后的城市</div>
+        <div class="home-version">v0.1.0 Alpha</div>
+    </div>
+
+    <script src="../common/js/ue-bridge.js"></script>
+    <script src="home.js"></script>
+</body>
+</html>

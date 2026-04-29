@@ -1,0 +1,1429 @@
+/* ========================================
+   地球守卫 · 游戏 UI — 暖色水墨风
+   ======================================== */
+
+/* --- 全局色板（与 Web/common/css/style.css 保持一致） --- */
+:root {
+  --paper:        #f5f0e8;
+  --paper-dark:   #ece4d4;
+  --paper-glass:  rgba(245, 240, 232, 0.92);
+  --ink:          #2c2816;
+  --ink-light:    #5a5040;
+  --ink-faint:    #8a8070;
+  --mountain:     #7a9e8e;
+  --mountain-deep:#4a7a6a;
+  --water-blue:   #3a6080;
+  --cinnabar:     #c04040;
+  --cinnabar-deep:#9a2e2e;
+  --ochre:        #b8965a;
+  --ochre-light:  #d4b478;
+  --border-ink:   rgba(80, 70, 60, 0.18);
+  --shadow-ink:   rgba(60, 50, 40, 0.12);
+
+  /* 旧变量映射（兼容 createDom 内联样式） */
+  --accent:           var(--cinnabar);
+  --accent-highlight: #d45050;
+  --bg-panel:         var(--paper-glass);
+  --text-main:        var(--ink);
+  --text-dim:         var(--ink-faint);
+  --border-ui:        var(--border-ink);
+
+  color: var(--ink);
+  font-family: 'Noto Serif SC', 'STSong', 'SimSun', 'Microsoft YaHei', serif;
+  background: var(--paper);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* --- 滚动条（暖赭色调） --- */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(184, 150, 90, 0.35);
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(184, 150, 90, 0.65); }
+* { scrollbar-width: thin; scrollbar-color: rgba(184,150,90,0.35) transparent; box-sizing: border-box; }
+
+body {
+  margin: 0;
+  overflow: hidden;
+  font-family: 'Noto Serif SC', 'STSong', 'SimSun', 'Microsoft YaHei', serif;
+  background-color: var(--paper);
+  color: var(--ink);
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button { color: inherit; font: inherit; }
+
+#app, .game-root, .scene-host { width: 100vw; height: 100vh; }
+.scene-host canvas { display: block; }
+
+/* 右侧面板展开时 HUD 避让宽度：14 + 330 + 14 */
+.game-root {
+  --hud-right-inset: 358px;
+}
+.game-root.game-root--terminal-collapsed {
+  --hud-right-inset: 14px;
+}
+
+/* 画面四角淡暖色晕染，不遮挡内容 */
+.anime-vignette {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  background:
+    radial-gradient(circle at 80% 10%, rgba(245, 228, 180, 0.22), transparent 28%),
+    radial-gradient(circle at 18% 88%, rgba(184, 150, 90, 0.10), transparent 28%),
+    linear-gradient(180deg, rgba(245,240,232,0.12), transparent 20%, transparent 80%, rgba(232,224,208,0.14));
+  pointer-events: none;
+}
+
+/* ===== 首页弹窗 ===== */
+.home-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(ellipse at 65% 30%, rgba(245, 236, 210, 0.55), transparent 45%),
+    rgba(232, 224, 206, 0.72);
+  backdrop-filter: blur(12px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 300ms ease;
+}
+.home-overlay.show { opacity: 1; pointer-events: auto; }
+
+.home-card {
+  width: min(520px, calc(100vw - 36px));
+  border: 1px solid var(--border-ink);
+  border-radius: 28px;
+  background: var(--paper-glass);
+  box-shadow: 0 24px 64px var(--shadow-ink), 0 0 0 1px rgba(184,150,90,0.10);
+  padding: 44px 48px;
+  text-align: center;
+  backdrop-filter: blur(18px);
+}
+
+.home-card .section-kicker {
+  display: inline-flex;
+  width: fit-content;
+  border-radius: 999px;
+  background: rgba(184, 150, 90, 0.14);
+  border: 1px solid rgba(184, 150, 90, 0.35);
+  color: var(--ochre);
+  padding: 4px 14px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 2px;
+}
+
+.home-card h1 {
+  margin: 14px 0 6px;
+  font-size: 44px;
+  color: var(--ink);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.home-card p {
+  max-width: 620px;
+  color: var(--ink-light);
+  line-height: 1.7;
+  font-size: 14px;
+}
+
+.home-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 22px;
+}
+
+.home-actions button {
+  cursor: pointer;
+  border: 1px solid var(--border-ink);
+  border-radius: 16px;
+  background: rgba(245, 240, 232, 0.8);
+  color: var(--ink);
+  padding: 12px 22px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  transition: border-color 0.2s ease, background 0.2s ease, transform 0.18s ease;
+}
+.home-actions button:hover {
+  border-color: var(--ochre);
+  background: rgba(184, 150, 90, 0.10);
+  transform: translateY(-2px);
+}
+
+.save-summary {
+  width: fit-content;
+  margin: 18px auto 0;
+  border-radius: 999px;
+  border: 1px solid rgba(184, 150, 90, 0.30);
+  background: rgba(184, 150, 90, 0.09);
+  color: var(--ochre);
+  padding: 8px 16px;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+/* ===== 通用面板 ===== */
+.panel {
+  position: fixed;
+  z-index: 10;
+  background: var(--paper-glass);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--border-ink);
+  border-radius: 22px;
+  box-shadow: 0 12px 36px var(--shadow-ink);
+}
+
+/* ===== 顶部状态条 ===== */
+.top-panel {
+  top: 14px;
+  left: 14px;
+  min-width: 720px;
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  padding: 14px 28px;
+}
+
+.top-panel-spacer {
+  flex: 1;
+  min-width: 12px;
+  min-height: 1px;
+}
+
+.theme-chip {
+  flex-shrink: 0;
+  cursor: pointer;
+  border: 1px solid var(--border-ink);
+  border-radius: 999px;
+  background: rgba(245, 240, 232, 0.75);
+  color: var(--ink-light);
+  padding: 8px 16px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
+}
+.theme-chip:hover {
+  border-color: var(--ochre);
+  background: rgba(184, 150, 90, 0.12);
+  color: var(--ink);
+}
+.theme-chip--block {
+  width: 100%;
+  max-width: 280px;
+}
+.home-theme-slot {
+  margin-top: 18px;
+  display: flex;
+  justify-content: center;
+}
+.pause-theme-btn {
+  cursor: pointer;
+  border: 1px dashed var(--border-ink);
+  border-radius: 16px;
+  background: transparent;
+  color: var(--ink-faint);
+  padding: 12px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  transition: all 140ms ease;
+}
+.pause-theme-btn:hover {
+  border-color: var(--ochre);
+  color: var(--ink);
+  background: rgba(184, 150, 90, 0.08);
+}
+
+.stat { display: grid; gap: 2px; }
+
+.stat span {
+  color: var(--ink-faint);
+  font-size: 11px;
+  letter-spacing: 1px;
+}
+
+.stat strong {
+  font-size: 16px;
+  color: var(--ink);
+  letter-spacing: 0.02em;
+}
+
+/* 模式徽章 */
+.mode-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  border-radius: 999px;
+  background: var(--cinnabar);
+  color: #fff;
+  padding: 3px 11px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+/* ===== 左侧快捷栏 ===== */
+.phone-dock {
+  position: fixed;
+  bottom: 14px;
+  left: 14px;
+  z-index: 12;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 7px;
+  border-radius: 24px;
+  background: var(--paper-glass);
+  padding: 10px;
+  box-shadow: 0 12px 36px var(--shadow-ink);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--border-ink);
+}
+
+.dock-button,
+.gacha-actions button,
+.close-button {
+  cursor: pointer;
+  border: 1px solid var(--border-ink);
+  border-radius: 14px;
+  background: rgba(245, 240, 232, 0.7);
+  color: var(--ink);
+  font-weight: 700;
+  transition: all 0.18s ease;
+}
+
+.dock-button { width: 60px; height: 44px; font-size: 11px; letter-spacing: 0.5px; }
+
+.dock-button:hover,
+.gacha-actions button:hover,
+.close-button:hover {
+  border-color: var(--ochre);
+  background: rgba(184, 150, 90, 0.12);
+  transform: translateY(-1px);
+}
+
+/* 高亮按钮（新游戏 / 抽卡） */
+.premium {
+  background: linear-gradient(135deg, var(--cinnabar), #e06040) !important;
+  color: #fff !important;
+  border-color: transparent !important;
+  box-shadow: 0 4px 14px rgba(192, 64, 64, 0.28);
+}
+.premium:hover {
+  filter: brightness(1.08);
+}
+
+/* ===== 右侧信息面板 ===== */
+.right-panel {
+  top: 14px;
+  bottom: 14px;
+  right: 14px;
+  width: 330px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+  transition: transform 0.28s cubic-bezier(0.25, 0.46, 0.45, 0.94), opacity 0.22s ease;
+}
+
+.right-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.right-panel-header .section-kicker {
+  margin: 0;
+}
+
+.right-panel-hide-btn {
+  flex-shrink: 0;
+  cursor: pointer;
+  border: 1px solid var(--border-ink);
+  border-radius: 10px;
+  background: rgba(245, 240, 232, 0.65);
+  color: var(--ink-light);
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  font-family: inherit;
+  transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
+}
+.right-panel-hide-btn:hover {
+  border-color: var(--ochre);
+  background: rgba(184, 150, 90, 0.12);
+  color: var(--ink);
+}
+
+.game-root--terminal-collapsed .right-panel {
+  transform: translateX(calc(100% + 24px));
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* 面板收起后贴边的「帮助」入口 */
+.terminal-help-tab {
+  position: fixed;
+  top: 50%;
+  right: 0;
+  z-index: 11;
+  transform: translateY(-50%);
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  padding: 18px 10px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.35em;
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--ink);
+  border: 1px solid var(--border-ink);
+  border-right: none;
+  border-radius: 14px 0 0 14px;
+  background: var(--paper-glass);
+  backdrop-filter: blur(16px);
+  box-shadow: -6px 0 24px var(--shadow-ink);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.22s ease, border-color 0.18s ease, background 0.18s ease;
+}
+.terminal-help-tab:hover {
+  border-color: var(--ochre);
+  background: rgba(184, 150, 90, 0.1);
+}
+.game-root--terminal-collapsed .terminal-help-tab {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* 小标签 */
+.section-kicker {
+  display: inline-flex;
+  width: fit-content;
+  border-radius: 999px;
+  background: rgba(184, 150, 90, 0.14);
+  border: 1px solid rgba(184, 150, 90, 0.32);
+  color: var(--ochre);
+  padding: 3px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 2px;
+}
+
+.right-panel h1,
+.gacha-card h2 {
+  margin: 8px 0;
+  font-size: 22px;
+  color: var(--ink);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.right-panel p,
+.gacha-card p {
+  margin: 6px 0;
+  color: var(--ink-light);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+/* 上传/缩放标签 */
+.prop-upload-label,
+.scale-control {
+  display: block;
+  border: 1px solid var(--border-ink);
+  border-radius: 14px;
+  background: rgba(245, 240, 232, 0.8);
+  color: var(--ink-light);
+  margin: 10px 0;
+  padding: 10px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease;
+  letter-spacing: 1px;
+}
+.prop-upload-label:hover, .scale-control:hover {
+  border-color: var(--ochre);
+  background: rgba(184, 150, 90, 0.08);
+}
+.prop-upload-label input { display: none; }
+
+/* 动画编辑器区块 */
+.animation-editor {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px dashed rgba(184, 150, 90, 0.38);
+  border-radius: 16px;
+  background: rgba(245, 240, 232, 0.5);
+}
+
+.anim-upload-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.anim-btn {
+  display: block;
+  padding: 9px;
+  border: 1px solid var(--border-ink);
+  border-radius: 10px;
+  background: rgba(245, 240, 232, 0.7);
+  color: var(--ink-light);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.18s ease;
+}
+.anim-btn:hover {
+  background: rgba(184, 150, 90, 0.12);
+  border-color: var(--ochre);
+  color: var(--ink);
+}
+.anim-btn input { display: none; }
+
+/* S级技能面板 */
+.stellar-skill-panel {
+  display: grid;
+  gap: 8px;
+  border: 1px solid rgba(192, 64, 64, 0.28);
+  border-radius: 16px;
+  background: rgba(245, 240, 232, 0.7);
+  margin: 10px 0;
+  padding: 12px;
+}
+
+.stellar-skill-panel button {
+  cursor: pointer;
+  border: 1px solid rgba(192, 64, 64, 0.35);
+  border-radius: 12px;
+  background: rgba(192, 64, 64, 0.07);
+  color: var(--ink);
+  padding: 9px 10px;
+  font-weight: 700;
+  text-align: left;
+  transition: all 0.18s ease;
+  letter-spacing: 0.5px;
+}
+.stellar-skill-panel button:hover:not(:disabled) {
+  background: rgba(192, 64, 64, 0.14);
+  border-color: var(--cinnabar);
+}
+.stellar-skill-panel button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.stellar-skill-panel p {
+  margin: 0;
+  color: var(--ink-faint);
+  font-size: 12px;
+}
+
+.stellar-skill-panel.active {
+  border-color: rgba(192, 64, 64, 0.50);
+  background: rgba(245, 235, 225, 0.8);
+}
+
+/* 数字输入框 */
+.scale-control input,
+.build-scale-label input {
+  width: 64px;
+  border: 1px solid var(--border-ink);
+  border-radius: 8px;
+  background: rgba(245, 240, 232, 0.9);
+  color: var(--ink);
+  margin-left: 8px;
+  padding: 4px 6px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* ===== 地图/关卡按钮列表 ===== */
+.map-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.map-button,
+.build-button {
+  cursor: pointer;
+  border: 1px solid var(--border-ink);
+  border-radius: 14px;
+  background: rgba(245, 240, 232, 0.75);
+  padding: 9px 12px;
+  text-align: left;
+  transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
+  color: var(--ink);
+}
+
+.map-button span {
+  color: var(--ink-faint);
+  font-size: 12px;
+}
+
+.map-button:hover,
+.build-button:hover {
+  border-color: var(--ochre);
+  background: rgba(184, 150, 90, 0.10);
+  transform: translateY(-1px);
+}
+
+.map-button.active,
+.build-button.active {
+  border-color: var(--cinnabar);
+  background: rgba(192, 64, 64, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(192,64,64,0.12);
+}
+
+/* ===== 底部建造工具栏 ===== */
+.toolbar {
+  right: var(--hud-right-inset);
+  bottom: 14px;
+  left: 96px;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 20px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  height: 210px;
+  border: 1px solid var(--border-ink);
+  border-radius: 22px;
+  background: var(--paper-glass);
+  backdrop-filter: blur(20px);
+  box-shadow: 0 12px 36px var(--shadow-ink);
+  /* 左右仅留极窄柔边，避免遮到首张/末张塔卡（原 3%–97% 过宽） */
+  -webkit-mask-image: linear-gradient(to right, transparent, black 0.8%, black 99.2%, transparent);
+  mask-image: linear-gradient(to right, transparent, black 0.8%, black 99.2%, transparent);
+  scrollbar-width: none;
+  transition: right 0.28s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+.toolbar::-webkit-scrollbar { display: none; }
+.toolbar--active {
+  cursor: grabbing;
+  cursor: -webkit-grabbing;
+  user-select: none;
+}
+.toolbar--active .build-card {
+  pointer-events: none; /* 防止拖拽时触发卡片点击 */
+}
+
+/* 建造卡片 */
+.build-card {
+  position: relative;
+  flex: 0 0 185px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  transition: transform 0.18s ease;
+}
+.build-card:hover { transform: translateY(-4px); }
+
+.build-button {
+  width: 100%;
+  height: 120px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  text-align: left;
+  border-radius: 18px;
+  background: rgba(245, 240, 232, 0.85);
+  border: 1px solid var(--border-ink);
+  color: var(--ink);
+  transition: all 0.18s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.build-image {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center top;
+  z-index: 0;
+  opacity: 0.9;
+}
+
+.build-info {
+  position: relative;
+  z-index: 1;
+  padding: 12px 14px;
+  background: linear-gradient(to top, rgba(20, 20, 20, 0.95) 10%, rgba(20, 20, 20, 0) 100%);
+  color: #fff;
+  min-height: 60%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.build-button.active {
+  border-color: var(--cinnabar);
+  box-shadow: 0 0 0 2px rgba(192, 64, 64, 0.4);
+}
+
+/* S级塔：金箔边框风格 */
+.build-button[data-rank="S"] {
+  border-width: 2px;
+  border-color: transparent;
+  background-clip: padding-box, border-box;
+  background-image: linear-gradient(rgba(248, 244, 236, 0.96), rgba(248, 244, 236, 0.96)), linear-gradient(135deg, #b8965a, #e8c870, #c04040);
+  box-shadow: 0 6px 20px rgba(184, 150, 90, 0.22);
+  animation: s-rank-shimmer 4s linear infinite;
+}
+@keyframes s-rank-shimmer {
+  0%   { filter: hue-rotate(0deg) brightness(1); }
+  50%  { filter: hue-rotate(12deg) brightness(1.04); }
+  100% { filter: hue-rotate(0deg) brightness(1); }
+}
+
+.build-name {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-weight: 700;
+  font-size: 14px;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+  letter-spacing: 0.5px;
+}
+
+.build-name .cost {
+  color: #ff6b6b;
+  font-size: 13px;
+  font-weight: 700;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+}
+
+.build-desc {
+  margin-top: 4px;
+  color: #e2e8f0;
+  font-size: 11px;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+}
+
+.s-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: linear-gradient(135deg, var(--cinnabar), var(--ochre));
+  color: #fff;
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  pointer-events: none;
+  box-shadow: 0 2px 8px rgba(192, 64, 64, 0.28);
+}
+
+/* 模型上传 / 缩放标签 */
+.model-upload-label,
+.build-scale-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 30px;
+  border: 1px solid var(--border-ink);
+  border-radius: 10px;
+  background: rgba(245, 240, 232, 0.8);
+  color: var(--ink-faint);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+.model-upload-label:hover {
+  background: rgba(184, 150, 90, 0.10);
+  color: var(--ink);
+  border-color: var(--ochre);
+}
+.build-card.has-model .model-upload-label {
+  background: rgba(74, 122, 106, 0.10);
+  color: var(--mountain-deep);
+  border-color: rgba(74, 122, 106, 0.35);
+}
+.build-scale-label input {
+  width: 46px;
+  background: rgba(245, 240, 232, 0.9);
+  border: 1px solid var(--border-ink);
+  border-radius: 6px;
+  color: var(--ink);
+  text-align: center;
+  font-weight: 700;
+  padding: 2px;
+}
+
+/* ===== 抽卡面板 ===== */
+.gacha-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(ellipse at 60% 30%, rgba(245, 230, 190, 0.55), transparent 45%),
+    rgba(220, 212, 195, 0.78);
+  backdrop-filter: blur(14px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms ease;
+}
+.gacha-overlay.show { opacity: 1; pointer-events: auto; }
+
+/* 卡池选择 Tab */
+.gacha-pool-tabs {
+  display: flex;
+  gap: 8px;
+  margin: 10px 0 6px;
+}
+.gacha-pool-tab {
+  cursor: pointer;
+  padding: 6px 16px;
+  border: 1px solid var(--border-ink);
+  border-radius: 999px;
+  background: rgba(245, 240, 232, 0.75);
+  color: var(--ink-light);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  transition: all 0.18s ease;
+  font-family: inherit;
+}
+/* 未选中：避免浅底 + 发白字看不清 */
+.gacha-pool-tab:not(.active) {
+  background: rgba(52, 58, 68, 0.08);
+  color: rgba(34, 38, 46, 0.92);
+  border-color: rgba(60, 56, 50, 0.35);
+}
+.gacha-pool-tab:not(.active):hover {
+  border-color: var(--ochre);
+  color: var(--ink);
+  background: rgba(245, 240, 232, 0.88);
+}
+.gacha-pool-tab.active:hover {
+  filter: brightness(1.06);
+}
+.gacha-pool-tab.active {
+  background: linear-gradient(135deg, var(--cinnabar), var(--ochre));
+  color: #fff;
+  border-color: transparent;
+  box-shadow: 0 2px 10px rgba(192, 64, 64, 0.3);
+}
+
+/* 济南限定等多 UP：子 Tab */
+.gacha-focus-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  min-height: 0;
+}
+.gacha-focus-tabs[hidden] {
+  display: none !important;
+}
+.gacha-focus-tabs-label {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: rgba(90, 86, 78, 0.95);
+  margin-right: 4px;
+}
+.gacha-focus-tab {
+  cursor: pointer;
+  padding: 5px 12px;
+  border: 1px solid rgba(60, 56, 50, 0.28);
+  border-radius: 10px;
+  background: rgba(52, 58, 68, 0.06);
+  color: rgba(34, 38, 46, 0.9);
+  font-size: 11px;
+  font-weight: 700;
+  font-family: inherit;
+  transition: all 0.16s ease;
+}
+.gacha-focus-tab:hover {
+  border-color: var(--ochre);
+  color: var(--ink);
+}
+.gacha-focus-tab.active {
+  background: rgba(184, 150, 90, 0.22);
+  border-color: var(--ochre);
+  color: var(--ink);
+}
+
+/* 卡池图片展示 */
+#gachaStageImg {
+  position: relative;
+  z-index: 2;
+  max-height: 200px;
+  max-width: 75%;
+  border-radius: 16px;
+  object-fit: cover;
+  opacity: 0;
+  filter: saturate(1.1) drop-shadow(0 14px 22px rgba(60,50,40,0.22));
+  transform: translateY(18px) scale(0.92);
+}
+.gacha-stage.reveal #gachaStageImg,
+.gacha-stage.reveal.s-hit #gachaStageImg {
+  animation: gacha-card-in 520ms cubic-bezier(0.2,1.2,0.2,1) forwards;
+}
+
+.gacha-card {
+  position: relative;
+  width: min(740px, calc(100vw - 36px));
+  border: 1px solid var(--border-ink);
+  border-radius: 24px;
+  background: var(--paper-glass);
+  box-shadow: 0 28px 72px var(--shadow-ink);
+  padding: 28px;
+  overflow: hidden;
+  backdrop-filter: blur(20px);
+}
+.gacha-card::after {
+  content: '';
+  position: absolute;
+  top: -70px;
+  right: -50px;
+  width: 220px;
+  height: 220px;
+  border-radius: 50%;
+  background: rgba(184, 150, 90, 0.10);
+  pointer-events: none;
+}
+
+.close-button {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 36px;
+  height: 36px;
+  font-size: 20px;
+  display: grid;
+  place-items: center;
+}
+
+.gacha-feature {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 18px 0;
+  border: 1px solid rgba(184, 150, 90, 0.30);
+  border-radius: 18px;
+  background: rgba(245, 240, 232, 0.8);
+  padding: 14px;
+}
+
+.s-rank-badge {
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+  border-radius: 20px;
+  background: linear-gradient(135deg, var(--cinnabar), var(--ochre));
+  color: #fff;
+  font-size: 38px;
+  font-weight: 900;
+  box-shadow: 0 0 20px rgba(192, 64, 64, 0.30);
+}
+
+.gacha-feature strong {
+  display: block;
+  font-size: 22px;
+  color: var(--ink);
+  font-weight: 700;
+}
+.gacha-feature span { color: var(--ochre); font-weight: 700; }
+.gacha-feature span.unlocked { color: var(--cinnabar); }
+
+.gacha-stage {
+  position: relative;
+  display: grid;
+  place-items: center;
+  height: 250px;
+  margin: 14px 0;
+  border: 1px solid var(--border-ink);
+  border-radius: 20px;
+  background:
+    radial-gradient(ellipse at 50% 40%, rgba(184, 150, 90, 0.12), transparent 40%),
+    rgba(245, 240, 232, 0.75);
+  overflow: hidden;
+}
+
+.gacha-stage img {
+  position: relative;
+  z-index: 2;
+  max-height: 228px;
+  max-width: 78%;
+  border-radius: 16px;
+  object-fit: cover;
+  opacity: 0;
+  filter: saturate(1.1) drop-shadow(0 14px 22px rgba(60,50,40,0.22));
+  transform: translateY(18px) scale(0.92);
+}
+
+.gacha-ring {
+  position: absolute;
+  z-index: 1;
+  width: 170px;
+  height: 170px;
+  border: 2px solid rgba(184, 150, 90, 0.45);
+  border-radius: 50%;
+  box-shadow: 0 0 20px rgba(184,150,90,0.18), inset 0 0 20px rgba(122,158,142,0.12);
+}
+.gacha-ring::before, .gacha-ring::after {
+  content: '';
+  position: absolute;
+  inset: 16px;
+  border-radius: 50%;
+  border: 1px dashed rgba(122, 158, 142, 0.40);
+}
+.gacha-ring::after {
+  inset: -26px;
+  border-color: rgba(192, 64, 64, 0.28);
+}
+
+.gacha-flash {
+  position: absolute;
+  z-index: 3;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--cinnabar), var(--ochre));
+  color: #fff;
+  padding: 7px 18px;
+  font-weight: 900;
+  letter-spacing: 0.16em;
+  opacity: 0;
+  transform: translateY(34px) scale(0.9);
+}
+
+.gacha-stage.pulling .gacha-ring { animation: gacha-spin 650ms linear infinite; }
+.gacha-stage.pulling::before {
+  content: '';
+  position: absolute;
+  inset: -40%;
+  z-index: 0;
+  background: conic-gradient(from 0deg, transparent, rgba(184,150,90,0.14), rgba(122,158,142,0.18), transparent);
+  animation: gacha-spin 900ms linear infinite;
+}
+
+.gacha-stage.reveal.s-hit img    { animation: gacha-card-in 520ms cubic-bezier(0.2,1.2,0.2,1) forwards; }
+.gacha-stage.reveal.s-hit .gacha-flash { animation: gacha-flash-in 620ms ease forwards; }
+.gacha-stage.reveal.s-hit {
+  box-shadow: 0 0 32px rgba(192,64,64,0.22), inset 0 0 40px rgba(184,150,90,0.10);
+}
+
+.gacha-stats,
+.gacha-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+
+.gacha-stats span {
+  border-radius: 999px;
+  border: 1px solid var(--border-ink);
+  background: rgba(245, 240, 232, 0.8);
+  padding: 8px 14px;
+  color: var(--ink-light);
+  font-size: 13px;
+}
+.gacha-stats strong { color: var(--cinnabar); }
+
+.gacha-actions { margin-top: 16px; }
+.gacha-actions button { min-width: 128px; padding: 11px 18px; }
+
+.gacha-result {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 48px;
+  margin-top: 14px;
+  color: var(--ink);
+}
+.gacha-result span {
+  border-radius: 999px;
+  border: 1px solid var(--border-ink);
+  background: rgba(245, 240, 232, 0.8);
+  padding: 6px 12px;
+  font-size: 13px;
+}
+.gacha-result span.rank-s {
+  background: linear-gradient(135deg, var(--cinnabar), var(--ochre));
+  color: #fff;
+  font-weight: 900;
+  border-color: transparent;
+}
+
+/* ===== Toast 提示 ===== */
+.toast-center {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 100;
+  min-width: 320px;
+  border: 1px solid rgba(192, 64, 64, 0.45);
+  border-radius: 22px;
+  background: rgba(248, 244, 236, 0.97);
+  color: var(--cinnabar);
+  padding: 22px 36px;
+  text-align: center;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  box-shadow: 0 16px 48px var(--shadow-ink), 0 0 0 1px rgba(192,64,64,0.12);
+  backdrop-filter: blur(12px);
+  opacity: 0;
+  transform: translate(-50%, -40%) scale(0.88);
+  transition: opacity 200ms ease, transform 200ms ease;
+  pointer-events: none;
+}
+.toast-center.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+
+.toast-side {
+  position: fixed;
+  top: 22px;
+  right: var(--hud-right-inset);
+  z-index: 90;
+  min-width: 210px;
+  border: 1px solid var(--border-ink);
+  border-radius: 14px;
+  background: rgba(248, 244, 236, 0.94);
+  color: var(--ink-light);
+  padding: 10px 18px;
+  text-align: right;
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: 0 8px 24px var(--shadow-ink);
+  backdrop-filter: blur(8px);
+  opacity: 0;
+  transform: translateX(16px);
+  transition: opacity 180ms ease, transform 180ms ease, right 0.28s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  pointer-events: none;
+}
+.toast-side.show { opacity: 1; transform: translateX(0); }
+
+/* ===== 暂停面板 ===== */
+.pause-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  background: rgba(232, 224, 208, 0.65);
+  backdrop-filter: blur(10px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms ease;
+}
+.pause-overlay.show { opacity: 1; pointer-events: auto; }
+
+.pause-card {
+  width: min(400px, calc(100vw - 40px));
+  border: 1px solid var(--border-ink);
+  border-radius: 28px;
+  background: var(--paper-glass);
+  box-shadow: 0 24px 64px var(--shadow-ink);
+  padding: 44px 48px;
+  text-align: center;
+}
+.pause-card h2 {
+  margin: 0 0 22px;
+  font-size: 28px;
+  color: var(--ink);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.pause-actions { display: grid; gap: 14px; }
+.pause-actions button {
+  cursor: pointer;
+  border: 1px solid var(--border-ink);
+  border-radius: 16px;
+  background: rgba(245, 240, 232, 0.9);
+  color: var(--ink);
+  padding: 15px;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  transition: all 140ms ease;
+}
+.pause-actions button:hover {
+  border-color: var(--ochre);
+  background: rgba(184, 150, 90, 0.10);
+  transform: translateY(-2px);
+}
+.pause-actions button.primary {
+  background: var(--cinnabar);
+  color: #fff;
+  border-color: var(--cinnabar);
+}
+.pause-actions button.primary:hover {
+  background: var(--cinnabar-deep);
+  filter: drop-shadow(0 0 10px rgba(192,64,64,0.30));
+}
+
+/* ===== 响应式 ===== */
+@media (max-width: 1080px) {
+  .game-root {
+    --hud-right-inset: 14px;
+  }
+  .right-panel { display: none; }
+  .top-panel { grid-template-columns: repeat(2, auto); min-width: auto; }
+  .toolbar { left: 88px; bottom: 14px; }
+  .phone-dock { left: 12px; }
+  .terminal-help-tab,
+  .right-panel-hide-btn {
+    display: none !important;
+  }
+  .game-root--terminal-collapsed .right-panel {
+    transform: none;
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+/* ===== 抽卡动画 ===== */
+@keyframes gacha-spin { to { transform: rotate(360deg); } }
+
+@keyframes gacha-card-in {
+  0%   { opacity: 0; transform: translateY(18px) scale(0.92) rotate(-2deg); }
+  100% { opacity: 1; transform: translateY(0) scale(1) rotate(0); }
+}
+
+@keyframes gacha-flash-in {
+  0%   { opacity: 0; transform: translateY(34px) scale(0.9); }
+  45%  { opacity: 1; transform: translateY(0) scale(1.08); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ===== 深色模式（与 Web/common/css 共用 data-theme 约定） ===== */
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --paper: #1a1f26;
+  --paper-dark: #13171c;
+  --paper-glass: rgba(26, 31, 38, 0.93);
+  --ink: #e8e4dc;
+  --ink-light: #b0aaa0;
+  --ink-faint: #7a756c;
+  --mountain: #5c9078;
+  --mountain-deep: #3d6a58;
+  --water-blue: #5a8ab8;
+  --cinnabar: #e05858;
+  --cinnabar-deep: #c04040;
+  --ochre: #c4a060;
+  --ochre-light: #d8b878;
+  --border-ink: rgba(210, 200, 185, 0.14);
+  --shadow-ink: rgba(0, 0, 0, 0.45);
+  --accent: var(--cinnabar);
+  --accent-highlight: #ff7a7a;
+  --bg-panel: var(--paper-glass);
+  --text-main: var(--ink);
+  --text-dim: var(--ink-faint);
+  --border-ui: var(--border-ink);
+  color: var(--ink);
+  background: var(--paper);
+}
+
+html[data-theme="dark"] body {
+  background-color: var(--paper);
+  color: var(--ink);
+}
+
+html[data-theme="dark"] * {
+  scrollbar-color: rgba(196, 160, 96, 0.35) transparent;
+}
+
+html[data-theme="dark"] .anime-vignette {
+  background:
+    radial-gradient(circle at 80% 10%, rgba(196, 160, 96, 0.07), transparent 28%),
+    radial-gradient(circle at 18% 88%, rgba(90, 138, 184, 0.06), transparent 28%),
+    linear-gradient(180deg, rgba(26, 31, 38, 0.2), transparent 20%, transparent 80%, rgba(12, 14, 18, 0.35));
+}
+
+html[data-theme="dark"] .home-overlay {
+  background:
+    radial-gradient(ellipse at 65% 30%, rgba(90, 120, 160, 0.2), transparent 45%),
+    rgba(12, 14, 18, 0.78);
+}
+
+html[data-theme="dark"] .home-actions button {
+  background: rgba(36, 42, 50, 0.85);
+  color: var(--ink);
+}
+html[data-theme="dark"] .home-actions button:hover {
+  background: rgba(196, 160, 96, 0.12);
+}
+
+html[data-theme="dark"] .gacha-overlay {
+  background:
+    radial-gradient(ellipse at 60% 30%, rgba(196, 160, 96, 0.12), transparent 45%),
+    rgba(14, 16, 20, 0.82);
+}
+
+html[data-theme="dark"] .gacha-pool-tab:not(.active) {
+  background: rgba(32, 38, 48, 0.92);
+  color: rgba(232, 228, 218, 0.92);
+  border-color: rgba(120, 128, 140, 0.45);
+}
+html[data-theme="dark"] .gacha-pool-tab:not(.active):hover {
+  background: rgba(48, 56, 66, 0.98);
+  color: rgba(248, 244, 236, 0.98);
+  border-color: var(--ochre);
+}
+
+html[data-theme="dark"] .gacha-focus-tabs-label {
+  color: rgba(196, 190, 175, 0.88);
+}
+html[data-theme="dark"] .gacha-focus-tab:not(.active) {
+  background: rgba(28, 34, 42, 0.95);
+  color: rgba(220, 216, 208, 0.92);
+  border-color: rgba(100, 108, 120, 0.5);
+}
+html[data-theme="dark"] .gacha-focus-tab:not(.active):hover {
+  background: rgba(40, 46, 56, 0.98);
+  border-color: var(--ochre);
+}
+html[data-theme="dark"] .gacha-focus-tab.active {
+  background: linear-gradient(135deg, rgba(160, 88, 64, 0.45), rgba(184, 150, 90, 0.35));
+  color: rgba(255, 250, 242, 0.98);
+  border-color: rgba(196, 160, 96, 0.55);
+}
+
+html[data-theme="dark"] .pause-overlay {
+  background: rgba(10, 12, 16, 0.72);
+}
+
+html[data-theme="dark"] .pause-card {
+  background: var(--paper-glass);
+  border-color: var(--border-ink);
+}
+
+html[data-theme="dark"] .pause-actions button:not(.primary) {
+  background: rgba(40, 46, 56, 0.95);
+  color: var(--ink);
+  border-color: var(--border-ink);
+}
+
+html[data-theme="dark"] .pause-actions button:not(.primary):hover {
+  background: rgba(56, 64, 76, 0.98);
+  border-color: var(--ochre);
+  color: var(--ink);
+}
+
+html[data-theme="dark"] .pause-actions button.pause-theme-btn {
+  background: rgba(32, 38, 48, 0.55);
+  color: var(--ink-light);
+  border-style: dashed;
+}
+
+html[data-theme="dark"] .pause-actions button.pause-theme-btn:hover {
+  background: rgba(196, 160, 96, 0.14);
+  color: var(--ink);
+  border-color: var(--ochre);
+}
+
+html[data-theme="dark"] .toast-center {
+  background: rgba(34, 40, 48, 0.97);
+  border-color: rgba(224, 88, 88, 0.45);
+}
+
+html[data-theme="dark"] .toast-side {
+  background: rgba(34, 40, 48, 0.94);
+  color: var(--ink-light);
+}
+
+html[data-theme="dark"] .gacha-feature,
+html[data-theme="dark"] .gacha-stats span,
+html[data-theme="dark"] .gacha-result span {
+  background: rgba(36, 42, 50, 0.88);
+}
+
+html[data-theme="dark"] .gacha-stage {
+  background:
+    radial-gradient(ellipse at 50% 40%, rgba(196, 160, 96, 0.08), transparent 40%),
+    rgba(30, 36, 44, 0.85);
+}
+
+html[data-theme="dark"] .build-button[data-rank="S"] {
+  background:
+    linear-gradient(rgba(30, 34, 40, 0.96), rgba(30, 34, 40, 0.96)) padding-box,
+    linear-gradient(135deg, #9a7848, #d4b070, #c04040) border-box;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+}
+
+html[data-theme="dark"] .theme-chip {
+  background: rgba(36, 42, 50, 0.85);
+  color: var(--ink-light);
+}
+html[data-theme="dark"] .theme-chip:hover {
+  background: rgba(196, 160, 96, 0.14);
+  color: var(--ink);
+}
+
+html[data-theme="dark"] .dock-button,
+html[data-theme="dark"] .gacha-actions button,
+html[data-theme="dark"] .close-button {
+  background: rgba(36, 42, 50, 0.75);
+  color: var(--ink);
+}
+
+html[data-theme="dark"] .map-button,
+html[data-theme="dark"] .build-button {
+  background: rgba(36, 42, 50, 0.78);
+}
+
+html[data-theme="dark"] .toolbar {
+  background: var(--paper-glass);
+}
+
+html[data-theme="dark"] .stellar-skill-panel {
+  background: rgba(36, 42, 50, 0.72);
+}
+
+html[data-theme="dark"] .stellar-skill-panel.active {
+  background: rgba(48, 40, 38, 0.85);
+}
+
+html[data-theme="dark"] .animation-editor {
+  background: rgba(36, 42, 50, 0.45);
+}
+
+html[data-theme="dark"] .right-panel-hide-btn {
+  background: rgba(36, 42, 50, 0.75);
+  color: var(--ink-light);
+}
+html[data-theme="dark"] .right-panel-hide-btn:hover {
+  background: rgba(196, 160, 96, 0.14);
+  color: var(--ink);
+}
+
+html[data-theme="dark"] .terminal-help-tab {
+  background: var(--paper-glass);
+  color: var(--ink);
+}

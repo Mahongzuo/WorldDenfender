@@ -1,0 +1,540 @@
+/* ========================================
+   水墨山水中国风 — 全局主题
+   ======================================== */
+
+/* --- Reset --- */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+/* --- Palette variables --- */
+:root {
+    /* 暖米黄纸色，避免纯白眩光；--paper-elev 用于卡片等略抬升表面 */
+    --paper:        #e9e2d4;
+    --paper-elev:   #f4efe4;
+    --paper-dark:   #dcd3c4;
+    --ink:          #2c2c2c;
+    --ink-light:    #5a5a5a;
+    --ink-faint:    #8a8070;
+    --mountain:     #7a9e8e;
+    --mountain-deep:#4a7a6a;
+    --water-blue:   #3a6080;
+    --cinnabar:     #c04040;
+    --ochre:        #b8965a;
+    --cloud:        rgba(255,255,255,0.40);
+    --border-ink:   rgba(80,70,60,0.18);
+    --shadow-ink:   rgba(60,50,40,0.10);
+    --map-ocean-bg: url('../../Images/MapBG.png');
+}
+
+/* --- Typography --- */
+@font-face {
+    font-family: 'GameFont';
+    src: local('LXGW WenKai'), local('Noto Serif SC'), local('STSong'),
+         local('SimSun'), local('Microsoft YaHei');
+}
+
+body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: 'GameFont', 'Noto Serif SC', 'STSong', 'SimSun', serif;
+    overflow: hidden;
+    width: 100vw;
+    height: 100vh;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+/* --- Map container --- */
+.map-container {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background:
+        linear-gradient(180deg, rgba(233,226,210,0.48) 0%, rgba(233,226,210,0.26) 50%, rgba(220,212,196,0.38) 100%),
+        radial-gradient(ellipse at 40% 25%, rgba(122,158,142,0.07) 0%, transparent 55%),
+        radial-gradient(ellipse at 75% 70%, rgba(58,96,128,0.06) 0%, transparent 50%),
+        var(--map-ocean-bg) center center / cover no-repeat,
+        var(--paper);
+}
+
+/* --- SVG map --- */
+.map-svg {
+    width: 100%;
+    height: 100%;
+    cursor: default;
+}
+
+.map-svg.panning {
+    cursor: grabbing !important;
+}
+
+.map-svg.panning .land,
+.map-svg.panning .land-china {
+    cursor: grabbing !important;
+    pointer-events: none;
+}
+
+/* --- Titles --- */
+.map-title {
+    position: absolute;
+    top: 22px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 26px;
+    font-weight: normal;
+    letter-spacing: 8px;
+    color: var(--ink);
+    text-shadow: 1px 1px 0 var(--paper);
+    pointer-events: none;
+    z-index: 10;
+}
+
+.map-subtitle {
+    position: absolute;
+    top: 56px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 13px;
+    letter-spacing: 4px;
+    color: var(--ink-faint);
+    pointer-events: none;
+    z-index: 10;
+}
+
+/* --- Country / province path --- */
+.land {
+    fill: var(--mountain);
+    stroke: var(--paper);
+    stroke-width: 0.6;
+    cursor: pointer;
+    transition: fill 0.25s ease, stroke 0.25s ease, filter 0.25s ease;
+    opacity: 0.85;
+}
+
+.land:hover {
+    fill: var(--mountain-deep);
+    stroke: var(--ochre);
+    stroke-width: 1;
+    opacity: 1;
+    filter: drop-shadow(0 0 4px rgba(74,122,106,0.35));
+}
+
+.land.active {
+    fill: var(--water-blue);
+    stroke: var(--ochre);
+    stroke-width: 1.2;
+    opacity: 1;
+    filter: drop-shadow(0 0 8px rgba(58,96,128,0.4));
+}
+
+/* --- China special styling on world map --- */
+.land-china {
+    fill: var(--cinnabar);
+    stroke: var(--paper);
+    stroke-width: 0.8;
+    cursor: pointer;
+    opacity: 0.75;
+    transition: fill 0.25s ease, stroke 0.25s ease, filter 0.25s ease;
+}
+
+.land-china:hover {
+    fill: #a03030;
+    stroke: var(--ochre);
+    stroke-width: 1.2;
+    opacity: 1;
+    filter: drop-shadow(0 0 6px rgba(192,64,64,0.4));
+}
+
+/* 地图区域名称（随 #mapContent 缩放平移，字号按区域大小估算） */
+.map-label-layer {
+    pointer-events: none;
+}
+
+.map-label {
+    fill: var(--ink);
+    font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans SC", SimHei, sans-serif;
+    font-weight: 500;
+    stroke: var(--paper);
+    stroke-width: 0.18px;
+    paint-order: stroke fill;
+    opacity: 0.9;
+    pointer-events: none;
+}
+
+.ocean {
+    fill: rgba(233, 226, 212, 0.12);
+}
+
+.graticule {
+    fill: none;
+    stroke: var(--border-ink);
+    stroke-width: 0.2;
+}
+
+/* --- Tooltip --- */
+.tooltip {
+    position: absolute;
+    padding: 10px 18px;
+    background: var(--paper);
+    border: 1px solid var(--border-ink);
+    border-radius: 3px;
+    color: var(--ink);
+    font-size: 14px;
+    letter-spacing: 1px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+    z-index: 100;
+    white-space: nowrap;
+    box-shadow: 2px 2px 8px var(--shadow-ink);
+}
+
+.tooltip::before {
+    content: '';
+    position: absolute;
+    top: 0; bottom: 0; left: 4px;
+    width: 2px;
+    background: var(--ochre);
+    opacity: 0.5;
+    border-radius: 1px;
+}
+
+.tooltip.visible { opacity: 1; }
+
+.tooltip .tip-name {
+    font-weight: bold;
+    font-size: 15px;
+    color: var(--ink);
+    padding-left: 6px;
+}
+
+.tooltip .tip-sub {
+    font-size: 11px;
+    color: var(--ink-faint);
+    margin-top: 2px;
+    padding-left: 6px;
+}
+
+.tooltip .tip-hint {
+    font-size: 11px;
+    color: var(--cinnabar);
+    margin-top: 4px;
+    padding-left: 6px;
+}
+
+/* --- Navigation button group --- */
+.nav-buttons {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    display: flex;
+    gap: 8px;
+    z-index: 20;
+}
+
+/* --- Buttons --- */
+.back-btn, .home-nav-btn {
+    padding: 8px 22px;
+    background: var(--paper);
+    border: 1px solid var(--border-ink);
+    border-left: 3px solid var(--cinnabar);
+    border-radius: 2px;
+    color: var(--ink);
+    font-size: 14px;
+    font-family: inherit;
+    letter-spacing: 2px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 1px 1px 4px var(--shadow-ink);
+    text-decoration: none;
+    display: inline-block;
+}
+
+.back-btn {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    z-index: 20;
+}
+
+.home-nav-btn {
+    border-left-color: var(--ochre);
+}
+
+.back-btn:hover, .home-nav-btn:hover {
+    background: var(--paper-dark);
+    border-color: var(--ochre);
+    box-shadow: 2px 2px 8px var(--shadow-ink);
+}
+
+/* --- Loading indicator --- */
+.loading {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 16px;
+    letter-spacing: 6px;
+    color: var(--ink-faint);
+    z-index: 50;
+}
+
+.loading::after {
+    content: '';
+    animation: dots 1.5s steps(4, end) infinite;
+}
+
+@keyframes dots {
+    0%   { content: ''; }
+    25%  { content: '.'; }
+    50%  { content: '..'; }
+    75%  { content: '...'; }
+}
+
+/* --- Decorative border --- */
+.map-border {
+    position: absolute;
+    inset: 10px;
+    border: 1px solid var(--border-ink);
+    border-radius: 2px;
+    pointer-events: none;
+    z-index: 5;
+}
+
+.map-border-inner {
+    position: absolute;
+    inset: 14px;
+    border: 1px solid rgba(80,70,60,0.08);
+    pointer-events: none;
+    z-index: 5;
+}
+
+/* --- Cloud ornament --- */
+.cloud-ornament {
+    position: absolute;
+    pointer-events: none;
+    z-index: 6;
+    opacity: 0.12;
+}
+
+.cloud-ornament.top-left {
+    top: 16px; left: 16px;
+    width: 80px; height: 40px;
+    border-bottom: 2px solid var(--ink-faint);
+    border-right: 2px solid var(--ink-faint);
+    border-bottom-right-radius: 40px;
+}
+
+.cloud-ornament.top-right {
+    top: 16px; right: 16px;
+    width: 80px; height: 40px;
+    border-bottom: 2px solid var(--ink-faint);
+    border-left: 2px solid var(--ink-faint);
+    border-bottom-left-radius: 40px;
+}
+
+.cloud-ornament.bottom-left {
+    bottom: 16px; left: 16px;
+    width: 80px; height: 40px;
+    border-top: 2px solid var(--ink-faint);
+    border-right: 2px solid var(--ink-faint);
+    border-top-right-radius: 40px;
+}
+
+.cloud-ornament.bottom-right {
+    bottom: 16px; right: 16px;
+    width: 80px; height: 40px;
+    border-top: 2px solid var(--ink-faint);
+    border-left: 2px solid var(--ink-faint);
+    border-top-left-radius: 40px;
+}
+
+/* --- Legend / info panel --- */
+.info-panel {
+    position: absolute;
+    bottom: 18px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 24px;
+    font-size: 12px;
+    color: var(--ink-faint);
+    letter-spacing: 1px;
+    z-index: 10;
+    pointer-events: none;
+}
+
+.info-panel .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.info-panel .legend-color {
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+    border: 1px solid var(--border-ink);
+}
+
+/* --- South China Sea box --- */
+.scs-box {
+    stroke: var(--border-ink);
+    stroke-width: 0.5;
+    fill: none;
+}
+
+/* --- Fade-in transition --- */
+.fade-in {
+    animation: fadeIn 0.5s ease-in;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+/* ========================================
+   Shared utility classes
+   ======================================== */
+
+.text-center { text-align: center; }
+.hidden { display: none !important; }
+
+.ink-divider {
+    width: 60%;
+    max-width: 300px;
+    height: 1px;
+    background: var(--border-ink);
+    margin: 16px auto;
+}
+
+.seal-btn {
+    display: inline-block;
+    padding: 14px 36px;
+    background: var(--paper);
+    border: 1px solid var(--border-ink);
+    border-radius: 3px;
+    color: var(--ink);
+    font-family: inherit;
+    font-size: 16px;
+    letter-spacing: 4px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 1px 1px 4px var(--shadow-ink);
+    text-decoration: none;
+}
+
+.seal-btn:hover {
+    background: var(--paper-dark);
+    border-color: var(--ochre);
+    box-shadow: 2px 2px 8px var(--shadow-ink);
+    transform: translateY(-1px);
+}
+
+.seal-btn.primary {
+    border-left: 3px solid var(--cinnabar);
+}
+
+.seal-btn.accent {
+    border-left: 3px solid var(--ochre);
+}
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--paper); }
+::-webkit-scrollbar-thumb { background: var(--border-ink); border-radius: 3px; }
+
+/* ===== 深色模式（与塔防页、ui-theme.js 一致） ===== */
+html[data-theme="dark"] {
+    color-scheme: dark;
+    --paper: #1a1f26;
+    --paper-elev: #242a32;
+    --paper-dark: #13171c;
+    --ink: #e8e4dc;
+    --ink-light: #b0aaa0;
+    --ink-faint: #7a756c;
+    --mountain: #5c9078;
+    --mountain-deep: #3d6a58;
+    --water-blue: #6a9ec8;
+    --cinnabar: #e05858;
+    --ochre: #c4a060;
+    --cloud: rgba(255,255,255,0.06);
+    --border-ink: rgba(210, 200, 185, 0.14);
+    --shadow-ink: rgba(0, 0, 0, 0.45);
+}
+
+html[data-theme="dark"] .map-container {
+    background:
+        linear-gradient(180deg, rgba(26,31,38,0.94) 0%, rgba(26,31,38,0.72) 50%, rgba(18,22,28,0.9) 100%),
+        radial-gradient(ellipse at 40% 25%, rgba(92,144,120,0.12) 0%, transparent 55%),
+        radial-gradient(ellipse at 75% 70%, rgba(90,138,184,0.08) 0%, transparent 50%),
+        var(--map-ocean-bg) center center / cover no-repeat,
+        var(--paper);
+}
+
+html[data-theme="dark"] .ocean {
+    fill: rgba(40, 52, 64, 0.45);
+}
+
+html[data-theme="dark"] .map-title {
+    text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.55);
+}
+
+html[data-theme="dark"] .map-label {
+    fill: var(--ink);
+    stroke: var(--paper);
+}
+
+html[data-theme="dark"] .tooltip {
+    background: var(--paper-elev);
+    color: var(--ink);
+    border-color: var(--border-ink);
+    box-shadow: 2px 2px 12px var(--shadow-ink);
+}
+
+html[data-theme="dark"] .back-btn,
+html[data-theme="dark"] .home-nav-btn {
+    background: var(--paper-elev);
+    color: var(--ink);
+}
+
+html[data-theme="dark"] .back-btn:hover,
+html[data-theme="dark"] .home-nav-btn:hover {
+    background: var(--paper-dark);
+}
+
+html[data-theme="dark"] .seal-btn {
+    background: var(--paper-elev);
+    color: var(--ink);
+}
+
+html[data-theme="dark"] .seal-btn:hover {
+    background: var(--paper-dark);
+}
+
+/* 地图 / 选关等静态页右下角切换 */
+.ui-theme-toggle {
+    position: fixed;
+    right: 18px;
+    bottom: 18px;
+    z-index: 200;
+    padding: 9px 18px;
+    font-size: 12px;
+    letter-spacing: 3px;
+    font-family: inherit;
+    font-weight: 700;
+    color: var(--ink);
+    background: var(--paper-elev);
+    border: 1px solid var(--border-ink);
+    border-radius: 3px;
+    cursor: pointer;
+    box-shadow: 1px 2px 8px var(--shadow-ink);
+    transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.ui-theme-toggle:hover {
+    border-color: var(--ochre);
+    background: var(--paper-dark);
+}

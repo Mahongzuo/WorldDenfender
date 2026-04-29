@@ -1,0 +1,516 @@
+import { Buffer } from "node:buffer";
+import { createReadStream, existsSync, statSync } from "node:fs";
+import { cp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { runInNewContext } from "node:vm";
+import { defineConfig, loadEnv } from "vite";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const loadedEnv = loadEnv(process.env.NODE_ENV === "production" ? "production" : "development", __dirname, "");
+const uploadDir = path.resolve(process.cwd(), "public", "uploads");
+const publicDir = path.resolve(process.cwd(), "public");
+const artsDir = path.resolve(publicDir, "Arts");
+const gameModelsDir = path.resolve(publicDir, "GameModels");
+const editorConfigFile = path.resolve(__dirname, "Web", "data", "level-editor-state.json");
+const runtimeSourceFile = path.resolve(__dirname, "src", "game", "content.ts");
+
+function readJsonBody(request) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    request.on("data", (chunk) => chunks.push(chunk));
+    request.on("end", () => {
+      try {
+        resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+      } catch (error) {
+        reject(error);
+      }
+    });
+    request.on("error", reject);
+  });
+}
+
+function sanitizeName(name) {
+  return name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-90);
+}
+
+function sanitizeProjectSegment(name) {
+  const normalized = String(name ?? "")
+    .normalize("NFC")
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[. ]+$/g, "");
+  return (normalized || "untitled").slice(0, 80);
+}
+
+function buildPublicUrl(...segments) {
+  return `/${segments.map((segment) => encodeURIComponent(segment)).join("/")}`;
+}
+
+function ensureUniqueFilename(directory, baseName, extension) {
+  let serial = 0;
+  let fileName = `${baseName}${extension}`;
+  while (existsSync(path.join(directory, fileName))) {
+    serial += 1;
+    fileName = `${baseName}-${String(serial).padStart(3, "0")}${extension}`;
+  }
+  return fileName;
+}
+
+function extractObjectLiteral(source, marker) {
+  const markerIndex = source.indexOf(marker);
+  if (markerIndex === -1) return "";
+  const assignIndex = source.indexOf("=", markerIndex);
+  if (assignIndex === -1) return "";
+  const start = source.indexOf("{", assignIndex);
+  if (start === -1) return "";
+  let depth = 0;
+  let quote = "";
+  let escaping = false;
+  for (let index = start; index < source.length; index += 1) {
+    const char = source[index];
+    if (quote) {
+      if (escaping) {
+        escaping = false;
+        continue;
+      }
+      if (char === "\\") {
+        escaping = true;
+        continue;
+      }
+      if (char === quote) quote = "";
+      continue;
+    }
+    if (char === '"' || char === "'" || char === "`") {
+      quote = char;
+      continue;
+    }
+    if (char === "{") depth += 1;
+    if (char === "}") {
+      depth -= 1;
+      if (depth === 0) return source.slice(start, index + 1);
+    }
+  }
+  return "";
+}
+
+function evaluateObjectLiteral(literal) {
+  return literal ? runInNewContext(`(${literal})`, Object.create(null)) : {};
+}
+
+function inferCityCode(aliases) {
+  return aliases.find((alias) => /^\d{6}$/.test(String(alias))) || "";
+}
+
+function buildRuntimeCityGameplaySeeds(source) {
+  const buildSpecs = evaluateObjectLiteral(extractObjectLiteral(source, "const BUILD_SPECS"));
+  const cityAliases = evaluateObjectLiteral(extractObjectLiteral(source, "const CITY_EDITOR_ALIASES"));
+  const cityMap = evaluateObjectLiteral(extractObjectLiteral(source, "const CITY_MAP"));
+  const seeds = {};
+
+  Object.values(buildSpecs).forEach((spec) => {
+    if (!spec || !spec.city) return;
+    const aliases = Array.isArray(cityAliases[spec.city]) ? cityAliases[spec.city].map(String) : [];
+    const cityCode = inferCityCode(aliases);
+    const cityName = String((cityMap[spec.city] && cityMap[spec.city].label) || aliases.find((alias) => /[\u4e00-\u9fa5]/.test(alias) && !/^\d+$/.test(alias)) || spec.city);
+    const configKey = cityCode || String(spec.city);
+    const imageCandidate = `/Arts/Cards/char_${spec.id}.png`;
+    const imagePath = existsSync(path.join(publicDir, "Arts", "Cards", `char_${spec.id}.png`)) ? imageCandidate : "";
+
+    if (!seeds[configKey]) {
+      seeds[configKey] = {
+        cityCode,
+        cityName,
+        aliases,
+        characters: [],
+        skills: [],
+        enemies: [],
+        updatedAt: "",
+      };
+    }
+
+    seeds[configKey].characters.push({
+      id: String(spec.id || ""),
+      name: String(spec.name || spec.id || "未命名角色"),
+      summary: String(spec.description || ""),
+      tags: [cityName, spec.role, spec.rank].filter(Boolean),
+      rarity: String(spec.rank || "common"),
+      placement: spec.id === "mine" || spec.id === "qinqiong" ? "road" : "roadside",
+      stats: {
+        hp: Number(spec.maxHp) || 100,
+        attack: Number(spec.damage) || 0,
+        cost: Number(spec.cost) || 0,
+        range: Number(spec.range || spec.healRange) || 0,
+        fireRate: Number(spec.fireRate) || 0,
+        healAmount: Number(spec.healAmount) || 0,
+        healRange: Number(spec.healRange) || 0,
+        splash: Number(spec.splash) || 0,
+        maxBlockCount: Number(spec.maxBlockCount) || 0,
+      },
+      assetRefs: imagePath ? { imagePath } : {},
+      cityCode,
+      cityName,
+      source: "runtime-sync",
+    });
+
+    if (spec.activeSkill) {
+      seeds[configKey].skills.push({
+        id: `${String(spec.id || "skill")}-skill`,
+        name: String(spec.activeSkill.name || `${spec.name}技能`),
+        summary: String(spec.activeSkill.description || ""),
+        tags: [cityName, String(spec.name || "")].filter(Boolean),
+        rarity: String(spec.rank || "common"),
+        stats: {
+          cooldown: Number(spec.activeSkill.cooldown) || 0,
+          cost: Number(spec.cost) || 0,
+          range: Number(spec.range || spec.healRange) || 0,
+          damage: Number(spec.damage || spec.healAmount) || 0,
+        },
+        assetRefs: imagePath ? { imagePath } : {},
+        cityCode,
+        cityName,
+        source: "runtime-sync",
+      });
+    }
+  });
+
+  return seeds;
+}
+
+function sendJson(response, statusCode, payload) {
+  response.statusCode = statusCode;
+  response.setHeader("Content-Type", "application/json; charset=utf-8");
+  response.end(JSON.stringify(payload, null, 2));
+}
+
+function gmEntryId(relPathPosix) {
+  const s = String(relPathPosix || "").replace(/\\/g, "/");
+  let h = 0;
+  for (let i = 0; i < s.length; i += 1) {
+    h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  }
+  const tail = sanitizeName(path.basename(s)).slice(0, 48).toLowerCase() || "model";
+  return `gm-${Math.abs(h).toString(36)}-${tail}`;
+}
+
+async function collectGameModelEntries(absRoot, publicFolder) {
+  const modelExt = /\.(glb|gltf|obj)$/i;
+  /** @type {Array<{ id: string; relativePath: string; publicUrl: string; name: string }>} */
+  const out = [];
+
+  async function walk(currentAbs, relPosix) {
+    let dirents;
+    try {
+      dirents = await readdir(currentAbs, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const ent of dirents) {
+      if (ent.name.startsWith(".")) continue;
+      const joined = path.join(currentAbs, ent.name);
+      const nextRel = relPosix ? `${relPosix}/${ent.name}` : ent.name;
+      if (ent.isDirectory()) {
+        await walk(joined, nextRel);
+      } else if (modelExt.test(ent.name)) {
+        const relToPublicPath = path.relative(publicFolder, joined).replace(/\\/g, "/");
+        const segments = relToPublicPath.split("/").filter(Boolean);
+        const publicUrl =
+          "/" +
+          segments.map((segment) => encodeURIComponent(segment)).join("/");
+        const stem = path.basename(ent.name, path.extname(ent.name));
+        out.push({
+          id: gmEntryId(relToPublicPath),
+          relativePath: nextRel.replace(/\\/g, "/"),
+          publicUrl,
+          name: stem,
+        });
+      }
+    }
+  }
+
+  await mkdir(absRoot, { recursive: true });
+  await walk(absRoot, "");
+  out.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
+  return out;
+}
+
+export default defineConfig({
+  plugins: [
+    {
+      name: "redirect-root",
+      configureServer(server) {
+        server.middlewares.use((req, res, next) => {
+          if (req.url === "/" || req.url === "/index.html") {
+            res.writeHead(302, { Location: "/Web/map/home.html" });
+            res.end();
+            return;
+          }
+          next();
+        });
+      },
+    },
+    {
+      name: "local-upload-api",
+      configureServer(server) {
+        server.middlewares.use("/api/app-config", (request, response) => {
+          if (request.method !== "GET") {
+            sendJson(response, 405, { error: "Method not allowed" });
+            return;
+          }
+          sendJson(response, 200, {
+            cesiumIonToken: (process.env.VITE_CESIUM_ION_TOKEN || loadedEnv.VITE_CESIUM_ION_TOKEN || "").trim(),
+          });
+        });
+
+        server.middlewares.use("/api/upload-model", async (request, response) => {
+          if (request.method !== "POST") {
+            response.statusCode = 405;
+            response.end("Method not allowed");
+            return;
+          }
+
+          try {
+            const body = await readJsonBody(request);
+            const originalName = sanitizeName(String(body.name ?? "model.glb"));
+            const content = String(body.content ?? "");
+            const extension = path.extname(originalName) || ".glb";
+            const basename = path.basename(originalName, extension);
+            const filename = `${Date.now()}-${basename}${extension}`.toLowerCase();
+            const data = Buffer.from(content, "base64");
+
+            await mkdir(uploadDir, { recursive: true });
+            await writeFile(path.join(uploadDir, filename), data);
+
+            response.setHeader("Content-Type", "application/json");
+            response.end(JSON.stringify({ url: `/uploads/${filename}` }));
+          } catch (error) {
+            response.statusCode = 500;
+            response.setHeader("Content-Type", "application/json");
+            response.end(JSON.stringify({ error: error instanceof Error ? error.message : "upload failed" }));
+          }
+        });
+
+        server.middlewares.use("/api/editor-assets", async (request, response) => {
+          if (request.method !== "POST") {
+            sendJson(response, 405, { error: "Method not allowed" });
+            return;
+          }
+
+          try {
+            const body = await readJsonBody(request);
+            const originalName = String(body.name ?? "asset.bin");
+            const content = String(body.content ?? "");
+            const assetType = sanitizeProjectSegment(body.assetType ?? "Misc");
+            const resourceKind = sanitizeProjectSegment(body.resourceKind ?? "asset");
+            const cityName = sanitizeProjectSegment(body.cityName ?? "未命名城市");
+            const cityCode = sanitizeProjectSegment(body.cityCode ?? "");
+            const extension = path.extname(originalName) || ".bin";
+            const originalBaseName = path.basename(originalName, extension);
+            const assetName = sanitizeProjectSegment(body.assetName ?? originalBaseName);
+            const directory = path.join(artsDir, assetType, cityName);
+            const baseName = sanitizeProjectSegment(`${cityName}-${assetName}`);
+            const fileName = ensureUniqueFilename(directory, baseName, extension);
+            const absolutePath = path.join(directory, fileName);
+            const data = Buffer.from(content, "base64");
+
+            await mkdir(directory, { recursive: true });
+            await writeFile(absolutePath, data);
+
+            const relativeSegments = path.relative(publicDir, absolutePath).split(path.sep).filter(Boolean);
+            const projectPath = path.posix.join("public", ...relativeSegments);
+            const publicUrl = buildPublicUrl(...relativeSegments);
+
+            sendJson(response, 200, {
+              id: `${Date.now()}-${sanitizeName(`${cityCode || cityName}-${resourceKind}-${assetName}`)}`,
+              name: assetName,
+              assetType,
+              resourceKind,
+              cityCode,
+              cityName,
+              fileName,
+              projectPath,
+              publicUrl,
+            });
+          } catch (error) {
+            sendJson(response, 500, {
+              error: error instanceof Error ? error.message : "failed to save editor asset",
+            });
+          }
+        });
+
+        server.middlewares.use("/api/game-models/catalog", async (request, response) => {
+          if (request.method !== "GET") {
+            sendJson(response, 405, { error: "Method not allowed" });
+            return;
+          }
+
+          try {
+            const entries = await collectGameModelEntries(gameModelsDir, publicDir);
+            sendJson(response, 200, {
+              root: "/GameModels",
+              entries,
+            });
+          } catch (error) {
+            sendJson(response, 500, {
+              error: error instanceof Error ? error.message : "catalog failed",
+              root: "/GameModels",
+              entries: [],
+            });
+          }
+        });
+
+        server.middlewares.use("/api/game-models/upload", async (request, response) => {
+          if (request.method !== "POST") {
+            sendJson(response, 405, { error: "Method not allowed" });
+            return;
+          }
+
+          try {
+            const body = await readJsonBody(request);
+            const originalName = sanitizeName(String(body.name ?? "model.glb"));
+            const extension = path.extname(originalName) || ".glb";
+            let basenameStem = sanitizeName(path.basename(originalName, extension));
+            if (!basenameStem) {
+              basenameStem = "model";
+            }
+            let subRaw = String(body.subdirectory ?? "")
+              .replace(/\\/g, "/")
+              .replace(/^\/+|\/+$/g, "");
+            const subSegments = subRaw
+              .split("/")
+              .map((segment) => sanitizeProjectSegment(segment))
+              .filter(Boolean);
+            /** @type {string} */
+            let targetDir = gameModelsDir;
+            for (const segment of subSegments) {
+              targetDir = path.join(targetDir, segment);
+            }
+            await mkdir(targetDir, { recursive: true });
+            const fileName = ensureUniqueFilename(targetDir, basenameStem, extension.toLowerCase());
+            const absolutePath = path.join(targetDir, fileName);
+            await writeFile(absolutePath, Buffer.from(String(body.content ?? ""), "base64"));
+            const relativeSegments = path.relative(publicDir, absolutePath).split(path.sep).filter(Boolean);
+            const projectPath = path.posix.join("public", ...relativeSegments);
+            const publicUrl = buildPublicUrl(...relativeSegments);
+            sendJson(response, 200, {
+              id: `${Date.now()}-${sanitizeName(`${subSegments.join("-") || "root"}-${basenameStem}`)}`,
+              projectPath,
+              publicUrl,
+              relativePath: relativeSegments.slice(1).join("/"),
+              name: path.basename(originalName),
+            });
+          } catch (error) {
+            sendJson(response, 500, {
+              error: error instanceof Error ? error.message : "game model upload failed",
+            });
+          }
+        });
+
+        server.middlewares.use("/api/runtime-city-gameplay", async (request, response) => {
+          if (request.method !== "GET") {
+            sendJson(response, 405, { error: "Method not allowed" });
+            return;
+          }
+
+          try {
+            const source = await readFile(runtimeSourceFile, "utf8");
+            sendJson(response, 200, buildRuntimeCityGameplaySeeds(source));
+          } catch (error) {
+            sendJson(response, 500, {
+              error: error instanceof Error ? error.message : "failed to load runtime city gameplay",
+            });
+          }
+        });
+
+        server.middlewares.use("/api/level-editor-config", async (request, response) => {
+          if (request.method === "GET") {
+            try {
+              const raw = await readFile(editorConfigFile, "utf8");
+              response.statusCode = 200;
+              response.setHeader("Content-Type", "application/json; charset=utf-8");
+              response.end(raw);
+            } catch (error) {
+              sendJson(response, 500, {
+                error: error instanceof Error ? error.message : "failed to read level editor config",
+              });
+            }
+            return;
+          }
+
+          if (request.method !== "POST") {
+            sendJson(response, 405, { error: "Method not allowed" });
+            return;
+          }
+
+          try {
+            const body = await readJsonBody(request);
+            if (!body || typeof body !== "object" || Array.isArray(body)) {
+              sendJson(response, 400, { error: "Invalid level editor config payload" });
+              return;
+            }
+
+            const nextState = {
+              ...body,
+              savedAt: new Date().toISOString(),
+            };
+
+            await mkdir(path.dirname(editorConfigFile), { recursive: true });
+            await writeFile(editorConfigFile, `${JSON.stringify(nextState, null, 2)}\n`, "utf8");
+            sendJson(response, 200, nextState);
+          } catch (error) {
+            sendJson(response, 500, {
+              error: error instanceof Error ? error.message : "failed to save level editor config",
+            });
+          }
+        });
+      },
+    },
+    {
+      name: "serve-web-static",
+      configureServer(server) {
+        const webDir = path.resolve(__dirname, "Web");
+        const mimeTypes = {
+          ".html": "text/html; charset=utf-8",
+          ".css": "text/css; charset=utf-8",
+          ".js": "application/javascript; charset=utf-8",
+          ".json": "application/json; charset=utf-8",
+          ".png": "image/png",
+          ".jpg": "image/jpeg",
+          ".gif": "image/gif",
+          ".svg": "image/svg+xml",
+          ".ico": "image/x-icon",
+        };
+
+        server.middlewares.use("/Web", (req, res, next) => {
+          let urlPath = decodeURIComponent(req.url.split("?")[0]);
+          // Default to index.html for directory requests
+          if (urlPath.endsWith("/")) urlPath += "index.html";
+          const filePath = path.join(webDir, urlPath);
+
+          if (existsSync(filePath) && statSync(filePath).isFile()) {
+            const ext = path.extname(filePath).toLowerCase();
+            const contentType = mimeTypes[ext] || "application/octet-stream";
+            res.setHeader("Content-Type", contentType);
+            createReadStream(filePath).pipe(res);
+          } else {
+            next();
+          }
+        });
+      },
+    },
+    /** 生产预览 / 静态部署时需能 fetch `/Web/data/level-editor-state.json`（与 dev 中间件一致） */
+    {
+      name: "copy-web-data-to-dist",
+      async closeBundle() {
+        const src = path.resolve(__dirname, "Web", "data");
+        const dest = path.resolve(__dirname, "dist", "Web", "data");
+        if (!existsSync(src)) {
+          return;
+        }
+        await mkdir(path.dirname(dest), { recursive: true });
+        await cp(src, dest, { recursive: true });
+      },
+    },
+  ],
+});
