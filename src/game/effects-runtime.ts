@@ -435,7 +435,7 @@ export function addStatusOutlineEffect(
 ): void {
   const group = new THREE.Group();
   target.traverse((child) => {
-    if (child instanceof THREE.Mesh) {
+    if (child instanceof THREE.Mesh && child.visible && !child.userData.isRangeRing && !child.userData.isEnemyHealthBar) {
       const outline = new THREE.Mesh(
         child.geometry,
         new THREE.MeshBasicMaterial({

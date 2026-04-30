@@ -46,6 +46,7 @@ export interface GameInputBindingOptions {
   onSelectMap: (index: number) => void;
   onActiveSkill: () => void;
   onKeyStateChange: (code: string, pressed: boolean, meta?: { repeat?: boolean }) => void;
+  onClearAllKeys: () => void;
 }
 
 export function bindGameInputHandlers(options: GameInputBindingOptions): void {
@@ -72,6 +73,7 @@ export function bindGameInputHandlers(options: GameInputBindingOptions): void {
     onSelectMap,
     onActiveSkill,
     onKeyStateChange,
+    onClearAllKeys,
   } = options;
 
   windowRef.addEventListener("storage", (event: StorageEvent) => {
@@ -137,6 +139,9 @@ export function bindGameInputHandlers(options: GameInputBindingOptions): void {
   });
 
   windowRef.addEventListener("keyup", (event) => onKeyStateChange(event.code, false));
+  // Release all held keys when the window loses focus (alt-tab, tab-switch, etc.)
+  // so the camera/player can't drift uncontrolled afterward.
+  windowRef.addEventListener("blur", () => onClearAllKeys());
 }
 
 export function shouldStartCameraDrag(gachaOpen: boolean, mode: GameMode, button: number): boolean {
@@ -144,7 +149,8 @@ export function shouldStartCameraDrag(gachaOpen: boolean, mode: GameMode, button
     return false;
   }
   if (mode === "explore") {
-    return button === 0 || button === 2;
+    // Left click (0) is reserved for basic attack in explore mode; only right-click rotates camera
+    return button === 2;
   }
   return button === 1 || button === 2;
 }

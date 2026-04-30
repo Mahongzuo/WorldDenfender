@@ -56,8 +56,9 @@ export function renderRuntimeMapScene(options: {
   currentCity: string;
   mode: GameMode;
   useGeoBackdrop?: boolean;
+  safeZoneCells?: Set<string>;
 }): void {
-  const { scene, mapGroup, hoverMesh, map, pathCells, obstacleCells, currentCity, mode, useGeoBackdrop } = options;
+  const { scene, mapGroup, hoverMesh, map, pathCells, obstacleCells, currentCity, mode, useGeoBackdrop, safeZoneCells } = options;
 
   mapGroup.add(hoverMesh);
   hoverMesh.visible = false;
@@ -311,6 +312,46 @@ export function renderRuntimeMapScene(options: {
     addEndpointMarker(mapGroup, map.path[map.path.length - 1], 0xff5e73, "基地");
   } else {
     addEndpointMarker(mapGroup, map.path[0], map.theme.accent, "探索起点");
+  }
+
+  // Safe zone floor overlays
+  if (safeZoneCells && safeZoneCells.size > 0) {
+    const safeGeo = new THREE.PlaneGeometry(TILE_SIZE * 0.94, TILE_SIZE * 0.94);
+    const safeMat = new THREE.MeshBasicMaterial({
+      color: 0x22dd77,
+      transparent: true,
+      opacity: 0.38,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -4,
+      polygonOffsetUnits: -4,
+    });
+    const borderGeo = new THREE.RingGeometry(TILE_SIZE * 0.40, TILE_SIZE * 0.47, 4);
+    const borderMat = new THREE.MeshBasicMaterial({
+      color: 0x55ffaa,
+      transparent: true,
+      opacity: 0.7,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -5,
+      polygonOffsetUnits: -5,
+    });
+    for (const key of safeZoneCells) {
+      const parts = key.split(",");
+      const cell = { col: Number(parts[0]), row: Number(parts[1]) };
+      const pos = cellToWorld(cell);
+      const plane = new THREE.Mesh(safeGeo, safeMat);
+      plane.rotation.x = -Math.PI / 2;
+      plane.position.set(pos.x, 0.12, pos.z);
+      plane.renderOrder = 5;
+      mapGroup.add(plane);
+      const ring = new THREE.Mesh(borderGeo, borderMat);
+      ring.rotation.x = -Math.PI / 2;
+      ring.rotation.z = Math.PI / 4;
+      ring.position.set(pos.x, 0.14, pos.z);
+      ring.renderOrder = 6;
+      mapGroup.add(ring);
+    }
   }
 }
 

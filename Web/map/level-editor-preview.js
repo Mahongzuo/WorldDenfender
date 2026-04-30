@@ -128,6 +128,12 @@ export function createPreview(options) {
   var getLevel = options.getLevel;
   var getActiveEditorMode = options.getActiveEditorMode;
   var getCatalog = options.getCatalog;
+  var getGeoMappingEnabled =
+    typeof options.getGeoMappingEnabled === 'function'
+      ? options.getGeoMappingEnabled
+      : function () {
+          return true;
+        };
   var onSelectActor = options.onSelectActor;
   var onActorModified = options.onActorModified;
   var onTransformModeChange = options.onTransformModeChange;
@@ -175,9 +181,16 @@ export function createPreview(options) {
       if (onSelectActor) onSelectActor(null);
       return;
     }
-    if (!selectionId) return;
     var tag = document.activeElement && document.activeElement.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+    if (ev.key === 'f' || ev.key === 'F') {
+      if (!selectionId) return;
+      ev.preventDefault();
+      focusSelection();
+      return;
+    }
+    if (!selectionId) return;
     if (ev.key === 'w' || ev.key === 'W') {
       ev.preventDefault();
       setTransformMode('translate');
@@ -215,6 +228,31 @@ export function createPreview(options) {
   rootGroup.add(geoGroup, terrainGroup, actorsHolder);
   scene.add(rootGroup);
 
+  placementHud = document.createElement('div');
+  placementHud.className = 'preview-placement-hud panel-surface';
+  placementHud.style.display = 'none';
+  placementHud.setAttribute('aria-hidden', 'true');
+  host.appendChild(placementHud);
+
+  placementGhost = new THREE.Mesh(
+    new THREE.BoxGeometry(1, 1, 1),
+    new THREE.MeshBasicMaterial({
+      color: 0x67e8f9,
+      transparent: true,
+      opacity: 0.4,
+      depthWrite: false,
+    }),
+  );
+  placementGhost.visible = false;
+  placementGhost.renderOrder = 50;
+  scene.add(placementGhost);
+
+  onWindowDragEndForPreview = function () {
+    hidePlacementPreview();
+    if (typeof window !== 'undefined') window.__egCatalogDragMeta = null;
+  };
+  window.addEventListener('dragend', onWindowDragEndForPreview);
+
   /** @type Map<string, THREE.Object3D> */
   var actorRoots = new Map();
   /** @type Map<string, THREE.Mesh> */
@@ -230,6 +268,10 @@ export function createPreview(options) {
 
   /** @type {string|null} */
   var selectionId = null;
+
+  var placementHud = null;
+  var placementGhost = null;
+  var onWindowDragEndForPreview = null;
 
   /** @type {THREE.WebGLRenderer & { __raf?: number }} */
   var rafHook = renderer;
@@ -678,6 +720,10 @@ export function createPreview(options) {
   }
 
   function loadGeoTilesForLevel(level) {
+    if (!getGeoMappingEnabled()) {
+      disposeGeoTiles();
+      return;
+    }
     var geo = normalizeGeoConfig(level);
     if (!geo) {
       disposeGeoTiles();
@@ -857,7 +903,8 @@ export function createPreview(options) {
     var pal = resolveThemePalette(level);
     var fogHex = parseCssColor(pal.fogHex || '#071019', 0x071019);
     var isJinan = isJinanLevel(level);
-    var usesGeoBackdrop = !!normalizeGeoConfig(level) && !!getCesiumIonToken();
+    var usesGeoBackdrop =
+      !!getGeoMappingEnabled() && !!normalizeGeoConfig(level) && !!getCesiumIonToken();
     setPreviewPlayfieldScale(
       usesGeoBackdrop && getActiveEditorMode() === 'defense' ? 20 : 1,
       usesGeoBackdrop && getActiveEditorMode() === 'defense' ? boardHeightForLevel(level) : 0,
@@ -1093,7 +1140,12 @@ export function createPreview(options) {
     });
   }
 
-  function refresh() {
+  function refresh(opts) {
+    opts = opts || {};
+    var preserveView = !!opts.preserveView;
+    var selectAfter = opts.selectActorId != null && opts.selectActorId !== '' ? opts.selectActorId : null;
+
+    hidePlacementPreview();
     var level = getLevel();
     selectionId = null;
     transform.detach();   // detach() already sets helper.visible = false
@@ -1101,7 +1153,7 @@ export function createPreview(options) {
     clearTerrain();
     if (!level) return;
     buildTerrainFromGameLogic(level);
-    frameCameraToLevel(level);
+    if (!preserveView) frameCameraToLevel(level);
     resize();
 
     Promise.all((level.map.actors || []).map(function (actor) { return ensureActorMesh(actor, level); }))
@@ -1110,11 +1162,43 @@ export function createPreview(options) {
           attachActorObject(actor.id, objs[idx]);
         });
         resize();
-        frameCameraToLevel(level);
+        if (!preserveView) frameCameraToLevel(level);
+        if (selectAfter && actorRoots.has(selectAfter)) {
+          setSelectedActor(selectAfter);
+          if (onSelectActor) onSelectActor(selectAfter);
+        }
       })
       .catch(function (err) {
         console.warn('[Preview] actor build:', err);
       });
+  }
+
+  function eulerYawDegreesFromQuaternion(q) {
+    var e = new THREE.Euler(0, 0, 0, 'YXZ');
+    e.setFromQuaternion(q instanceof THREE.Quaternion ? q : new THREE.Quaternion(q.x, q.y, q.z, q.w));
+    return radToDeg(e.y);
+  }
+
+  function logicalActorScaleFromObjectScale(scaleVec) {
+    var lx = Number(scaleVec.x);
+    var lz = Number(scaleVec.z);
+    var ly = Number(scaleVec.y);
+    if (previewPlayfieldScale !== 1 && previewPlayfieldScale > 1e-6) {
+      ly = ly / previewPlayfieldScale;
+    }
+    var u = lx;
+    if (Number.isFinite(lx) && Number.isFinite(lz) && lx > 1e-6 && lz > 1e-6) {
+      u = Math.abs(lx - lz) < 1e-4 ? lx : (lx + lz) * 0.5;
+    } else if (Number.isFinite(ly) && ly > 1e-6) {
+      u = ly;
+    } else if (Number.isFinite(lx) && lx > 1e-6) {
+      u = lx;
+    } else if (Number.isFinite(lz) && lz > 1e-6) {
+      u = lz;
+    } else {
+      u = 1;
+    }
+    return u > 1e-6 ? u : 1;
   }
 
   function syncSelectedFromScene(silentOnly) {
@@ -1124,25 +1208,25 @@ export function createPreview(options) {
     var actor = (level.map.actors || []).find(function (a) { return a.id === selectionId; });
     if (!obj || !actor) return;
 
+    obj.updateWorldMatrix(true, false);
     ensureOffset(actor);
     var cols = level.map.grid.cols;
     var rows = level.map.grid.rows;
     var ts = level.map.grid.tileSize;
 
-    var wx = obj.position.x;
-    var wy = obj.position.y;
-    var wz = obj.position.z;
-    var anc = worldToAnchor(wx, wz, cols, rows, ts);
+    var wp = obj.getWorldPosition(new THREE.Vector3());
+    var logical = logicalPointFromWorldHit(wp);
+    var anc = worldToAnchor(logical.x, logical.z, cols, rows, ts);
     actor.col = anc.col;
     actor.row = anc.row;
     var c = cellCenterXZ(anc.col, anc.row, cols, rows, ts);
-    actor.worldOffsetMeters.x = wx - c.x;
-    actor.worldOffsetMeters.y = wy;
-    actor.worldOffsetMeters.z = wz - c.z;
+    actor.worldOffsetMeters.x = logical.x - c.x;
+    actor.worldOffsetMeters.y = logical.y;
+    actor.worldOffsetMeters.z = logical.z - c.z;
 
-    actor.rotation = radToDeg(obj.rotation.y);
-    var s = (obj.scale.x + obj.scale.y + obj.scale.z) / 3;
-    actor.scale = s > 0 ? s : 1;
+    actor.rotation = eulerYawDegreesFromQuaternion(obj.quaternion);
+
+    actor.scale = logicalActorScaleFromObjectScale(obj.scale);
 
     if (!silentOnly && onActorModified) onActorModified(actor);
   }
@@ -1182,6 +1266,124 @@ export function createPreview(options) {
     };
   }
 
+  function hidePlacementPreview() {
+    if (placementHud) placementHud.style.display = 'none';
+    if (placementGhost) placementGhost.visible = false;
+  }
+
+  function escPlacementHtml(s) {
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+  }
+
+  function shortenModelLabel(path) {
+    var s = String(path || '').trim();
+    if (!s) return '—';
+    var tail = s.split(/[/\\?#]/).filter(Boolean).pop() || s;
+    if (tail.length > 42) return tail.slice(0, 40) + '…';
+    return tail;
+  }
+
+  function collectPlacementMeshes(placeOpts) {
+    var po = placeOpts || {};
+    var list = [];
+    terrainGroup.updateMatrixWorld(true);
+    terrainGroup.traverse(function (ch) {
+      if (ch.isMesh) list.push(ch);
+    });
+    if (po.includeActors !== false) {
+      actorRoots.forEach(function (grp) {
+        grp.updateMatrixWorld(true);
+        grp.traverse(function (ch) {
+          if (ch.isMesh) list.push(ch);
+        });
+      });
+    }
+    if (po.includeGeo && geoTiles && geoTiles.group) {
+      geoTiles.group.updateMatrixWorld(true);
+      geoTiles.group.traverse(function (ch) {
+        if (ch.isMesh && ch.visible) list.push(ch);
+      });
+    }
+    return list;
+  }
+
+  function raycastPlaceSurface(clientX, clientY, placeOpts) {
+    var rect = renderer.domElement.getBoundingClientRect();
+    var nx = ((clientX - rect.left) / rect.width) * 2 - 1;
+    var ny = -((clientY - rect.top) / rect.height) * 2 + 1;
+    var ray = new THREE.Raycaster();
+    ray.setFromCamera(new THREE.Vector2(nx, ny), camera);
+    var meshes = collectPlacementMeshes(placeOpts);
+    if (meshes.length) {
+      var th = ray.intersectObjects(meshes, true);
+      if (th.length) {
+        var p = th[0].point.clone();
+        var n = new THREE.Vector3(0, 1, 0);
+        if (th[0].face && th[0].object) {
+          n.copy(th[0].face.normal);
+          n.transformDirection(th[0].object.matrixWorld);
+          if (n.lengthSq() < 1e-8) n.set(0, 1, 0);
+          else n.normalize();
+        }
+        return { logical: logicalPointFromWorldHit(p), worldPoint: p, normal: n };
+      }
+    }
+    var plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -previewPlayfieldYOffset);
+    var hit = new THREE.Vector3();
+    var ok = ray.ray.intersectPlane(plane, hit);
+    if (!ok) return null;
+    return { logical: logicalPointFromWorldHit(hit), worldPoint: hit.clone(), normal: new THREE.Vector3(0, 1, 0) };
+  }
+
+  function showPlacementPreview(clientX, clientY) {
+    if (!placementHud || !placementGhost) return;
+    var meta =
+      typeof window !== 'undefined' &&
+      window.__egCatalogDragMeta &&
+      typeof window.__egCatalogDragMeta === 'object'
+        ? window.__egCatalogDragMeta
+        : null;
+    var level = getLevel();
+    if (!meta || !level || !level.map || !level.map.grid) {
+      hidePlacementPreview();
+      return;
+    }
+    var hitInfo = raycastPlaceSurface(clientX, clientY, { includeActors: true, includeGeo: true });
+    if (!hitInfo || !hitInfo.logical) {
+      hidePlacementPreview();
+      return;
+    }
+    var logical = hitInfo.logical;
+    var cols = level.map.grid.cols || 28;
+    var rows = level.map.grid.rows || 18;
+    var ts = Number(level.map.grid.tileSize) || 2;
+    var anc = worldToAnchor(logical.x, logical.z, cols, rows, ts);
+    placementHud.style.display = 'block';
+    var title = meta.name || meta.assetId || '模型';
+    var fp = meta.modelPath || '';
+    placementHud.innerHTML = [
+      '<div class="preview-placement-hud__title">放置：' + escPlacementHtml(title) + '</div>',
+      '<div class="preview-placement-hud__path" title="' + escPlacementHtml(fp) + '">' + escPlacementHtml(shortenModelLabel(fp)) + '</div>',
+      '<div class="preview-placement-hud__snap">吸附 · 棋盘格 (' + anc.col + ', ' + anc.row + ') · 高度约 ' +
+        logical.y.toFixed(2) +
+        ' m · 缩放×' +
+        previewPlayfieldScale +
+        '</div>',
+    ].join('');
+    placementGhost.visible = true;
+    var box = ts * 0.42;
+    box *= Math.min(2.2, Math.max(0.35, previewPlayfieldScale));
+    if (!(box > 0.12) || !Number.isFinite(box)) box = 0.5;
+    placementGhost.scale.set(box, box, box);
+    placementGhost.position.copy(hitInfo.worldPoint);
+    placementGhost.position.addScaledVector(hitInfo.normal, box * 0.52);
+  }
+
+  function onHostDragOver(ev) {
+    previewDnDAllow(ev);
+    showPlacementPreview(ev.clientX, ev.clientY);
+  }
+
   function raycastGround(clientX, clientY) {
     var rect = renderer.domElement.getBoundingClientRect();
     var nx = ((clientX - rect.left) / rect.width) * 2 - 1;
@@ -1203,6 +1405,98 @@ export function createPreview(options) {
     var hit = new THREE.Vector3();
     var ok = ray.ray.intersectPlane(plane, hit);
     return ok ? logicalPointFromWorldHit(hit) : null;
+  }
+
+  function readDnDPayload(dataTransfer) {
+    if (!dataTransfer) return null;
+    function tryParse(raw) {
+      var s = raw == null ? '' : String(raw).trim();
+      if (!s) return null;
+      try {
+        return JSON.parse(s);
+      } catch (e) {
+        return null;
+      }
+    }
+    var payload = tryParse(dataTransfer.getData('application/json'));
+    if (payload && Object.keys(payload).length) return payload;
+    payload = tryParse(dataTransfer.getData('text/plain'));
+    if (payload && Object.keys(payload).length) return payload;
+    var types = [];
+    try {
+      types = dataTransfer.types ? Array.prototype.slice.call(dataTransfer.types) : [];
+    } catch (e2) {
+      types = [];
+    }
+    for (var i = 0; i < types.length; i += 1) {
+      var mime = types[i];
+      if (mime === 'Files' || mime === 'text/uri-list') continue;
+      payload = tryParse(dataTransfer.getData(mime));
+      if (payload && Object.keys(payload).length) return payload;
+    }
+    return null;
+  }
+
+  function previewDnDAllow(ev) {
+    ev.preventDefault();
+    if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'copy';
+  }
+
+  var previewDnDAbortController = null;
+  function teardownPreviewDnD() {
+    if (previewDnDAbortController) {
+      try {
+        previewDnDAbortController.abort();
+      } catch (e) {
+      }
+      previewDnDAbortController = null;
+    }
+  }
+
+  function onHostDrop(ev) {
+    ev.preventDefault();
+    var level = getLevel();
+    if (!level) return;
+    var payload = readDnDPayload(ev.dataTransfer);
+    hidePlacementPreview();
+    if (!payload) return;
+
+    var hitInfo = raycastPlaceSurface(ev.clientX, ev.clientY, { includeActors: true, includeGeo: true });
+    var hb = boardCenterLogicalHit(level);
+    var use = (hitInfo && hitInfo.logical) || hb || { x: 0, y: 0, z: 0 };
+
+    if (payload.kind === 'catalogModel') {
+      if (options.onDropCatalogModel)
+        options.onDropCatalogModel({
+          assetId: payload.assetId || payload.id,
+          worldX: use.x,
+          worldY: use.y,
+          worldZ: use.z,
+        });
+      return;
+    }
+    if (payload.kind === 'template') {
+      if (options.onDropActorTemplate)
+        options.onDropActorTemplate({
+          templateId: payload.id,
+          worldX: use.x,
+          worldY: use.y,
+          worldZ: use.z,
+        });
+    }
+  }
+
+  teardownPreviewDnD();
+  if (typeof AbortController !== 'undefined') {
+    previewDnDAbortController = new AbortController();
+    var dnOpts = { signal: previewDnDAbortController.signal };
+    host.addEventListener('dragenter', previewDnDAllow, dnOpts);
+    host.addEventListener('dragover', onHostDragOver, dnOpts);
+    host.addEventListener('drop', onHostDrop, dnOpts);
+  } else {
+    host.addEventListener('dragenter', previewDnDAllow);
+    host.addEventListener('dragover', onHostDragOver);
+    host.addEventListener('drop', onHostDrop);
   }
 
   renderer.domElement.addEventListener(
@@ -1247,51 +1541,6 @@ export function createPreview(options) {
     true,
   );
 
-  renderer.domElement.addEventListener('dragover', function (ev) {
-    ev.preventDefault();
-    ev.dataTransfer.dropEffect = 'copy';
-  });
-
-  renderer.domElement.addEventListener('drop', function (ev) {
-    ev.preventDefault();
-    var level = getLevel();
-    if (!level) return;
-    var payload = {};
-    try {
-      payload = JSON.parse(ev.dataTransfer.getData('application/json') || '{}');
-    } catch (e) {
-      try {
-        payload = JSON.parse(ev.dataTransfer.getData('text/plain') || '{}');
-      } catch (e2) {
-        return;
-      }
-    }
-
-    var hit = raycastGround(ev.clientX, ev.clientY);
-    var hb = boardCenterLogicalHit(level);
-    var use = hit || hb;
-
-    if (payload.kind === 'catalogModel') {
-      if (options.onDropCatalogModel)
-        options.onDropCatalogModel({
-          assetId: payload.assetId || payload.id,
-          worldX: use.x,
-          worldY: use.y,
-          worldZ: use.z,
-        });
-      return;
-    }
-    if (payload.kind === 'template') {
-      if (options.onDropActorTemplate)
-        options.onDropActorTemplate({
-          templateId: payload.id,
-          worldX: use.x,
-          worldY: use.y,
-          worldZ: use.z,
-        });
-    }
-  });
-
   function setTransformMode(mode) {
     if (mode === 'rotate' || mode === 'scale' || mode === 'translate') {
       transform.setMode(mode);
@@ -1315,6 +1564,18 @@ export function createPreview(options) {
   }
 
   function dispose() {
+    teardownPreviewDnD();
+    if (onWindowDragEndForPreview) {
+      window.removeEventListener('dragend', onWindowDragEndForPreview);
+      onWindowDragEndForPreview = null;
+    }
+    if (placementGhost) {
+      scene.remove(placementGhost);
+      placementGhost.geometry.dispose();
+      placementGhost.material.dispose();
+      placementGhost = null;
+    }
+    placementHud = null;
     window.removeEventListener('keydown', onKeyDown);
     if (rafHook.__raf) cancelAnimationFrame(rafHook.__raf);
     disposeGeoTiles();
@@ -1331,7 +1592,9 @@ export function createPreview(options) {
   refresh();
 
   return {
-    refresh: refresh,
+    refresh: function (opts) {
+      refresh(opts || {});
+    },
     resize: resize,
     dispose: dispose,
     setSelectedActor: setSelectedActor,

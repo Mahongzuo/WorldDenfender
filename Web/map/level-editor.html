@@ -24,11 +24,20 @@
     <link rel="stylesheet" href="level-editor.css">
 </head>
 <body class="editor-page">
-    <div class="engine-shell">
+    <div class="engine-shell" id="engineShell">
         <header class="engine-topbar panel-surface">
             <div class="brand-block">
                 <div class="eyebrow">Earth Guardian · Level Engine</div>
-                <h1>国家 / 城市关卡编辑器</h1>
+                <div class="brand-title-row">
+                    <h1>国家 / 城市关卡编辑器</h1>
+                    <label class="geo-mapping-toggle" title="关闭后不请求 Cesium ion，预览使用格子底板，节省流量">
+                        <span class="geo-mapping-toggle__text">开启地理信息映射</span>
+                        <span class="geo-mapping-toggle__switch">
+                            <input type="checkbox" id="toggleGeoMapping" checked aria-label="开启地理信息映射（Cesium 底板）">
+                            <span class="geo-mapping-toggle__thumb" aria-hidden="true"></span>
+                        </span>
+                    </label>
+                </div>
                 <p id="levelSummary">自动生成关卡骨架，自由布置塔防与第三人称探索地图。</p>
             </div>
 
@@ -48,12 +57,15 @@
             </div>
         </header>
 
-        <aside class="region-panel panel-surface">
+        <aside class="region-panel panel-surface" id="regionPanel">
+            <button type="button" class="shell-sidebar-rail shell-sidebar-rail--left" id="railExpandRegionPanel" hidden aria-expanded="false" aria-controls="regionPanelBody" title="展开关卡列表">›</button>
+            <div class="region-panel-body" id="regionPanelBody">
             <div class="panel-head">
                 <div>
                     <div class="eyebrow">Region Library</div>
                     <h2>国家 / 中国城市</h2>
                 </div>
+                <button type="button" class="mini-button sidebar-collapse-btn" id="collapseRegionPanel" aria-expanded="true" aria-controls="regionPanelBody" title="收起侧栏（扩大中间编辑区）">收起</button>
             </div>
 
             <label class="field-block">
@@ -69,28 +81,31 @@
             </div>
 
             <div id="levelTree" class="level-tree" aria-live="polite"></div>
+            </div>
         </aside>
 
         <main class="viewport-panel panel-surface">
             <section id="levelWorkbench" class="workbench-surface">
-            <section class="level-strip">
-                <div>
-                    <div class="eyebrow">Current Level</div>
-                    <h2 id="currentLevelName">请选择关卡</h2>
-                    <p id="currentLevelMeta">地图尺寸、道路、敌人出口和 Actor 会保存到项目 JSON。</p>
+            <section class="level-strip level-strip--editor-toolbar">
+                <div class="level-strip-lead">
+                    <div class="level-strip-lead__copy">
+                        <div class="eyebrow">Current Level</div>
+                        <h2 id="currentLevelName">请选择关卡</h2>
+                        <p id="currentLevelMeta">地图尺寸、道路、敌人出口和 Actor 会保存到项目 JSON。</p>
+                    </div>
+                    <button type="button" class="mini-button content-browser-float-open-btn" id="btnOpenContentBrowserFloat" aria-pressed="false" title="打开项目模型浏览器 (Ctrl + 空格)">内容浏览器</button>
                 </div>
+                <section class="mode-ribbon mode-ribbon--split mode-ribbon--in-strip" aria-label="布局与预览">
+                    <div class="mode-ribbon-inner" id="editorModeTabs" aria-label="关卡模式">
+                        <button class="mode-button active" data-editor-mode="defense">塔防布局</button>
+                        <button class="mode-button" data-editor-mode="explore">探索布局</button>
+                    </div>
+                    <div class="mode-ribbon-inner view-mode-tabs" id="viewportViewTabs" role="tablist" aria-label="视口视图">
+                        <button type="button" class="mode-button secondary active" data-view-mode="board" role="tab" aria-selected="true">棋盘布局</button>
+                        <button type="button" class="mode-button secondary" data-view-mode="preview" role="tab">关卡预览</button>
+                    </div>
+                </section>
                 <div id="overviewStats" class="overview-stats"></div>
-            </section>
-
-            <section class="mode-ribbon mode-ribbon--split" aria-label="布局与预览">
-                <div class="mode-ribbon-inner" id="editorModeTabs" aria-label="关卡模式">
-                    <button class="mode-button active" data-editor-mode="defense">塔防布局</button>
-                    <button class="mode-button" data-editor-mode="explore">探索布局</button>
-                </div>
-                <div class="mode-ribbon-inner view-mode-tabs" id="viewportViewTabs" role="tablist" aria-label="视口视图">
-                    <button type="button" class="mode-button secondary active" data-view-mode="board" role="tab" aria-selected="true">棋盘布局</button>
-                    <button type="button" class="mode-button secondary" data-view-mode="preview" role="tab">关卡预览</button>
-                </div>
             </section>
 
             <section class="tool-ribbon" id="editorToolRibbon" aria-label="地图编辑工具">
@@ -102,6 +117,7 @@
                 <button class="tool-button" data-tool="buildSlot">塔位</button>
                 <button class="tool-button" data-tool="objective">防守目标</button>
                 <button class="tool-button" data-tool="explorePoint">探索点</button>
+                <button class="tool-button" data-tool="safeZone">安全区</button>
                 <button class="tool-button" data-tool="actor">模型 Actor</button>
                 <button class="tool-button danger" data-tool="erase">橡皮擦</button>
             </section>
@@ -115,29 +131,30 @@
 
                 <div id="previewStageWrap" class="preview-stage-wrap view-hidden" aria-hidden="true">
                     <div class="preview-split">
-                        <div id="previewHost" class="preview-host"></div>
-                        <div class="preview-toolbar-overlay" id="previewToolbarOverlay">
-                            <div class="preview-toolbar-inner panel-surface">
-                                <span class="preview-toolbar-label">三维操作</span>
-                                <button type="button" class="mini-button preview-tool-btn active" id="previewGizmoTranslate" title="位移 (快捷键 W)">移动</button>
-                                <button type="button" class="mini-button preview-tool-btn" id="previewGizmoRotate" title="旋转">旋转</button>
-                                <button type="button" class="mini-button preview-tool-btn" id="previewGizmoScale" title="缩放">缩放</button>
-                                <button type="button" class="mini-button" id="previewFocusSelection" title="相机聚焦到所选对象">聚焦</button>
+                        <div class="preview-viewport-pane">
+                            <div id="previewHost" class="preview-host"></div>
+                            <div class="preview-toolbar-overlay" id="previewToolbarOverlay">
+                                <div class="preview-toolbar-inner panel-surface">
+                                    <span class="preview-toolbar-label">三维操作</span>
+                                    <button type="button" class="mini-button preview-tool-btn active" id="previewGizmoTranslate" title="位移 (快捷键 W)">移动</button>
+                                    <button type="button" class="mini-button preview-tool-btn" id="previewGizmoRotate" title="旋转">旋转</button>
+                                    <button type="button" class="mini-button preview-tool-btn" id="previewGizmoScale" title="缩放">缩放</button>
+                                    <button type="button" class="mini-button" id="previewFocusSelection" title="聚焦到所选对象 (F)">聚焦</button>
+                                </div>
                             </div>
                         </div>
+                        <aside class="level-content-browser panel-surface" id="levelContentBrowser" aria-label="关卡内容浏览器">
+                            <div class="level-content-browser-head">
+                                <div>
+                                    <div class="eyebrow">Outline</div>
+                                    <strong class="level-content-browser-title">关卡内容浏览器</strong>
+                                </div>
+                            </div>
+                            <p class="level-content-browser-hint section-hint">列出本关已放置的棋盘与模型；点击与 3D / Inspector 联动，<kbd>Delete</kbd> 删除当前选中项。</p>
+                            <div id="levelContentBrowserFilters" class="level-content-browser-filters" role="tablist" aria-label="按类型筛选"></div>
+                            <div id="levelContentBrowserList" class="level-content-browser-list" tabindex="-1"></div>
+                        </aside>
                     </div>
-                    <aside class="content-browser panel-surface" id="contentBrowser" aria-label="内容浏览器">
-                        <div class="content-browser-head">
-                            <div>
-                                <div class="eyebrow">Content</div>
-                                <strong class="content-browser-title">项目模型</strong>
-                            </div>
-                            <button type="button" class="mini-button" id="contentBrowserReload" title="扫描 public/GameModels 并刷新列表">刷新</button>
-                        </div>
-                        <p class="content-browser-hint">扫描项目 <code>public/GameModels</code> 下的 .glb / .gltf / .obj；拖入关卡预览场景。右侧「上传模型」会写入同一目录。先点击下方卡片选型，再在下方查看三维预览。</p>
-                        <div id="contentBrowserList" class="content-browser-list"></div>
-                        <div id="contentBrowserPreviewHost" class="content-browser-mini-preview-host" aria-label="项目模型预览"></div>
-                    </aside>
                 </div>
 
                 <div class="stage-hint" id="stageHint">
@@ -326,12 +343,15 @@
             </section>
         </main>
 
-        <aside class="inspector-panel panel-surface">
+        <aside class="inspector-panel panel-surface" id="inspectorPanel">
+            <button type="button" class="shell-sidebar-rail shell-sidebar-rail--right" id="railExpandInspectorPanel" hidden aria-expanded="false" aria-controls="inspectorPanelBody" title="展开属性面板">‹</button>
+            <div class="inspector-panel-body" id="inspectorPanelBody">
             <div class="panel-head">
                 <div>
                     <div class="eyebrow">Inspector</div>
                     <h2>属性与 Actor</h2>
                 </div>
+                <button type="button" class="mini-button sidebar-collapse-btn" id="collapseInspectorPanel" aria-expanded="true" aria-controls="inspectorPanelBody" title="收起侧栏（扩大中间编辑区）">收起</button>
             </div>
 
             <div id="levelInspectorWorkspace">
@@ -473,9 +493,9 @@
                 <div id="selectionInspector" class="selection-inspector empty-state">未选择对象。</div>
             </section>
 
-            <section class="inspector-section view-hidden" id="previewSceneOutlineSection" aria-label="关卡预览场景大纲">
+            <section class="inspector-section view-hidden" id="previewSceneOutlineSection" aria-label="关卡预览场景大纲（已迁移到预览区右侧）">
                 <h3>预览场景大纲</h3>
-                <p class="section-hint">仅在「关卡预览」下列出已放置的 Actor；点击可选中，配合工具栏 Gizmo 编辑。</p>
+                <p class="section-hint">已在「关卡预览」右侧「关卡内容浏览器」中展示；此处保留兼容布局。</p>
                 <div id="previewSceneOutlineList" class="preview-scene-outline-list"></div>
             </section>
 
@@ -576,7 +596,115 @@
                     <p class="section-hint">新模型会写入 <code>public/GameModels/分类目录/</code>，扫描后自动出现在列表中。</p>
                 </section>
             </div>
+            </div>
         </aside>
+    </div>
+
+    <!-- 新建关卡弹窗 -->
+    <div id="createLevelModal" class="modal-overlay view-hidden" aria-hidden="true">
+        <div class="modal-surface panel-surface create-level-modal" role="dialog" aria-modal="true" aria-labelledby="createLevelTitle">
+            <div class="create-level-header">
+                <div>
+                    <div class="eyebrow">Create New Level</div>
+                    <h2 id="createLevelTitle">新建关卡</h2>
+                    <p>先确定关卡归属，再用地点搜索自动带入真实地图中心点。</p>
+                </div>
+                <button type="button" class="modal-close-button" id="btnCancelCreateLevel" aria-label="关闭新建关卡面板">×</button>
+            </div>
+            <form id="createLevelForm" class="create-level-form">
+                <section class="create-level-section">
+                    <div class="create-level-section-head">
+                        <span class="create-level-step">1</span>
+                        <div>
+                            <h3>关卡信息</h3>
+                            <p>名称必填，国家或城市用于归类到左侧关卡树。</p>
+                        </div>
+                    </div>
+                    <div class="form-grid two create-level-grid">
+                        <label class="field-block">
+                            <span>关卡名称 <em>必填</em></span>
+                            <input id="newLevelName" type="text" placeholder="例如：法国 巴黎 或 济南 大明湖" required>
+                        </label>
+                        <label class="field-block create-level-combobox">
+                            <span>国家或城市</span>
+                            <input id="newLevelRegionSearch" type="search" placeholder="搜索并选择已有国家/城市..." autocomplete="off">
+                            <div id="newLevelRegionDropdown" class="dropdown-list view-hidden"></div>
+                        </label>
+                    </div>
+                </section>
+
+                <section class="create-level-section create-level-section--place">
+                    <div class="create-level-section-head">
+                        <span class="create-level-step">2</span>
+                        <div>
+                            <h3>真实地图定位</h3>
+                            <p>搜索地点后会自动填写经纬度；也可以手动微调。</p>
+                        </div>
+                    </div>
+                    <label class="field-block create-level-place-field">
+                        <span>搜索地点</span>
+                        <div class="place-search-row">
+                            <input id="newLevelPlaceSearch" type="search" placeholder="例如：Paris、埃菲尔铁塔、大明湖" autocomplete="off">
+                            <button type="button" id="btnSearchPlace" class="action-button accent place-search-button">搜索</button>
+                        </div>
+                        <div id="newLevelPlaceDropdown" class="dropdown-list place-dropdown view-hidden"></div>
+                    </label>
+                    <div class="place-helper-row">
+                        <button type="button" id="btnUseCurrentLocation" class="location-dashed-button">使用当前位置</button>
+                        <span>搜索会默认选中最匹配地点，你仍可在结果列表里切换。</span>
+                    </div>
+
+                    <div id="selectedPlacePreview" class="selected-place-card view-hidden">
+                        <div class="selected-place-kicker">已选择位置</div>
+                        <strong id="selectedPlaceName"></strong>
+                        <div id="selectedPlaceCoords"></div>
+                    </div>
+
+                    <div class="form-grid two create-level-grid create-level-coords-grid">
+                        <label class="field-block">
+                            <span>纬度 (Lat)</span>
+                            <input id="newLevelLat" type="number" step="0.000001" placeholder="例如：48.858890">
+                        </label>
+                        <label class="field-block">
+                            <span>经度 (Lon)</span>
+                            <input id="newLevelLon" type="number" step="0.000001" placeholder="例如：2.320041">
+                        </label>
+                    </div>
+                </section>
+
+                <div class="create-level-footer">
+                    <button type="button" class="action-button ghost-action" id="btnCancelCreateLevelAlt">取消</button>
+                    <button type="button" class="action-button accent" id="btnConfirmCreateLevel">确认创建</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="contentBrowserFloatPanel" class="content-browser-float panel-surface view-hidden" aria-hidden="true" role="dialog" aria-labelledby="contentBrowserFloatTitle">
+        <div class="content-browser-float-toolbar" id="contentBrowserFloatDragHandle" title="拖拽移动">
+            <div class="content-browser-float-head">
+                <strong id="contentBrowserFloatTitle">项目模型浏览器</strong>
+                <span class="content-browser-float-shortcut">Ctrl + 空格</span>
+            </div>
+            <button type="button" class="mini-button" id="contentBrowserFloatClose" aria-label="关闭内容浏览器">关闭</button>
+        </div>
+        <div class="content-browser-float-body">
+            <div class="content-browser-float-pane content-browser-float-pane--list panel-surface">
+                <div class="content-browser-head">
+                    <div>
+                        <div class="eyebrow">Content</div>
+                        <strong class="content-browser-title">项目模型</strong>
+                    </div>
+                    <button type="button" class="mini-button" id="contentBrowserReload" title="扫描 public/GameModels 并刷新列表">刷新</button>
+                </div>
+                <p class="content-browser-hint">扫描项目 <code>public/GameModels</code>；拖拽列表中的卡片放入左侧关卡预览场景。右下角可拖动改变窗口大小。</p>
+                <div id="contentBrowserList" class="content-browser-list content-browser-list--float"></div>
+            </div>
+            <div class="content-browser-float-pane content-browser-float-pane--preview">
+                <div class="content-browser-float-preview-label">模型预览</div>
+                <div id="contentBrowserPreviewHost" class="content-browser-mini-preview-host content-browser-mini-preview-host--float" aria-label="项目模型三维预览"></div>
+            </div>
+        </div>
     </div>
 
     <div id="statusDock" class="status-dock">

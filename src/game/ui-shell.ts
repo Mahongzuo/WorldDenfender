@@ -15,6 +15,7 @@ export interface GameUiShellRefs {
   selectedUnitPanel: HTMLElement;
   selectedUnitName: HTMLElement;
   selectedUnitStats: HTMLElement;
+  activeSkillMeta: HTMLElement;
   activeSkillButton: HTMLButtonElement;
   gachaPanel: HTMLElement;
   homeOverlay: HTMLElement;
@@ -32,6 +33,18 @@ export interface GameUiShellRefs {
   gachaFocusTabsElement: HTMLElement;
   pausePanel: HTMLElement;
   toolbar: HTMLElement;
+  exploreHud: HTMLElement;
+  exploreLevelBadge: HTMLElement;
+  exploreXpBar: HTMLElement;
+  exploreHpBar: HTMLElement;
+  exploreHpText: HTMLElement;
+  exploreSkillAttackCd: HTMLElement;
+  exploreSkillECd: HTMLElement;
+  exploreSkillRCd: HTMLElement;
+  inventoryPanel: HTMLElement;
+  inventoryGrid: HTMLElement;
+  gameOverPanel: HTMLElement;
+  safeZoneShopPanel: HTMLElement;
 }
 
 type RequiredElement = <T extends HTMLElement = HTMLElement>(selector: string) => T;
@@ -94,7 +107,8 @@ export function renderGameUiShell(app: HTMLElement, requiredElement: RequiredEle
             <span class="section-kicker">已选中干员</span>
             <h3 id="selectedUnitName" style="margin:4px 0;">单位名称</h3>
             <p id="selectedUnitStats" style="font-size:13px; color:#a3a3a3; margin-bottom:8px;">HP: 100/100 | ATK: 50</p>
-            <button id="activeSkillButton" class="premium" style="display:none; width:100%;">释放技能</button>
+            <p id="activeSkillMeta" class="active-skill-meta" hidden>快捷键 · 冷却</p>
+            <button id="activeSkillButton" class="premium active-skill-cast-btn" style="display:none; width:100%;">释放技能</button>
           </section>
           <div class="map-grid" id="mapButtons"></div>
         </aside>
@@ -143,7 +157,103 @@ export function renderGameUiShell(app: HTMLElement, requiredElement: RequiredEle
           </div>
         </section>
         <div class="toast-center" id="toastCenter"></div>
-        <div class="toast-side" id="toastSide"></div>
+        <div class="toast-side-stack" id="toastSide" aria-live="polite"></div>
+        <section class="explore-hud" id="exploreHud" aria-hidden="true">
+          <div class="explore-hud-level">
+            <div class="explore-level-badge" id="exploreLevelBadge">1</div>
+            <div class="explore-xp-bar-wrap">
+              <div class="explore-xp-bar" id="exploreXpBar" style="width:0%"></div>
+            </div>
+          </div>
+          <div class="explore-hud-hp">
+            <span class="explore-hp-label">HP</span>
+            <div class="explore-hp-bar-wrap">
+              <div class="explore-hp-bar" id="exploreHpBar" style="width:100%"></div>
+              <span class="explore-hp-text" id="exploreHpText">100 / 100</span>
+            </div>
+          </div>
+          <div class="explore-hud-skills">
+            <div class="explore-skill" title="基础攻击 · 左键">
+              <span class="explore-skill-icon">⚡</span>
+              <span class="explore-skill-key">LMB</span>
+              <div class="explore-skill-cd" id="exploreSkillAttackCd" style="height:0%"></div>
+            </div>
+            <div class="explore-skill" title="法球技能 · E">
+              <span class="explore-skill-icon">🌀</span>
+              <span class="explore-skill-key">E</span>
+              <div class="explore-skill-cd" id="exploreSkillECd" style="height:0%"></div>
+            </div>
+            <div class="explore-skill" title="冲击爆发 · R">
+              <span class="explore-skill-icon">💥</span>
+              <span class="explore-skill-key">R</span>
+              <div class="explore-skill-cd" id="exploreSkillRCd" style="height:0%"></div>
+            </div>
+          </div>
+        </section>
+        <section class="inventory-panel" id="inventoryPanel" aria-hidden="true">
+          <div class="inventory-card">
+            <div class="inventory-header">
+              <h2>背包</h2>
+              <button class="close-button" id="inventoryCloseBtn" aria-label="关闭背包">×</button>
+            </div>
+            <div class="inventory-grid" id="inventoryGrid"></div>
+            <p class="inventory-hint">按 I 关闭背包，点击火焰道具可使用</p>
+          </div>
+        </section>
+        <section class="game-over-overlay" id="gameOverPanel" aria-hidden="true">
+          <div class="game-over-vignette"></div>
+          <div class="game-over-card">
+            <h2 class="game-over-title">失败了</h2>
+            <p class="game-over-reason" id="gameOverReason">基地已被摧毁</p>
+            <div class="game-over-actions">
+              <button class="premium" id="gameOverRestartBtn">重新开始</button>
+              <button id="gameOverMapBtn">换一个关卡</button>
+            </div>
+          </div>
+        </section>
+        <section class="safe-zone-shop" id="safeZoneShopPanel" aria-hidden="true">
+          <div class="shop-card">
+            <div class="shop-header">
+              <h3>🏥 安全区补给站</h3>
+              <button class="close-button" id="shopCloseBtn">×</button>
+            </div>
+            <p class="shop-hint">按 B 开关商店 · 金钱通用：探索与塔防共用</p>
+            <div class="shop-items" id="shopItems">
+              <div class="shop-item">
+                <span class="shop-item-icon">💊</span>
+                <div class="shop-item-info">
+                  <span class="shop-item-name">HP 恢复药水</span>
+                  <span class="shop-item-desc">恢复 50 点生命</span>
+                </div>
+                <button class="shop-item-buy" data-item="hp-small">$30</button>
+              </div>
+              <div class="shop-item">
+                <span class="shop-item-icon">💉</span>
+                <div class="shop-item-info">
+                  <span class="shop-item-name">HP 强效药水</span>
+                  <span class="shop-item-desc">恢复 150 点生命</span>
+                </div>
+                <button class="shop-item-buy" data-item="hp-large">$60</button>
+              </div>
+              <div class="shop-item">
+                <span class="shop-item-icon">❤️</span>
+                <div class="shop-item-info">
+                  <span class="shop-item-name">生命强化</span>
+                  <span class="shop-item-desc">最大 HP +50 并完全回复</span>
+                </div>
+                <button class="shop-item-buy" data-item="max-hp">$100</button>
+              </div>
+              <div class="shop-item">
+                <span class="shop-item-icon">✨</span>
+                <div class="shop-item-info">
+                  <span class="shop-item-name">完全恢复</span>
+                  <span class="shop-item-desc">HP 恢复至最大值</span>
+                </div>
+                <button class="shop-item-buy" data-item="full-heal">$80</button>
+              </div>
+            </div>
+          </div>
+        </section>
       </div>
     `;
 
@@ -164,6 +274,7 @@ export function renderGameUiShell(app: HTMLElement, requiredElement: RequiredEle
     selectedUnitPanel: requiredElement("#selectedUnitPanel"),
     selectedUnitName: requiredElement("#selectedUnitName"),
     selectedUnitStats: requiredElement("#selectedUnitStats"),
+    activeSkillMeta: requiredElement("#activeSkillMeta"),
     activeSkillButton: requiredElement<HTMLButtonElement>("#activeSkillButton"),
     gachaPanel: requiredElement("#gachaPanel"),
     homeOverlay: requiredElement("#homeOverlay"),
@@ -181,5 +292,17 @@ export function renderGameUiShell(app: HTMLElement, requiredElement: RequiredEle
     gachaFocusTabsElement: requiredElement("#gachaFocusTabs"),
     pausePanel: requiredElement("#pausePanel"),
     toolbar: requiredElement("#buildToolbar"),
+    exploreHud: requiredElement("#exploreHud"),
+    exploreLevelBadge: requiredElement("#exploreLevelBadge"),
+    exploreXpBar: requiredElement("#exploreXpBar"),
+    exploreHpBar: requiredElement("#exploreHpBar"),
+    exploreHpText: requiredElement("#exploreHpText"),
+    exploreSkillAttackCd: requiredElement("#exploreSkillAttackCd"),
+    exploreSkillECd: requiredElement("#exploreSkillECd"),
+    exploreSkillRCd: requiredElement("#exploreSkillRCd"),
+    inventoryPanel: requiredElement("#inventoryPanel"),
+    inventoryGrid: requiredElement("#inventoryGrid"),
+    gameOverPanel: requiredElement("#gameOverPanel"),
+    safeZoneShopPanel: requiredElement("#safeZoneShopPanel"),
   };
 }

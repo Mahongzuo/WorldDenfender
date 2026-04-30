@@ -98,6 +98,8 @@ export interface MapDefinition {
   path: GridCell[];
   obstacles: GridCell[];
   actors?: MapActorDef[];
+  /** Explore-mode safe zone cells: enemies will not attack the player here */
+  safeZones?: GridCell[];
 }
 
 export interface EditorCell {
@@ -126,6 +128,40 @@ export interface EditorExplorationLayout {
   obstacles?: EditorCell[];
   startPoint?: EditorCell & { id?: string; name?: string };
   exitPoint?: EditorCell & { id?: string; name?: string };
+  /** Cells where explore enemies will not attack the player */
+  safeZones?: EditorCell[];
+}
+
+export interface InventoryItem {
+  id: string;
+  name: string;
+  quantity: number;
+  type: "material" | "consumable";
+  icon: string;
+  collectedAt: number;
+}
+
+export interface ExploreEnemy {
+  id: string;
+  mesh: THREE.Group;
+  hpBar: THREE.Mesh;
+  hp: number;
+  maxHp: number;
+  speed: number;
+  attackDamage: number;
+  aggroRange: number;
+  attackCooldown: number;
+  attackTimer: number;
+  dead: boolean;
+}
+
+export interface ExploreProjectile {
+  mesh: THREE.Mesh;
+  velocity: THREE.Vector3;
+  damage: number;
+  lifetime: number;
+  type: "basic" | "orb" | "blast" | "lightning" | "spark";
+  target?: ExploreEnemy | null;
 }
 
 export interface EditorLevel {
@@ -192,7 +228,10 @@ export interface Building {
   bonusBlockUntil?: number;
   healthBarGroup?: THREE.Group;
   healthBarFill?: THREE.Mesh;
-  skillHud?: THREE.Sprite;
+  skillHudBillboard?: THREE.Group;
+  skillHudPlane?: THREE.Mesh;
+  /** 抵消 buildGroup(scale,1,scale) 对 Sprite billboard 宽高比的破坏（否则地理图中技能牌会变扁横条）。 */
+  skillHudAnchor?: THREE.Group;
   skillHudText?: string;
 }
 

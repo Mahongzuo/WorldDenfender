@@ -1,5 +1,6 @@
 /**
  * 关卡编辑器「项目模型」条目下方的小型 3D 预览（与预览主场景分离）。
+ * 仅在 WebGL 视口内使用浅灰演播室光照与深色背景偏 lookdev。
  */
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
@@ -18,14 +19,18 @@ function resolveUrl(path) {
 export function createContentBrowserMiniPreview(options) {
   var host = options.host;
   var scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x0b1218);
+  scene.background = new THREE.Color(0x383e47);
 
   var camera = new THREE.PerspectiveCamera(40, 1, 0.08, 48);
   camera.position.set(1.6, 1.1, 2.2);
 
-  var renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  var renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 0.92;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.setSize(host.clientWidth || 1, host.clientHeight || 1, false);
 
   host.innerHTML = '';
@@ -34,10 +39,29 @@ export function createContentBrowserMiniPreview(options) {
   renderer.domElement.style.height = '100%';
   renderer.domElement.style.display = 'block';
 
-  var ambient = new THREE.HemisphereLight(0xb8d4ff, 0x34425a, 2.2);
-  var key = new THREE.DirectionalLight(0xfff0dd, 2.4);
-  key.position.set(3, 6, 4);
-  scene.add(ambient, key);
+  var ambient = new THREE.HemisphereLight(0xbec4cc, 0x2c3238, 1.35);
+  var key = new THREE.DirectionalLight(0xfff4ec, 1.75);
+  key.position.set(4.8, 9.5, 5);
+  key.castShadow = true;
+  key.shadow.mapSize.set(1024, 1024);
+  key.shadow.bias = -0.0002;
+  var fill = new THREE.DirectionalLight(0xd4dcff, 0.52);
+  fill.position.set(-4.8, 5.6, -2.6);
+  var rim = new THREE.DirectionalLight(0xfff0e6, 0.36);
+  rim.position.set(-1.9, 3.9, -4.9);
+  scene.add(ambient, key, fill, rim);
+
+  var ground = new THREE.Mesh(
+    new THREE.CircleGeometry(4.25, 56),
+    new THREE.MeshStandardMaterial({
+      color: 0x4a525c,
+      roughness: 0.93,
+      metalness: 0.05,
+    }),
+  );
+  ground.rotation.x = -Math.PI / 2;
+  ground.receiveShadow = true;
+  scene.add(ground);
 
   var controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
@@ -103,7 +127,7 @@ export function createContentBrowserMiniPreview(options) {
           resolve(gltf.scene.clone(true));
         },
         undefined,
-        reject
+        reject,
       );
     });
   }

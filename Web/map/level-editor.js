@@ -97,12 +97,23 @@
     var previewInitGeneration = 0;
     var gameplayPreviewInitGeneration = 0;
     var previewRefreshTimer = null;
+    var GEO_MAPPING_STORAGE_KEY = 'earth-guardian.level-editor.geoMappingEnabled';
+    var shellLeftCollapsedPref = false;
+    var shellRightCollapsedPref = false;
+    var SHELL_LEFT_COLLAPSE_KEY = 'earth-guardian.level-editor.shellLeftCollapsed';
+    var SHELL_RIGHT_COLLAPSE_KEY = 'earth-guardian.level-editor.shellRightCollapsed';
+    var CONTENT_BROWSER_FLOAT_GEOM_KEY = 'earth-guardian.level-editor.contentBrowserFloat.geometry';
+    var geoMappingEnabled = true;
     var isDirty = false;
     var regionSources = { countries: [], chinaCities: [] };
     var contentBrowserMiniApi = null;
+    var contentBrowserFloatGeomTimer = null;
+    var contentBrowserFloatRo = null;
     var selectedContentBrowserAssetId = '';
+    var levelContentBrowserFilter = 'all';
 
     var refs = {
+        toggleGeoMapping: document.getElementById('toggleGeoMapping'),
         levelSummary: document.getElementById('levelSummary'),
         btnGenerateRegions: document.getElementById('btnGenerateRegions'),
         btnCreateLevel: document.getElementById('btnCreateLevel'),
@@ -194,6 +205,11 @@
         contentBrowserList: document.getElementById('contentBrowserList'),
         contentBrowserReload: document.getElementById('contentBrowserReload'),
         contentBrowserPreviewHost: document.getElementById('contentBrowserPreviewHost'),
+        mapStageWrap: document.getElementById('mapStageWrap'),
+        contentBrowserFloatPanel: document.getElementById('contentBrowserFloatPanel'),
+        btnOpenContentBrowserFloat: document.getElementById('btnOpenContentBrowserFloat'),
+        contentBrowserFloatDragHandle: document.getElementById('contentBrowserFloatDragHandle'),
+        contentBrowserFloatClose: document.getElementById('contentBrowserFloatClose'),
         stageHintExtra: document.getElementById('stageHintExtra'),
         previewGizmoTranslate: document.getElementById('previewGizmoTranslate'),
         previewGizmoRotate: document.getElementById('previewGizmoRotate'),
@@ -222,7 +238,35 @@
         modelInspectorStats: document.getElementById('modelInspectorStats'),
         modelInspectorUpload: document.getElementById('modelInspectorUpload'),
         modelInspectorUploadName: document.getElementById('modelInspectorUploadName'),
-        modelInspectorUploadCategory: document.getElementById('modelInspectorUploadCategory')
+        modelInspectorUploadCategory: document.getElementById('modelInspectorUploadCategory'),
+        createLevelModal: document.getElementById('createLevelModal'),
+        btnCancelCreateLevel: document.getElementById('btnCancelCreateLevel'),
+        newLevelName: document.getElementById('newLevelName'),
+        newLevelRegionSearch: document.getElementById('newLevelRegionSearch'),
+        newLevelRegionDropdown: document.getElementById('newLevelRegionDropdown'),
+        newLevelPlaceSearch: document.getElementById('newLevelPlaceSearch'),
+        newLevelPlaceDropdown: document.getElementById('newLevelPlaceDropdown'),
+        btnSearchPlace: document.getElementById('btnSearchPlace'),
+        btnUseCurrentLocation: document.getElementById('btnUseCurrentLocation'),
+        newLevelLat: document.getElementById('newLevelLat'),
+        newLevelLon: document.getElementById('newLevelLon'),
+        btnConfirmCreateLevel: document.getElementById('btnConfirmCreateLevel'),
+        selectedPlacePreview: document.getElementById('selectedPlacePreview'),
+        selectedPlaceName: document.getElementById('selectedPlaceName'),
+        selectedPlaceCoords: document.getElementById('selectedPlaceCoords'),
+        btnCancelCreateLevelAlt: document.getElementById('btnCancelCreateLevelAlt'),
+        levelContentBrowser: document.getElementById('levelContentBrowser'),
+        levelContentBrowserFilters: document.getElementById('levelContentBrowserFilters'),
+        levelContentBrowserList: document.getElementById('levelContentBrowserList'),
+        engineShell: document.getElementById('engineShell'),
+        regionPanel: document.getElementById('regionPanel'),
+        regionPanelBody: document.getElementById('regionPanelBody'),
+        collapseRegionPanel: document.getElementById('collapseRegionPanel'),
+        railExpandRegionPanel: document.getElementById('railExpandRegionPanel'),
+        inspectorPanel: document.getElementById('inspectorPanel'),
+        inspectorPanelBody: document.getElementById('inspectorPanelBody'),
+        collapseInspectorPanel: document.getElementById('collapseInspectorPanel'),
+        railExpandInspectorPanel: document.getElementById('railExpandInspectorPanel')
     };
 
     var TOOL_LABELS = {
@@ -234,8 +278,28 @@
         buildSlot: '塔位',
         objective: '防守目标',
         explorePoint: '探索点',
+        safeZone: '安全区',
         actor: '模型 Actor',
         erase: '橡皮擦'
+    };
+
+    var LEVEL_CONTENT_BROWSER_FILTER_ORDER = [
+        'all',
+        'obstacle',
+        'spawn',
+        'path',
+        'buildSlot',
+        'objective',
+        'explorePoint',
+        'safeZone',
+        'actor'
+    ];
+
+    var LCB_CELL_KIND_LABEL = {
+        obstacleCell: '障碍',
+        pathCell: '敌人路径',
+        buildSlotCell: '塔位',
+        safeZoneCell: '安全区'
     };
 
     var MODEL_CATEGORY_CONFIG = {
@@ -516,12 +580,102 @@
         }
     };
 
+    function readShellCollapsedPrefsFromStorage() {
+        try {
+            shellLeftCollapsedPref = window.localStorage.getItem(SHELL_LEFT_COLLAPSE_KEY) === '1';
+            shellRightCollapsedPref = window.localStorage.getItem(SHELL_RIGHT_COLLAPSE_KEY) === '1';
+        } catch (_e) {
+            shellLeftCollapsedPref = shellRightCollapsedPref = false;
+        }
+    }
+
+    function persistShellCollapsedPrefs() {
+        try {
+            window.localStorage.setItem(SHELL_LEFT_COLLAPSE_KEY, shellLeftCollapsedPref ? '1' : '0');
+            window.localStorage.setItem(SHELL_RIGHT_COLLAPSE_KEY, shellRightCollapsedPref ? '1' : '0');
+        } catch (_e) {
+            /* ignore */
+        }
+    }
+
+    function isNarrowWorkbenchLayout() {
+        return typeof window.matchMedia !== 'undefined' && window.matchMedia('(max-width: 1180px)').matches;
+    }
+
+    function bumpShellLayoutDependentUi() {
+        window.requestAnimationFrame(function () {
+            if (viewportViewMode === 'preview' && previewApi && typeof previewApi.resize === 'function') previewApi.resize();
+        });
+    }
+
+    function applyShellPanelCollapseUi() {
+        if (!refs.engineShell || !refs.regionPanel || !refs.inspectorPanel) return;
+        var narrow = isNarrowWorkbenchLayout();
+        if (narrow) {
+            refs.engineShell.classList.remove('shell-left-collapsed', 'shell-right-collapsed');
+            refs.regionPanel.classList.remove('shell-panel-collapsed');
+            refs.inspectorPanel.classList.remove('shell-panel-collapsed');
+            if (refs.railExpandRegionPanel) refs.railExpandRegionPanel.hidden = true;
+            if (refs.railExpandInspectorPanel) refs.railExpandInspectorPanel.hidden = true;
+            if (refs.regionPanelBody) refs.regionPanelBody.removeAttribute('aria-hidden');
+            if (refs.inspectorPanelBody) refs.inspectorPanelBody.removeAttribute('aria-hidden');
+            bumpShellLayoutDependentUi();
+            return;
+        }
+        refs.engineShell.classList.toggle('shell-left-collapsed', shellLeftCollapsedPref);
+        refs.engineShell.classList.toggle('shell-right-collapsed', shellRightCollapsedPref);
+        refs.regionPanel.classList.toggle('shell-panel-collapsed', shellLeftCollapsedPref);
+        refs.inspectorPanel.classList.toggle('shell-panel-collapsed', shellRightCollapsedPref);
+        if (refs.railExpandRegionPanel) {
+            refs.railExpandRegionPanel.hidden = !shellLeftCollapsedPref;
+            refs.railExpandRegionPanel.setAttribute('aria-expanded', shellLeftCollapsedPref ? 'false' : 'true');
+        }
+        if (refs.railExpandInspectorPanel) {
+            refs.railExpandInspectorPanel.hidden = !shellRightCollapsedPref;
+            refs.railExpandInspectorPanel.setAttribute('aria-expanded', shellRightCollapsedPref ? 'false' : 'true');
+        }
+        if (refs.regionPanelBody) refs.regionPanelBody.setAttribute('aria-hidden', shellLeftCollapsedPref ? 'true' : 'false');
+        if (refs.inspectorPanelBody) refs.inspectorPanelBody.setAttribute('aria-hidden', shellRightCollapsedPref ? 'true' : 'false');
+        if (refs.collapseRegionPanel)
+            refs.collapseRegionPanel.setAttribute('aria-expanded', shellLeftCollapsedPref ? 'false' : 'true');
+        if (refs.collapseInspectorPanel)
+            refs.collapseInspectorPanel.setAttribute('aria-expanded', shellRightCollapsedPref ? 'false' : 'true');
+        bumpShellLayoutDependentUi();
+    }
+
     function init() {
+        initGeoMappingToggle();
+        readShellCollapsedPrefsFromStorage();
         bindEvents();
+        bindCreateLevelModalEvents();
         loadState();
+        applyShellPanelCollapseUi();
+    }
+
+    function readGeoMappingEnabledFromStorage() {
+        var v = window.localStorage.getItem(GEO_MAPPING_STORAGE_KEY);
+        if (v === null) return true;
+        return v !== '0' && v !== 'false';
+    }
+
+    function initGeoMappingToggle() {
+        geoMappingEnabled = readGeoMappingEnabledFromStorage();
+        if (refs.toggleGeoMapping) {
+            refs.toggleGeoMapping.checked = geoMappingEnabled;
+        }
     }
 
     function bindEvents() {
+        if (refs.toggleGeoMapping) {
+            refs.toggleGeoMapping.addEventListener('change', function () {
+                geoMappingEnabled = !!refs.toggleGeoMapping.checked;
+                window.localStorage.setItem(GEO_MAPPING_STORAGE_KEY, geoMappingEnabled ? '1' : '0');
+                if (viewportViewMode === 'preview' && previewApi && typeof previewApi.refresh === 'function') {
+                    var sid = selectedObject && selectedObject.kind === 'actor' ? selectedObject.id : null;
+                    previewApi.refresh({ preserveView: true, selectActorId: sid });
+                }
+            });
+        }
         refs.btnReload.addEventListener('click', reloadState);
         refs.btnSave.addEventListener('click', saveState);
         refs.btnExport.addEventListener('click', exportState);
@@ -794,10 +948,76 @@
             });
         }
 
+        wireContentBrowserFloating();
+
+        if (refs.collapseRegionPanel) {
+            refs.collapseRegionPanel.addEventListener('click', function () {
+                shellLeftCollapsedPref = true;
+                persistShellCollapsedPrefs();
+                applyShellPanelCollapseUi();
+            });
+        }
+        if (refs.railExpandRegionPanel) {
+            refs.railExpandRegionPanel.addEventListener('click', function () {
+                shellLeftCollapsedPref = false;
+                persistShellCollapsedPrefs();
+                applyShellPanelCollapseUi();
+            });
+        }
+        if (refs.collapseInspectorPanel) {
+            refs.collapseInspectorPanel.addEventListener('click', function () {
+                shellRightCollapsedPref = true;
+                persistShellCollapsedPrefs();
+                applyShellPanelCollapseUi();
+            });
+        }
+        if (refs.railExpandInspectorPanel) {
+            refs.railExpandInspectorPanel.addEventListener('click', function () {
+                shellRightCollapsedPref = false;
+                persistShellCollapsedPrefs();
+                applyShellPanelCollapseUi();
+            });
+        }
+
+        var shellReflowTimer = null;
         window.addEventListener('resize', function () {
             if (viewportViewMode === 'preview' && previewApi && typeof previewApi.resize === 'function') {
                 previewApi.resize();
             }
+            clearTimeout(shellReflowTimer);
+            shellReflowTimer = window.setTimeout(function () {
+                applyShellPanelCollapseUi();
+                clampContentBrowserFloatPanelIntoViewport();
+            }, 100);
+        });
+
+        document.addEventListener('keydown', function (e) {
+            var ae = document.activeElement;
+            var tag = ae && ae.tagName;
+            if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+            if (ae && ae.isContentEditable) return;
+
+            if ((e.ctrlKey || e.metaKey) && e.code === 'Space') {
+                if (activeWorkbench !== 'level') return;
+                e.preventDefault();
+                toggleContentBrowserFloat();
+                return;
+            }
+
+            if (e.key === 'f' || e.key === 'F') {
+                if (activeWorkbench !== 'level') return;
+                if (viewportViewMode !== 'preview' || !previewApi || typeof previewApi.focusSelection !== 'function') return;
+                if (!selectedObject || selectedObject.kind !== 'actor') return;
+                e.preventDefault();
+                e.stopPropagation();
+                previewApi.focusSelection();
+                return;
+            }
+
+            if (e.key !== 'Delete') return;
+            if (activeWorkbench !== 'level' || !selectedObject) return;
+            e.preventDefault();
+            deleteSelection();
         });
     }
 
@@ -1631,48 +1851,338 @@
         renderContentBrowser();
     }
 
-    function renderPreviewSceneOutline() {
-        if (!refs.previewSceneOutlineSection || !refs.previewSceneOutlineList) return;
-        var show = activeWorkbench === 'level' && viewportViewMode === 'preview';
-        refs.previewSceneOutlineSection.classList.toggle('view-hidden', !show);
-        refs.previewSceneOutlineSection.setAttribute('aria-hidden', show ? 'false' : 'true');
-        if (!show || !state) {
-            refs.previewSceneOutlineList.innerHTML = '';
-            return;
-        }
-        var level = getLevel();
-        if (!level || !level.map || !Array.isArray(level.map.actors)) {
-            refs.previewSceneOutlineList.innerHTML = '<div class="empty-state">暂无 Actor。</div>';
-            return;
-        }
-        var actors = level.map.actors;
-        if (!actors.length) {
-            refs.previewSceneOutlineList.innerHTML = '<div class="empty-state">场景中尚无已放置的 Actor。</div>';
-            return;
-        }
-        var selId = selectedObject && selectedObject.kind === 'actor' ? selectedObject.id : '';
-        refs.previewSceneOutlineList.innerHTML = actors
-            .map(function (actor) {
-                var active = actor.id === selId ? ' preview-scene-outline-item--active' : '';
-                var icon = actor.icon ? String(actor.icon).slice(0, 3) : '◆';
-                var cat = actor.category ? String(actor.category) : '';
-                return [
-                    '<button type="button" class="preview-scene-outline-item' +
-                        active +
-                        '" data-outline-actor="' +
-                        escapeAttr(actor.id) +
-                        '" title="' +
-                        escapeAttr(cat + ' · ' + (actor.name || actor.id)) +
-                        '">',
-                    '  <span class="preview-scene-outline-icon">' + escapeHtml(icon) + '</span>',
-                    '  <span class="preview-scene-outline-text">',
-                    '    <strong>' + escapeHtml(actor.name || actor.id) + '</strong>',
-                    '    <span>' + escapeHtml(cat || 'Actor') + '</span>',
-                    '  </span>',
+    function ensureLevelContentBrowserUiWired() {
+        var filters = refs.levelContentBrowserFilters;
+        var list = refs.levelContentBrowserList;
+        if (filters && filters.dataset.lcbWired !== '1') {
+            filters.dataset.lcbWired = '1';
+            filters.innerHTML = LEVEL_CONTENT_BROWSER_FILTER_ORDER.map(function (fid) {
+                var label = fid === 'all' ? '全部' : TOOL_LABELS[fid] || fid;
+                var active = fid === levelContentBrowserFilter ? ' active' : '';
+                return (
+                    '<button type="button" role="tab" class="lcb-filter-chip' +
+                    active +
+                    '" data-lcb-filter="' +
+                    escapeAttr(fid) +
+                    '" aria-selected="' +
+                    (active ? 'true' : 'false') +
+                    '">' +
+                    escapeHtml(label) +
                     '</button>'
-                ].join('');
-            })
-            .join('');
+                );
+            }).join('');
+            filters.addEventListener('click', function (e) {
+                var chip = e.target.closest('[data-lcb-filter]');
+                if (!chip) return;
+                levelContentBrowserFilter = chip.getAttribute('data-lcb-filter') || 'all';
+                filters.querySelectorAll('[data-lcb-filter]').forEach(function (c) {
+                    var on = c.getAttribute('data-lcb-filter') === levelContentBrowserFilter;
+                    c.classList.toggle('active', on);
+                    c.setAttribute('aria-selected', on ? 'true' : 'false');
+                });
+                renderLevelContentBrowser();
+            });
+        }
+        if (list && list.dataset.lcbWired !== '1') {
+            list.dataset.lcbWired = '1';
+            list.addEventListener('click', function (e) {
+                var btn = e.target.closest('[data-lcb-sel-kind]');
+                if (!btn) return;
+                var kind = btn.getAttribute('data-lcb-sel-kind') || '';
+                if (
+                    kind === 'obstacleCell' ||
+                    kind === 'pathCell' ||
+                    kind === 'buildSlotCell' ||
+                    kind === 'safeZoneCell'
+                ) {
+                    selectGridCellObject(kind, Number(btn.getAttribute('data-lcb-col')), Number(btn.getAttribute('data-lcb-row')));
+                    return;
+                }
+                var oid = btn.getAttribute('data-lcb-id');
+                if (kind && oid != null && oid !== '') selectObject(kind, oid);
+            });
+        }
+    }
+
+    function lcbBtnActive(selKind, probe) {
+        if (!selectedObject || selectedObject.kind !== selKind) return false;
+        if (probe.id != null && selectedObject.id !== probe.id) return false;
+        if (probe.col != null && (selectedObject.col !== probe.col || selectedObject.row !== probe.row)) return false;
+        return true;
+    }
+
+    function sortCells(cells) {
+        return cells
+            .slice()
+            .sort(function (a, b) {
+                return Number(a.row) - Number(b.row) || Number(a.col) - Number(b.col);
+            });
+    }
+
+    function lcbItemButton(meta) {
+        var sk = meta.selKind;
+        var active = lcbBtnActive(sk, meta.probe || {}) ? ' lcb-item--active' : '';
+        var attrs = ['type="button"', 'class="lcb-item' + active + '"', 'data-lcb-sel-kind="' + escapeAttr(sk) + '"'];
+        if (meta.id != null) attrs.push('data-lcb-id="' + escapeAttr(meta.id) + '"');
+        if (meta.col != null) attrs.push('data-lcb-col="' + escapeAttr(String(meta.col)) + '"');
+        if (meta.row != null) attrs.push('data-lcb-row="' + escapeAttr(String(meta.row)) + '"');
+        var icon = escapeHtml(meta.icon || '·');
+        var t1 = escapeHtml(meta.title || '');
+        var t2 = escapeHtml(meta.sub || '');
+        return (
+            '<button ' +
+            attrs.join(' ') +
+            '>' +
+            '<span class="lcb-item-icon">' +
+            icon +
+            '</span>' +
+            '<span class="lcb-item-meta">' +
+            '<strong>' +
+            t1 +
+            '</strong>' +
+            '<span>' +
+            t2 +
+            '</span>' +
+            '</span>' +
+            '</button>'
+        );
+    }
+
+    function lcbSection(title, inner) {
+        if (!inner) return '';
+        return (
+            '<div class="level-content-browser-section">' +
+            '<h4>' +
+            escapeHtml(title) +
+            '</h4>' +
+            inner +
+            '</div>'
+        );
+    }
+
+    function renderLevelContentBrowser() {
+        ensureLevelContentBrowserUiWired();
+        if (!refs.levelContentBrowserList || !refs.levelContentBrowser) return;
+
+        var show = activeWorkbench === 'level' && viewportViewMode === 'preview';
+        refs.levelContentBrowser.classList.toggle('view-hidden', !show);
+        refs.levelContentBrowser.setAttribute('aria-hidden', show ? 'false' : 'true');
+
+        if (!show || !state) {
+            refs.levelContentBrowserList.innerHTML = '';
+            return;
+        }
+
+        if (refs.previewSceneOutlineSection) {
+            refs.previewSceneOutlineSection.classList.add('view-hidden');
+            refs.previewSceneOutlineSection.setAttribute('aria-hidden', 'true');
+        }
+
+        var level = getLevel();
+        if (!level || !level.map) {
+            refs.levelContentBrowserList.innerHTML = '<div class="empty-state">请选择关卡</div>';
+            return;
+        }
+
+        var f = levelContentBrowserFilter;
+        var want = function (key) {
+            return f === 'all' || f === key;
+        };
+        var map = level.map;
+        var layout = ensureExplorationLayout(map);
+        var sections = [];
+
+        /* 障碍 */
+        if (want('obstacle')) {
+            var obs =
+                activeEditorMode === 'explore'
+                    ? sortCells(layout.obstacles || [])
+                    : sortCells(map.obstacles || []);
+            var obsHtml = obs
+                .map(function (c) {
+                    return lcbItemButton({
+                        selKind: 'obstacleCell',
+                        col: c.col,
+                        row: c.row,
+                        probe: { col: c.col, row: c.row },
+                        icon: '障',
+                        title: '障碍 — (' + c.col + ',' + c.row + ')',
+                        sub: activeEditorMode === 'explore' ? '探索布局' : '塔防布局'
+                    });
+                })
+                .join('');
+            if (obsHtml) sections.push(lcbSection('障碍', obsHtml));
+        }
+
+        /* 敌人出口 */
+        if (want('spawn')) {
+            var spHtml = '';
+            if (activeEditorMode === 'explore' && layout.startPoint) {
+                var sp = layout.startPoint;
+                spHtml += lcbItemButton({
+                    selKind: 'spawn',
+                    id: sp.id,
+                    probe: { id: sp.id },
+                    icon: '出',
+                    title: sp.name || '探索起点',
+                    sub: '(' + sp.col + ',' + sp.row + ')'
+                });
+            } else if (activeEditorMode === 'defense') {
+                spHtml = (map.spawnPoints || [])
+                    .map(function (sp) {
+                        return lcbItemButton({
+                            selKind: 'spawn',
+                            id: sp.id,
+                            probe: { id: sp.id },
+                            icon: '出',
+                            title: sp.name || '敌人出口',
+                            sub: '(' + sp.col + ',' + sp.row + ')'
+                        });
+                    })
+                    .join('');
+            }
+            if (spHtml) sections.push(lcbSection('敌人出口', spHtml));
+        }
+
+        /* 敌人路径 */
+        if (want('path')) {
+            var pathCells = [];
+            if (activeEditorMode === 'explore') pathCells = sortCells(layout.path || []);
+            else {
+                var seen = {};
+                (map.enemyPaths || []).forEach(function (p) {
+                    (p.cells || []).forEach(function (c) {
+                        var k = c.col + ',' + c.row;
+                        if (seen[k]) return;
+                        seen[k] = true;
+                        pathCells.push(c);
+                    });
+                });
+                pathCells = sortCells(pathCells);
+            }
+            var pathHtml = pathCells
+                .map(function (c) {
+                    return lcbItemButton({
+                        selKind: 'pathCell',
+                        col: c.col,
+                        row: c.row,
+                        probe: { col: c.col, row: c.row },
+                        icon: '径',
+                        title: '路径格 — (' + c.col + ',' + c.row + ')',
+                        sub: '敌人路径'
+                    });
+                })
+                .join('');
+            if (pathHtml) sections.push(lcbSection('敌人路径', pathHtml));
+        }
+
+        /* 塔位 */
+        if (want('buildSlot') && activeEditorMode === 'defense') {
+            var bsHtml = sortCells(map.buildSlots || [])
+                .map(function (c) {
+                    return lcbItemButton({
+                        selKind: 'buildSlotCell',
+                        col: c.col,
+                        row: c.row,
+                        probe: { col: c.col, row: c.row },
+                        icon: '塔',
+                        title: '塔位 — (' + c.col + ',' + c.row + ')',
+                        sub: '仅塔防布局'
+                    });
+                })
+                .join('');
+            if (bsHtml) sections.push(lcbSection('塔位', bsHtml));
+        }
+
+        /* 防守目标 */
+        if (want('objective')) {
+            var obHtml = '';
+            if (activeEditorMode === 'explore' && layout.exitPoint) {
+                var op = layout.exitPoint;
+                obHtml = lcbItemButton({
+                    selKind: 'objective',
+                    id: op.id,
+                    probe: { id: op.id },
+                    icon: '标',
+                    title: op.name || '探索终点',
+                    sub: '(' + op.col + ',' + op.row + ')'
+                });
+            } else if (activeEditorMode === 'defense' && map.objectivePoint) {
+                var opz = map.objectivePoint;
+                obHtml = lcbItemButton({
+                    selKind: 'objective',
+                    id: opz.id,
+                    probe: { id: opz.id },
+                    icon: '标',
+                    title: opz.name || '防守目标',
+                    sub: '(' + opz.col + ',' + opz.row + ')'
+                });
+            }
+            if (obHtml) sections.push(lcbSection('防守目标', obHtml));
+        }
+
+        /* 探索点 */
+        if (want('explorePoint') && Array.isArray(map.explorationPoints) && map.explorationPoints.length) {
+            var epHtml = map.explorationPoints
+                .map(function (p) {
+                    return lcbItemButton({
+                        selKind: 'explorePoint',
+                        id: p.id,
+                        probe: { id: p.id },
+                        icon: '探',
+                        title: p.name || p.id,
+                        sub: '(' + p.col + ',' + p.row + ')'
+                    });
+                })
+                .join('');
+            sections.push(lcbSection('探索点', epHtml));
+        }
+
+        /* 安全区 */
+        if (want('safeZone') && activeEditorMode === 'explore') {
+            var szHtml = sortCells(layout.safeZones || [])
+                .map(function (c) {
+                    return lcbItemButton({
+                        selKind: 'safeZoneCell',
+                        col: c.col,
+                        row: c.row,
+                        probe: { col: c.col, row: c.row },
+                        icon: '安',
+                        title: '安全区 — (' + c.col + ',' + c.row + ')',
+                        sub: '探索布局'
+                    });
+                })
+                .join('');
+            if (szHtml) sections.push(lcbSection('安全区', szHtml));
+        }
+
+        /* 模型 Actor */
+        if (want('actor') && Array.isArray(map.actors) && map.actors.length) {
+            var actHtml = map.actors
+                .map(function (actor) {
+                    var cat = actor.category ? String(actor.category) : '';
+                    return lcbItemButton({
+                        selKind: 'actor',
+                        id: actor.id,
+                        probe: { id: actor.id },
+                        icon: actor.icon ? String(actor.icon).slice(0, 2) : 'Ac',
+                        title: actor.name || actor.id,
+                        sub: cat || '模型 Actor'
+                    });
+                })
+                .join('');
+            sections.push(lcbSection('模型 Actor', actHtml));
+        }
+
+        refs.levelContentBrowserList.innerHTML = sections.length
+            ? sections.join('')
+            : '<div class="empty-state">当前筛选下暂无条目；可在棋盘布局中添加障碍、路径等内容。</div>';
+    }
+
+    function renderPreviewSceneOutline() {
+        renderLevelContentBrowser();
+        /* 侧栏大纲已迁移至预览区右侧；保留空列表避免遗留脚本报错 */
+        if (refs.previewSceneOutlineList) refs.previewSceneOutlineList.innerHTML = '';
     }
 
     function renderWorkbenchShell() {
@@ -1688,6 +2198,11 @@
         if (refs.modelWorkbench) {
             refs.modelWorkbench.classList.toggle('view-hidden', !model);
             refs.modelWorkbench.setAttribute('aria-hidden', model ? 'false' : 'true');
+        }
+        if (refs.btnOpenContentBrowserFloat) {
+            refs.btnOpenContentBrowserFloat.classList.toggle('view-hidden', !level);
+            refs.btnOpenContentBrowserFloat.setAttribute('aria-hidden', level ? 'false' : 'true');
+            if (!level && isContentBrowserFloatOpen()) toggleContentBrowserFloat(false);
         }
         if (refs.levelInspectorWorkspace) refs.levelInspectorWorkspace.classList.toggle('view-hidden', !level);
         if (refs.gameplayInspectorWorkspace) {
@@ -2124,20 +2639,20 @@
     function refreshPreviewNow() {
         if (viewportViewMode !== 'preview' || !previewApi || typeof previewApi.refresh !== 'function') return;
         if (typeof previewApi.resize === 'function') previewApi.resize();
-        previewApi.refresh();
-        if (selectedObject && selectedObject.kind === 'actor') {
-            previewApi.setSelectedActor(selectedObject.id);
-        }
+        var sid = selectedObject && selectedObject.kind === 'actor' ? selectedObject.id : null;
+        previewApi.refresh({ preserveView: true, selectActorId: sid });
     }
 
     function syncViewportPanels() {
         var board = viewportViewMode === 'board';
+        var levelPreviewShown = !board && activeWorkbench === 'level';
         if (refs.boardViewport) refs.boardViewport.classList.toggle('view-hidden', !board);
         if (refs.previewStageWrap) {
             refs.previewStageWrap.classList.toggle('view-hidden', board);
             refs.previewStageWrap.setAttribute('aria-hidden', board ? 'true' : 'false');
         }
         if (refs.editorToolRibbon) refs.editorToolRibbon.classList.toggle('view-hidden', !board);
+        if (refs.mapStageWrap) refs.mapStageWrap.classList.toggle('map-stage-wrap--level-preview', levelPreviewShown);
         updateStageHintText();
         if (!board && previewApi && typeof previewApi.resize === 'function') {
             previewApi.resize();
@@ -2149,7 +2664,7 @@
         if (!refs.stageHintExtra) return;
         if (viewportViewMode === 'preview') {
             refs.stageHintExtra.textContent =
-                '鼠标左键拖拽旋转场景，滚轮缩放，右键平移；左键点中 Actor（或拖拽 Gizmo：移动·旋转·缩放）会优先编辑对象。Esc 取消选择；底部内容浏览器可把模型拖到地面；Inspector 仍可精确数值。';
+                '鼠标左键拖拽旋转场景，滚轮缩放，右键平移；左键点中 Actor（或拖拽 Gizmo：移动·旋转·缩放）会优先编辑对象。Esc 取消选择；F 聚焦所选 Actor；顶部「内容浏览器」或 Ctrl+空格 弹出项目模型（可拖拽缩放窗口），卡片拖入三维场景；右侧「关卡内容浏览器」可点选并按 Delete；Inspector 可精确数值。';
             return;
         }
         refs.stageHintExtra.textContent = '点击格子放置，拖拽已有 Actor 移动，右侧可精确编辑属性。';
@@ -2164,6 +2679,9 @@
                 previewApi = mod.createPreview({
                     host: refs.previewHost,
                     getLevel: getLevel,
+                    getGeoMappingEnabled: function () {
+                        return geoMappingEnabled;
+                    },
                     getActiveEditorMode: function () {
                         return activeEditorMode;
                     },
@@ -2183,10 +2701,8 @@
                     onTransformModeChange: setPreviewToolbarMode
                 });
                 setPreviewToolbarMode('translate');
-                previewApi.refresh();
-                if (selectedObject && selectedObject.kind === 'actor') {
-                    previewApi.setSelectedActor(selectedObject.id);
-                }
+                var initSel = selectedObject && selectedObject.kind === 'actor' ? selectedObject.id : null;
+                previewApi.refresh({ preserveView: false, selectActorId: initSel });
                 renderContentBrowser();
                 renderPreviewSceneOutline();
             })
@@ -2219,13 +2735,19 @@
     function onPreviewActorCommitted() {
         markDirty('已更新 Actor 变换');
         renderSelectionInspector();
+        renderMap();
+        renderPreviewSceneOutline();
         renderOverview();
     }
 
     function onDropCatalogModelInPreview(payload) {
         var level = getLevel();
         if (!level || !payload || !payload.assetId) return;
-        var template = state.actorTemplates.find(function (t) { return t.id === 'explore-item'; }) || state.actorTemplates[0];
+        var template = findActorTemplate('explore-item');
+        if (!template || !template.id) {
+            setStatus('无法放置模型：缺少可用 Actor 模板（explore-item）。', 'error');
+            return;
+        }
         var asset = getBrowsableModelAssets().find(function (item) { return item.id === payload.assetId; });
         var col = Math.floor(level.map.grid.cols / 2);
         var row = Math.floor(level.map.grid.rows / 2);
@@ -2237,6 +2759,7 @@
         selectedObject = { kind: 'actor', id: actor.id };
         markDirty('已在预览中放置模型');
         renderAll();
+        refreshPreviewNow();
     }
 
     function onDropActorTemplateInPreview(payload) {
@@ -2259,6 +2782,7 @@
         selectedObject = { kind: 'actor', id: actor.id };
         markDirty('已在预览中放置 Actor');
         renderAll();
+        refreshPreviewNow();
     }
 
     function setPreviewToolbarMode(mode) {
@@ -2275,6 +2799,184 @@
         if (previewApi && typeof previewApi.setTransformMode === 'function') previewApi.setTransformMode(mode);
     }
 
+    function clampContentBrowserGeom(n, lo, hi) {
+        return Math.min(hi, Math.max(lo, n));
+    }
+
+    function isContentBrowserFloatOpen() {
+        return refs.contentBrowserFloatPanel && !refs.contentBrowserFloatPanel.classList.contains('view-hidden');
+    }
+
+    function persistContentBrowserFloatGeometry() {
+        if (!refs.contentBrowserFloatPanel || !isContentBrowserFloatOpen()) return;
+        var el = refs.contentBrowserFloatPanel;
+        var r = el.getBoundingClientRect();
+        try {
+            window.localStorage.setItem(
+                CONTENT_BROWSER_FLOAT_GEOM_KEY,
+                JSON.stringify({
+                    left: Math.round(r.left),
+                    top: Math.round(r.top),
+                    width: Math.round(el.offsetWidth),
+                    height: Math.round(el.offsetHeight)
+                })
+            );
+        } catch (_e) {}
+    }
+
+    function schedulePersistContentBrowserFloatGeometry() {
+        clearTimeout(contentBrowserFloatGeomTimer);
+        contentBrowserFloatGeomTimer = setTimeout(persistContentBrowserFloatGeometry, 220);
+    }
+
+    function clampContentBrowserFloatPanelIntoViewport() {
+        var p = refs.contentBrowserFloatPanel;
+        if (!p || !isContentBrowserFloatOpen()) return;
+        var w = clampContentBrowserGeom(p.offsetWidth, 380, Math.max(400, window.innerWidth - 16));
+        var h = clampContentBrowserGeom(p.offsetHeight, 280, Math.max(300, window.innerHeight - 80));
+        p.style.width = w + 'px';
+        p.style.height = h + 'px';
+        var r = p.getBoundingClientRect();
+        var maxL = Math.max(8, window.innerWidth - w - 8);
+        var maxT = Math.max(8, window.innerHeight - h - 72);
+        p.style.left = clampContentBrowserGeom(r.left, 8, maxL) + 'px';
+        p.style.top = clampContentBrowserGeom(r.top, 8, maxT) + 'px';
+        schedulePersistContentBrowserFloatGeometry();
+    }
+
+    function applyContentBrowserFloatGeometryFromStorage() {
+        var raw = '';
+        try {
+            raw = window.localStorage.getItem(CONTENT_BROWSER_FLOAT_GEOM_KEY) || '';
+        } catch (_e) {
+            raw = '';
+        }
+        var p = refs.contentBrowserFloatPanel;
+        if (!p || !raw) return false;
+        var o;
+        try {
+            o = JSON.parse(raw);
+        } catch (_e) {
+            return false;
+        }
+        if (
+            typeof o.left !== 'number' ||
+            typeof o.top !== 'number' ||
+            typeof o.width !== 'number' ||
+            typeof o.height !== 'number' ||
+            !Number.isFinite(o.width) ||
+            !Number.isFinite(o.height)
+        )
+            return false;
+        var w = clampContentBrowserGeom(o.width, 380, Math.max(400, window.innerWidth - 16));
+        var h = clampContentBrowserGeom(o.height, 280, Math.max(300, window.innerHeight - 80));
+        var maxL = Math.max(8, window.innerWidth - w - 8);
+        var maxT = Math.max(8, window.innerHeight - h - 72);
+        p.style.right = 'auto';
+        p.style.bottom = 'auto';
+        p.style.left = clampContentBrowserGeom(o.left, 8, maxL) + 'px';
+        p.style.top = clampContentBrowserGeom(o.top, 8, maxT) + 'px';
+        p.style.width = w + 'px';
+        p.style.height = h + 'px';
+        return true;
+    }
+
+    function observeContentBrowserFloatResize() {
+        if (!refs.contentBrowserFloatPanel || typeof ResizeObserver === 'undefined') return;
+        if (contentBrowserFloatRo) contentBrowserFloatRo.disconnect();
+        contentBrowserFloatRo = new ResizeObserver(function () {
+            schedulePersistContentBrowserFloatGeometry();
+            if (contentBrowserMiniApi && typeof contentBrowserMiniApi.resize === 'function') {
+                window.requestAnimationFrame(function () {
+                    contentBrowserMiniApi.resize();
+                });
+            }
+        });
+        contentBrowserFloatRo.observe(refs.contentBrowserFloatPanel);
+    }
+
+    function toggleContentBrowserFloat(optOpen) {
+        var p = refs.contentBrowserFloatPanel;
+        if (!p || activeWorkbench !== 'level') return;
+        var open = typeof optOpen === 'boolean' ? optOpen : !isContentBrowserFloatOpen();
+        p.classList.toggle('view-hidden', !open);
+        p.setAttribute('aria-hidden', open ? 'false' : 'true');
+        if (refs.btnOpenContentBrowserFloat)
+            refs.btnOpenContentBrowserFloat.setAttribute('aria-pressed', open ? 'true' : 'false');
+        if (!open) {
+            schedulePersistContentBrowserFloatGeometry();
+            return;
+        }
+        applyContentBrowserFloatGeometryFromStorage();
+        observeContentBrowserFloatResize();
+        window.requestAnimationFrame(function () {
+            renderContentBrowser();
+            if (contentBrowserMiniApi && typeof contentBrowserMiniApi.resize === 'function') contentBrowserMiniApi.resize();
+        });
+    }
+
+    function wireContentBrowserFloating() {
+        if (refs.btnOpenContentBrowserFloat) {
+            refs.btnOpenContentBrowserFloat.addEventListener('click', function () {
+                toggleContentBrowserFloat();
+            });
+        }
+        if (refs.contentBrowserFloatClose) {
+            refs.contentBrowserFloatClose.addEventListener('click', function () {
+                toggleContentBrowserFloat(false);
+            });
+        }
+        var panel = refs.contentBrowserFloatPanel;
+        var handle = refs.contentBrowserFloatDragHandle;
+        if (!panel || !handle) return;
+        var drag = false;
+        var sx = 0;
+        var sy = 0;
+        var sl = 0;
+        var st = 0;
+        handle.addEventListener(
+            'pointerdown',
+            function (ev) {
+                if (ev.button !== 0) return;
+                if (ev.target.closest && ev.target.closest('button')) return;
+                drag = true;
+                handle.setPointerCapture(ev.pointerId);
+                var r = panel.getBoundingClientRect();
+                sx = ev.clientX;
+                sy = ev.clientY;
+                sl = r.left;
+                st = r.top;
+                panel.style.left = sl + 'px';
+                panel.style.top = st + 'px';
+                panel.style.right = 'auto';
+            },
+            { passive: true }
+        );
+        handle.addEventListener(
+            'pointermove',
+            function (ev) {
+                if (!drag) return;
+                var nx = sl + (ev.clientX - sx);
+                var ny = st + (ev.clientY - sy);
+                var maxL = Math.max(8, window.innerWidth - panel.offsetWidth - 8);
+                var maxT = Math.max(8, window.innerHeight - panel.offsetHeight - 72);
+                panel.style.left = Math.min(Math.max(8, nx), maxL) + 'px';
+                panel.style.top = Math.min(Math.max(8, ny), maxT) + 'px';
+            },
+            { passive: true }
+        );
+        function endDrag(ev) {
+            if (!drag) return;
+            drag = false;
+            try {
+                handle.releasePointerCapture(ev.pointerId);
+            } catch (_e) {}
+            schedulePersistContentBrowserFloatGeometry();
+        }
+        handle.addEventListener('pointerup', endDrag);
+        handle.addEventListener('pointercancel', endDrag);
+    }
+
     function renderContentBrowser() {
         var list = refs.contentBrowserList;
         if (!list || !state) return;
@@ -2282,7 +2984,7 @@
         if (!assets.length) {
             selectedContentBrowserAssetId = '';
             list.innerHTML =
-                '<div class="empty-state">暂无模型。将 .glb/.gltf 放进项目 <code>public/GameModels/</code> 或使用右侧「上传模型」，然后点「刷新」。</div>';
+                '<div class="empty-state">暂无模型。将 .glb/.gltf 放进项目 <code>public/GameModels/</code> 或使用右侧「上传模型」，在「内容浏览器」窗口中点「刷新」。</div>';
             showContentBrowserMiniPreview('');
             return;
         }
@@ -2315,13 +3017,30 @@
         list.querySelectorAll('[data-asset-chip]').forEach(function (chip) {
             chip.addEventListener('dragstart', function (event) {
                 var id = chip.getAttribute('data-asset-chip');
-                var payloadJson = JSON.stringify({ kind: 'catalogModel', assetId: id, id: id });
+                var asset = assets.find(function (a) {
+                    return a.id === id;
+                });
+                var name = asset ? asset.name || id : id || '';
+                var modelPath = asset ? asset.path || asset.publicUrl || '' : '';
+                var payloadJson = JSON.stringify({
+                    kind: 'catalogModel',
+                    assetId: id,
+                    id: id,
+                    name: name,
+                    modelPath: modelPath
+                });
+                if (typeof window !== 'undefined') {
+                    window.__egCatalogDragMeta = { assetId: id, name: name, modelPath: modelPath };
+                }
                 if (event.dataTransfer) {
                     event.dataTransfer.setData('application/json', payloadJson);
                     /* 部分环境与浏览器对自定义 MIME 的 getData 不稳定，mirror 一份到 text/plain 供 Inspector 接住 */
                     event.dataTransfer.setData('text/plain', payloadJson);
                     event.dataTransfer.effectAllowed = 'copy';
                 }
+            });
+            chip.addEventListener('dragend', function () {
+                if (typeof window !== 'undefined') window.__egCatalogDragMeta = null;
             });
             chip.addEventListener('click', function (event) {
                 if (event.target && event.target.closest && event.target.closest('a')) return;
@@ -2356,7 +3075,16 @@
             }
             contentBrowserMiniApi = null;
             host.innerHTML =
-                '<div class="empty-state content-browser-mini-empty">点击下方卡片或拖拽到场景；支持 .glb / .gltf / .obj 目录扫描。</div>';
+                '<div class="empty-state content-browser-mini-empty">在「内容浏览器」窗口中选择模型卡片，或拖拽到关卡预览场景。</div>';
+            return;
+        }
+        if (!isContentBrowserFloatOpen()) {
+            if (contentBrowserMiniApi && typeof contentBrowserMiniApi.dispose === 'function') {
+                contentBrowserMiniApi.dispose();
+            }
+            contentBrowserMiniApi = null;
+            host.innerHTML =
+                '<div class="empty-state content-browser-mini-empty">按工具条「内容浏览器」或 Ctrl+空格 打开窗口后查看三维预览。</div>';
             return;
         }
         import('./content-browser-model-preview.js')
@@ -2560,17 +3288,29 @@
         bindMarkerDrag();
     }
 
+    function boardCellMatchesSelection(level, col, row) {
+        if (!selectedObject) return false;
+        var k = selectedObject.kind;
+        if (k === 'obstacleCell' || k === 'pathCell' || k === 'buildSlotCell' || k === 'safeZoneCell')
+            return selectedObject.col === col && selectedObject.row === row;
+        var obj = findSelectedObject(level);
+        if (obj && obj.item != null && Number(obj.item.col) === col && Number(obj.item.row) === row) return true;
+        return false;
+    }
+
     function renderCell(level, col, row, defensePathKeys) {
         var classes = ['map-cell'];
         var exploreLayout = ensureExplorationLayout(level.map);
         if (activeEditorMode === 'explore') {
             if (hasCell(exploreLayout.path, col, row)) classes.push('path');
             if (hasCell(exploreLayout.obstacles, col, row)) classes.push('obstacle');
+            if (Array.isArray(exploreLayout.safeZones) && hasCell(exploreLayout.safeZones, col, row)) classes.push('safe-zone');
         } else {
             if (hasCell(level.map.obstacles, col, row)) classes.push('obstacle');
             else if (defensePathKeys && defensePathKeys.has(String(col) + ',' + String(row))) classes.push('path');
             if (hasCell(level.map.buildSlots, col, row)) classes.push('build-slot');
         }
+        if (boardCellMatchesSelection(level, col, row)) classes.push('map-cell--lcb-selected');
         var markers = [];
         if (activeEditorMode === 'explore') {
             if (exploreLayout.startPoint && exploreLayout.startPoint.col === col && exploreLayout.startPoint.row === row) {
@@ -2629,6 +3369,10 @@
             if (activeTool === 'spawn') setExploreStartPoint(col, row);
             if (activeTool === 'objective') setExploreExitPoint(col, row);
             if (activeTool === 'buildSlot') addExplorePoint(col, row);
+            if (activeTool === 'safeZone') {
+                if (!Array.isArray(exploreLayout.safeZones)) exploreLayout.safeZones = [];
+                toggleCell(exploreLayout.safeZones, col, row);
+            }
         } else {
             if (activeTool === 'road') toggleCell(level.map.roads, col, row);
             if (activeTool === 'obstacle') toggleCell(level.map.obstacles, col, row);
@@ -2780,6 +3524,7 @@
         if (activeEditorMode === 'explore') {
             removeCell(layout.path, col, row);
             removeCell(layout.obstacles, col, row);
+            if (Array.isArray(layout.safeZones)) removeCell(layout.safeZones, col, row);
             if (layout.startPoint && layout.startPoint.col === col && layout.startPoint.row === row) layout.startPoint = null;
             if (layout.exitPoint && layout.exitPoint.col === col && layout.exitPoint.row === row) layout.exitPoint = null;
         } else {
@@ -2953,6 +3698,19 @@
 
     function renderSelectionInspector() {
         var level = getLevel();
+        if (selectedObject && LCB_CELL_KIND_LABEL[selectedObject.kind]) {
+            refs.selectionInspector.className = 'selection-inspector';
+            var label = LCB_CELL_KIND_LABEL[selectedObject.kind] || selectedObject.kind;
+            refs.selectionInspector.innerHTML =
+                '<p class="section-hint">已选「' +
+                escapeHtml(label) +
+                '」棋盘格 (' +
+                selectedObject.col +
+                ',' +
+                selectedObject.row +
+                '）。按 Delete 键从关卡移除。</p>';
+            return;
+        }
         var target = findSelectedObject(level);
         if (!target) {
             refs.selectionInspector.className = 'selection-inspector empty-state';
@@ -3017,7 +3775,13 @@
         var target = findSelectedObject(getLevel());
         if (!target) return;
         var path = input.getAttribute('data-inspect-field');
-        var next = input.type === 'number' ? Number(input.value) : input.value;
+        var next =
+            input.type === 'number'
+                ? input.value === '' || input.value === '-' || input.value === '.' || input.value === '-.'
+                    ? NaN
+                    : Number(input.value)
+                : input.value;
+        if (input.type === 'number' && !Number.isFinite(next)) return;
         updatePath(target.item, path, next);
         if (path === 'col' || path === 'row') {
             target.item[path] = Math.max(0, Math.floor(Number(next) || 0));
@@ -3324,30 +4088,287 @@
         syncPreviewIfOpen();
     }
 
+    function closeCreateLevelModal() {
+        if (!refs.createLevelModal) return;
+        refs.createLevelModal.classList.add('view-hidden');
+        refs.createLevelModal.setAttribute('aria-hidden', 'true');
+    }
+
+    function resetCreateLevelModal() {
+        refs.newLevelName.value = '';
+        refs.newLevelRegionSearch.value = '';
+        delete refs.newLevelRegionSearch.dataset.code;
+        delete refs.newLevelRegionSearch.dataset.kind;
+        refs.newLevelPlaceSearch.value = '';
+        delete refs.newLevelPlaceSearch.dataset.name;
+        refs.newLevelPlaceDropdown.classList.add('view-hidden');
+        refs.newLevelPlaceDropdown.innerHTML = '';
+        refs.selectedPlacePreview.classList.add('view-hidden');
+        refs.selectedPlaceName.textContent = '';
+        refs.selectedPlaceCoords.textContent = '';
+        refs.newLevelLat.value = '';
+        refs.newLevelLon.value = '';
+        refs.newLevelRegionDropdown.classList.add('view-hidden');
+        refs.newLevelRegionDropdown.innerHTML = '';
+    }
+
     function createManualLevel() {
+        if (!refs.createLevelModal) return;
+        resetCreateLevelModal();
+        refs.createLevelModal.classList.remove('view-hidden');
+        refs.createLevelModal.setAttribute('aria-hidden', 'false');
+        setTimeout(function () { refs.newLevelName.focus(); }, 0);
+    }
+
+    function normalizePlaceSearchResult(item) {
+        var lon = Number(item && item.lon);
+        var lat = Number(item && item.lat);
+        if (!Number.isFinite(lon) || !Number.isFinite(lat)) return null;
+        return {
+            name: String(item.display_name || item.name || '未命名位置'),
+            longitude: lon.toFixed(6),
+            latitude: lat.toFixed(6),
+            type: String(item.type || item.category || ''),
+            importance: Number(item.importance) || 0
+        };
+    }
+
+    function setSelectedCreateLevelPlace(place, options) {
+        if (!place) return;
+        var lat = String(place.latitude || '').trim();
+        var lon = String(place.longitude || '').trim();
+        var name = String(place.name || '').trim() || '未命名位置';
+        refs.newLevelPlaceSearch.value = name;
+        refs.newLevelPlaceSearch.dataset.name = name;
+        refs.newLevelLat.value = lat;
+        refs.newLevelLon.value = lon;
+        refs.selectedPlaceName.textContent = name;
+        refs.selectedPlaceCoords.textContent = '经度: ' + lon + ', 纬度: ' + lat;
+        refs.selectedPlacePreview.classList.remove('view-hidden');
+        if (!options || !options.keepDropdown) {
+            refs.newLevelPlaceDropdown.classList.add('view-hidden');
+        }
+    }
+
+    function renderPlaceSearchResults(results) {
+        var selectedLat = refs.newLevelLat.value;
+        var selectedLon = refs.newLevelLon.value;
+        refs.newLevelPlaceDropdown.innerHTML = results.map(function (place, index) {
+            var selected = place.latitude === selectedLat && place.longitude === selectedLon;
+            var typeLabel = place.type ? ' · ' + escapeHtml(place.type) : '';
+            return [
+                '<button type="button" class="dropdown-item place-result-item' + (selected ? ' selected' : '') + '"',
+                ' data-lat="' + escapeAttr(place.latitude) + '"',
+                ' data-lon="' + escapeAttr(place.longitude) + '"',
+                ' data-name="' + escapeAttr(place.name) + '"',
+                '>',
+                '<strong>' + escapeHtml(index === 0 ? place.name + '（最佳匹配）' : place.name) + '</strong>',
+                '<span>经度 ' + escapeHtml(place.longitude) + ' · 纬度 ' + escapeHtml(place.latitude) + typeLabel + '</span>',
+                '</button>'
+            ].join('');
+        }).join('');
+        refs.newLevelPlaceDropdown.classList.toggle('view-hidden', results.length === 0);
+    }
+
+    async function searchCreateLevelPlace() {
+        var q = refs.newLevelPlaceSearch.value.trim();
+        if (!q) {
+            setStatus('请输入要搜索的地点', 'error');
+            refs.newLevelPlaceSearch.focus();
+            return;
+        }
+        setStatus('正在搜索地点：' + q + '...', 'idle');
+        refs.btnSearchPlace.disabled = true;
+        refs.newLevelPlaceDropdown.innerHTML = '<div class="dropdown-item dropdown-item-muted">搜索中...</div>';
+        refs.newLevelPlaceDropdown.classList.remove('view-hidden');
+        try {
+            var url = 'https://nominatim.openstreetmap.org/search?format=json&q=' +
+                encodeURIComponent(q) +
+                '&limit=8&accept-language=zh-CN&addressdetails=1';
+            var res = await fetch(url);
+            if (!res.ok) throw new Error('网络请求失败');
+            var data = await res.json();
+            var results = (Array.isArray(data) ? data : [])
+                .map(normalizePlaceSearchResult)
+                .filter(Boolean)
+                .sort(function (a, b) { return b.importance - a.importance; });
+            if (!results.length) {
+                refs.newLevelPlaceDropdown.innerHTML = '<div class="dropdown-item dropdown-item-muted">未找到相关地点</div>';
+                refs.selectedPlacePreview.classList.add('view-hidden');
+                setStatus('未找到相关地点', 'error');
+                return;
+            }
+            setSelectedCreateLevelPlace(results[0], { keepDropdown: true });
+            renderPlaceSearchResults(results);
+            setStatus('已自动填入最匹配地点的经纬度，可在列表中切换', 'success');
+        } catch (err) {
+            refs.newLevelPlaceDropdown.innerHTML = '<div class="dropdown-item dropdown-item-muted">搜索失败，请稍后重试</div>';
+            setStatus('地点搜索失败: ' + err.message, 'error');
+        } finally {
+            refs.btnSearchPlace.disabled = false;
+        }
+    }
+
+    function useCurrentLocationForCreateLevel() {
+        if (!navigator.geolocation) {
+            setStatus('当前浏览器不支持地理定位', 'error');
+            return;
+        }
+        refs.btnUseCurrentLocation.disabled = true;
+        setStatus('正在获取当前位置...', 'idle');
+        navigator.geolocation.getCurrentPosition(async function (position) {
+            var lon = Number(position.coords.longitude).toFixed(6);
+            var lat = Number(position.coords.latitude).toFixed(6);
+            var name = '当前位置';
+            try {
+                var response = await fetch('https://nominatim.openstreetmap.org/reverse?format=json&lon=' + encodeURIComponent(lon) + '&lat=' + encodeURIComponent(lat) + '&accept-language=zh-CN');
+                if (response.ok) {
+                    var data = await response.json();
+                    name = data.display_name || name;
+                }
+            } catch (error) {}
+            setSelectedCreateLevelPlace({ name: name, longitude: lon, latitude: lat });
+            refs.newLevelPlaceDropdown.classList.add('view-hidden');
+            refs.btnUseCurrentLocation.disabled = false;
+            setStatus('已填入当前位置', 'success');
+        }, function (error) {
+            refs.btnUseCurrentLocation.disabled = false;
+            setStatus('获取当前位置失败: ' + error.message, 'error');
+        }, { enableHighAccuracy: true, timeout: 10000 });
+    }
+
+    function confirmCreateLevel() {
+        var name = refs.newLevelName.value.trim();
+        if (!name) {
+            setStatus('请输入关卡名称', 'error');
+            return;
+        }
+        var regionName = refs.newLevelRegionSearch.value.trim() || '自定义国家';
+        var regionKind = refs.newLevelRegionSearch.dataset.kind || 'country';
+        var regionCode = refs.newLevelRegionSearch.dataset.code || 'CUSTOM';
+        
+        var lat = Number(refs.newLevelLat.value);
+        var lon = Number(refs.newLevelLon.value);
+        var hasGeo = Number.isFinite(lat) && Number.isFinite(lon) && refs.newLevelLat.value !== '' && refs.newLevelLon.value !== '';
+        
         var id = uniqueLevelId('custom-level');
         var level = createDraftLevel({
             id: id,
-            name: '自定义关卡',
-            countryCode: 'CUSTOM',
-            countryName: '自定义国家',
-            cityCode: '',
-            cityName: '自定义城市',
-            regionLabel: '自定义国家 · 自定义城市',
+            name: name,
+            countryCode: regionKind === 'country' ? regionCode : 'CN',
+            countryName: regionKind === 'country' ? regionName : '中国',
+            cityCode: regionKind === 'city' ? regionCode : '',
+            cityName: regionKind === 'city' ? regionName : (regionKind === 'country' ? '' : '自定义城市'),
+            regionLabel: regionName,
             source: 'manual'
         });
+        
+        if (hasGeo) {
+            level.map.geo = {
+                enabled: true,
+                provider: 'cesium-ion',
+                assetId: DEFAULT_CESIUM_ION_3D_TILES_ASSET_ID,
+                center: { lat: lat, lon: lon, heightMeters: 45 },
+                extentMeters: 1400,
+                rotationDeg: 0,
+                boardHeightMeters: 32,
+                scale: 1
+            };
+            level.extensions = level.extensions || {};
+            level.extensions.manualWorldGeoPin = true;
+            level.extensions.placeSearchName = refs.newLevelPlaceSearch.dataset.name || refs.newLevelPlaceSearch.value.trim() || '';
+        }
+        
         state.levels.unshift(level);
         selectedLevelId = level.id;
-        markDirty('已创建自定义关卡');
+        markDirty('已创建新关卡：' + name);
         renderAll();
+        
+        closeCreateLevelModal();
+        setStatus('已创建新关卡，已自动选中', 'success');
     }
 
-    function syncPreviewIfOpen() {
-        if (viewportViewMode !== 'preview' || !previewApi || typeof previewApi.refresh !== 'function') return;
-        previewApi.refresh();
-        if (selectedObject && selectedObject.kind === 'actor' && typeof previewApi.setSelectedActor === 'function') {
-            previewApi.setSelectedActor(selectedObject.id);
+    function bindCreateLevelModalEvents() {
+        if (!refs.btnCancelCreateLevel) return;
+        refs.btnCancelCreateLevel.addEventListener('click', closeCreateLevelModal);
+        refs.newLevelRegionSearch.addEventListener('input', function() {
+            var q = refs.newLevelRegionSearch.value.trim().toLowerCase();
+            if (!q) {
+                refs.newLevelRegionDropdown.classList.add('view-hidden');
+                return;
+            }
+            var results = [];
+            regionSources.countries.forEach(function(c) {
+                if (c.name.toLowerCase().indexOf(q) !== -1 || (c.code && c.code.toLowerCase().indexOf(q) !== -1)) {
+                    results.push({ name: c.name, code: c.code, kind: 'country' });
+                }
+            });
+            regionSources.chinaCities.forEach(function(c) {
+                if (c.name.toLowerCase().indexOf(q) !== -1 || (c.code && c.code.toLowerCase().indexOf(q) !== -1)) {
+                    results.push({ name: c.name, code: c.code, kind: 'city', parent: '中国' });
+                }
+            });
+            if (results.length > 0) {
+                refs.newLevelRegionDropdown.innerHTML = results.slice(0, 10).map(function(r) {
+                    var label = r.kind === 'country' ? r.name : (r.parent + ' ' + r.name);
+                    return '<div class="dropdown-item" data-name="' + escapeAttr(r.name) + '" data-code="' + escapeAttr(r.code) + '" data-kind="' + escapeAttr(r.kind) + '">' + escapeHtml(label) + '</div>';
+                }).join('');
+                refs.newLevelRegionDropdown.classList.remove('view-hidden');
+            } else {
+                refs.newLevelRegionDropdown.classList.add('view-hidden');
+            }
+        });
+        refs.newLevelRegionDropdown.addEventListener('click', function(e) {
+            var item = e.target.closest('.dropdown-item');
+            if (item) {
+                refs.newLevelRegionSearch.value = item.getAttribute('data-name');
+                refs.newLevelRegionDropdown.classList.add('view-hidden');
+                refs.newLevelRegionSearch.dataset.code = item.getAttribute('data-code');
+                refs.newLevelRegionSearch.dataset.kind = item.getAttribute('data-kind');
+            }
+        });
+        document.addEventListener('click', function(e) {
+            if (refs.newLevelRegionSearch && !refs.newLevelRegionSearch.contains(e.target) && !refs.newLevelRegionDropdown.contains(e.target)) {
+                refs.newLevelRegionDropdown.classList.add('view-hidden');
+            }
+            if (refs.newLevelPlaceSearch && !refs.newLevelPlaceSearch.contains(e.target) && !refs.newLevelPlaceDropdown.contains(e.target)) {
+                refs.newLevelPlaceDropdown.classList.add('view-hidden');
+            }
+        });
+        
+        refs.newLevelPlaceSearch.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                searchCreateLevelPlace();
+            }
+        });
+        
+        refs.btnSearchPlace.addEventListener('click', searchCreateLevelPlace);
+        if (refs.btnUseCurrentLocation) refs.btnUseCurrentLocation.addEventListener('click', useCurrentLocationForCreateLevel);
+        
+        refs.newLevelPlaceDropdown.addEventListener('click', function(e) {
+            var item = e.target.closest('.dropdown-item');
+            if (item && item.getAttribute('data-lat')) {
+                setSelectedCreateLevelPlace({
+                    latitude: item.getAttribute('data-lat'),
+                    longitude: item.getAttribute('data-lon'),
+                    name: item.getAttribute('data-name')
+                });
+                setStatus('已选择位置: ' + item.getAttribute('data-name'), 'success');
+            }
+        });
+        if (refs.btnCancelCreateLevelAlt) {
+            refs.btnCancelCreateLevelAlt.addEventListener('click', closeCreateLevelModal);
         }
+        refs.btnConfirmCreateLevel.addEventListener('click', confirmCreateLevel);
+    }
+
+    function syncPreviewIfOpen(viewOpts) {
+        viewOpts = viewOpts || {};
+        var preserve = viewOpts.preserveView !== false;
+        if (viewportViewMode !== 'preview' || !previewApi || typeof previewApi.refresh !== 'function') return;
+        var sid = selectedObject && selectedObject.kind === 'actor' ? selectedObject.id : null;
+        previewApi.refresh({ preserveView: preserve, selectActorId: sid });
     }
 
     function selectLevel(levelId) {
@@ -3356,7 +4377,7 @@
         selectedGameplayEntryId = '';
         selectedGameplayAssetId = '';
         renderAll();
-        syncPreviewIfOpen();
+        syncPreviewIfOpen({ preserveView: false });
     }
 
     function selectObject(kind, id) {
@@ -3366,6 +4387,16 @@
         if (viewportViewMode === 'preview' && previewApi && typeof previewApi.setSelectedActor === 'function') {
             if (kind === 'actor') previewApi.setSelectedActor(id);
             else previewApi.setSelectedActor(null);
+        }
+        renderPreviewSceneOutline();
+    }
+
+    function selectGridCellObject(kind, col, row) {
+        selectedObject = { kind: kind, col: col, row: row };
+        renderSelectionInspector();
+        renderMap();
+        if (viewportViewMode === 'preview' && previewApi && typeof previewApi.setSelectedActor === 'function') {
+            previewApi.setSelectedActor(null);
         }
         renderPreviewSceneOutline();
     }
@@ -3383,6 +4414,22 @@
         if (selectedObject.kind === 'objective') {
             if (activeEditorMode === 'explore' && layout.exitPoint && layout.exitPoint.id === selectedObject.id) layout.exitPoint = null;
             else level.map.objectivePoint = null;
+        }
+        if (selectedObject.kind === 'obstacleCell') {
+            if (activeEditorMode === 'explore') removeCell(layout.obstacles, selectedObject.col, selectedObject.row);
+            else removeCell(level.map.obstacles, selectedObject.col, selectedObject.row);
+        }
+        if (selectedObject.kind === 'pathCell') {
+            if (activeEditorMode === 'explore') removeCell(layout.path, selectedObject.col, selectedObject.row);
+            else
+                level.map.enemyPaths.forEach(function (p) {
+                    removeCell(p.cells, selectedObject.col, selectedObject.row);
+                });
+        }
+        if (selectedObject.kind === 'buildSlotCell') removeCell(level.map.buildSlots, selectedObject.col, selectedObject.row);
+        if (selectedObject.kind === 'safeZoneCell') {
+            if (!Array.isArray(layout.safeZones)) layout.safeZones = [];
+            removeCell(layout.safeZones, selectedObject.col, selectedObject.row);
         }
         selectedObject = null;
         markDirty('已删除选中对象');
@@ -4552,6 +5599,7 @@
             theme: normalizeTheme(source.theme || fallbackMap.theme),
             path: normalizeCells(source.path || []),
             obstacles: normalizeCells(source.obstacles || []),
+            safeZones: normalizeCells(source.safeZones || []),
             startPoint: normalizePoint(source.startPoint) || { id: 'explore-start', name: '探索起点', col: 0, row: Math.floor((fallbackMap.grid.rows || DEFAULT_GRID_ROWS) / 2) },
             exitPoint: normalizePoint(source.exitPoint) || { id: 'explore-exit', name: '探索终点', col: Math.max(0, (fallbackMap.grid.cols || DEFAULT_GRID_COLS) - 4), row: Math.floor((fallbackMap.grid.rows || DEFAULT_GRID_ROWS) / 2) }
         };
@@ -4590,8 +5638,8 @@
                 modelId: String(source.modelId || source.assetId || ''),
                 col: clamp(Number(source.col) || 0, 0, 79),
                 row: clamp(Number(source.row) || 0, 0, 79),
-                rotation: Number(source.rotation) || 0,
-                scale: Number(source.scale) || 1,
+                rotation: Number.isFinite(Number(source.rotation)) ? Number(source.rotation) : 0,
+                scale: Number.isFinite(Number(source.scale)) && Number(source.scale) > 0 ? Number(source.scale) : 1,
                 worldOffsetMeters: {
                     x: Number(wx.x) || 0,
                     y: Number(wx.y) || 0,
@@ -5023,6 +6071,7 @@
         }
         map.explorationLayout.path = Array.isArray(map.explorationLayout.path) ? map.explorationLayout.path : [];
         map.explorationLayout.obstacles = Array.isArray(map.explorationLayout.obstacles) ? map.explorationLayout.obstacles : [];
+        if (!Array.isArray(map.explorationLayout.safeZones)) map.explorationLayout.safeZones = [];
         return map.explorationLayout;
     }
 

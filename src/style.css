@@ -545,6 +545,30 @@ button { color: inherit; font: inherit; }
   background: rgba(245, 235, 225, 0.8);
 }
 
+.stellar-skill-panel .active-skill-meta {
+  margin: 0 0 10px 0;
+  font-size: 13px;
+  line-height: 1.55;
+  font-weight: 650;
+  color: var(--ink);
+  letter-spacing: 0.02em;
+}
+
+.stellar-skill-panel .active-skill-meta kbd {
+  display: inline-block;
+  margin: 0 2px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: 1px solid rgba(15, 23, 42, 0.2);
+  background: rgba(255, 255, 255, 0.75);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.stellar-skill-panel .active-skill-cast-btn:disabled {
+  opacity: 0.82;
+}
+
 /* 数字输入框 */
 .scale-control input,
 .build-scale-label input {
@@ -1105,11 +1129,24 @@ button { color: inherit; font: inherit; }
 }
 .toast-center.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 
-.toast-side {
+.toast-side-stack {
   position: fixed;
   top: 22px;
   right: var(--hud-right-inset);
   z-index: 90;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  width: min(340px, 42vw);
+  pointer-events: none;
+  transition: right 0.28s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+.toast-side-item {
+  width: fit-content;
+  max-width: 100%;
+  margin: 0;
   min-width: 210px;
   border: 1px solid var(--border-ink);
   border-radius: 14px;
@@ -1119,14 +1156,417 @@ button { color: inherit; font: inherit; }
   text-align: right;
   font-size: 13px;
   font-weight: 700;
+  line-height: 1.45;
   box-shadow: 0 8px 24px var(--shadow-ink);
   backdrop-filter: blur(8px);
   opacity: 0;
-  transform: translateX(16px);
-  transition: opacity 180ms ease, transform 180ms ease, right 0.28s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  transform: translateX(14px);
+  transition: opacity 0.22s ease, transform 0.28s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+.toast-side-item.toast-side-item--in {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+/* ===== 探索模式 HUD（底部血条/等级/技能槽）===== */
+.explore-hud {
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 22px 12px;
+  background: linear-gradient(180deg, transparent 0%, rgba(0, 0, 0, 0.78) 100%);
+  backdrop-filter: blur(8px);
+  border-radius: 14px 14px 0 0;
+  z-index: 100;
+  pointer-events: none;
+  user-select: none;
+}
+.explore-hud[aria-hidden="true"] { display: none; }
+
+.explore-hud-level {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+}
+.explore-level-badge {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #ff6b9d, #c850c0);
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 900;
+  font-size: 15px;
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 2px 8px rgba(200, 80, 192, 0.5);
+}
+.explore-xp-bar-wrap {
+  width: 44px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.explore-xp-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #c850c0, #ff6b9d);
+  border-radius: 2px;
+  transition: width 0.35s ease;
+}
+
+.explore-hud-hp {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 200px;
+}
+.explore-hp-label {
+  color: #ff6b9d;
+  font-weight: 800;
+  font-size: 12px;
+  letter-spacing: 1.5px;
+  text-shadow: 0 0 6px rgba(255, 107, 157, 0.7);
+}
+.explore-hp-bar-wrap {
+  flex: 1;
+  height: 14px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 7px;
+  overflow: hidden;
+  position: relative;
+  border: 1px solid rgba(255, 100, 100, 0.3);
+}
+.explore-hp-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #ff3366, #ff6b9d);
+  border-radius: 7px;
+  transition: width 0.2s ease;
+}
+.explore-hp-text {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+}
+
+.explore-hud-skills {
+  display: flex;
+  gap: 8px;
+}
+.explore-skill {
+  position: relative;
+  width: 46px;
+  height: 46px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1.5px solid rgba(255, 255, 255, 0.22);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+.explore-skill-icon {
+  font-size: 18px;
+  line-height: 1;
+  z-index: 2;
+  position: relative;
+}
+.explore-skill-key {
+  font-size: 8px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.55);
+  letter-spacing: 0.5px;
+  z-index: 2;
+  position: relative;
+}
+.explore-skill-cd {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: rgba(0, 0, 0, 0.62);
+  transition: height 0.1s linear;
+  z-index: 1;
+}
+
+/* ===== 背包面板 ===== */
+.inventory-panel {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(10px);
+  z-index: 200;
+  animation: fadeIn 0.18s ease;
+}
+.inventory-panel[aria-hidden="true"] { display: none; }
+
+.inventory-card {
+  background: var(--paper, #1a1a2e);
+  border: 1.5px solid rgba(255, 107, 157, 0.35);
+  border-radius: 18px;
+  padding: 24px;
+  min-width: 420px;
+  max-width: 620px;
+  max-height: 72vh;
+  overflow-y: auto;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 107, 157, 0.12);
+}
+.inventory-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+.inventory-header h2 {
+  margin: 0;
+  font-size: 20px;
+  color: #ff6b9d;
+  letter-spacing: 2px;
+}
+.inventory-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.inventory-item {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  padding: 10px 6px 8px;
+  text-align: center;
+  cursor: default;
+  transition: background 0.15s, border-color 0.15s;
+  position: relative;
+  overflow: hidden;
+}
+.inventory-item:hover {
+  background: rgba(255, 107, 157, 0.14);
+  border-color: rgba(255, 107, 157, 0.5);
+}
+.inventory-item-icon { font-size: 22px; line-height: 1; }
+.inventory-item-name {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.7);
+  margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.inventory-item-qty {
+  font-size: 11px;
+  font-weight: 800;
+  color: #ffec6e;
+  margin-top: 2px;
+}
+.inventory-item-use {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: rgba(255, 107, 157, 0.8);
+  color: #fff;
+  border: none;
+  border-radius: 0 0 6px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 3px 0;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
   pointer-events: none;
 }
-.toast-side.show { opacity: 1; transform: translateX(0); }
+.inventory-item:hover .inventory-item-use {
+  opacity: 1;
+  pointer-events: all;
+}
+.inventory-empty {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 36px 16px;
+  color: rgba(255, 255, 255, 0.38);
+  font-size: 14px;
+}
+.inventory-hint {
+  text-align: center;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.38);
+  margin: 0;
+}
+
+/* ===== 探索模式隐藏防御UI ===== */
+.game-root--explore #buildToolbar,
+.game-root--explore #rightTerminalPanel,
+.game-root--explore #rightTerminalShowBtn,
+.game-root--explore #gachaOpenButton {
+  display: none !important;
+}
+
+/* ===== 游戏失败面板 ===== */
+.game-over-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.5s ease;
+}
+.game-over-overlay[aria-hidden="false"] {
+  opacity: 1;
+  pointer-events: all;
+}
+.game-over-vignette {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center, rgba(140, 0, 0, 0.0) 25%, rgba(160, 0, 0, 0.7) 100%);
+  animation: game-over-pulse 2s ease-in-out infinite;
+}
+@keyframes game-over-pulse {
+  0%, 100% { opacity: 0.65; }
+  50% { opacity: 1; }
+}
+.game-over-card {
+  position: relative;
+  background: rgba(8, 4, 12, 0.95);
+  border: 2px solid #bb2233;
+  border-radius: 18px;
+  padding: 44px 64px;
+  text-align: center;
+  box-shadow: 0 0 80px rgba(200, 0, 40, 0.55);
+}
+.game-over-title {
+  font-size: 56px;
+  font-weight: 900;
+  color: #ff2244;
+  letter-spacing: 6px;
+  margin: 0 0 14px;
+  text-shadow: 0 0 24px rgba(255, 34, 68, 0.9);
+}
+.game-over-reason {
+  font-size: 17px;
+  color: #bbb;
+  margin: 0 0 32px;
+}
+.game-over-actions {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+}
+.game-over-actions button {
+  padding: 11px 32px;
+  border-radius: 9px;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  border: none;
+  transition: transform 0.1s;
+}
+.game-over-actions button:hover { transform: translateY(-2px); }
+.game-over-actions .premium {
+  background: linear-gradient(135deg, #ff6b9d, #c44dff);
+  color: #fff;
+}
+.game-over-actions button:not(.premium) {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ccc;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+/* ===== 安全区商店 ===== */
+.safe-zone-shop {
+  position: fixed;
+  right: 24px;
+  bottom: 120px;
+  z-index: 200;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(16px);
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+.safe-zone-shop[aria-hidden="false"] {
+  opacity: 1;
+  pointer-events: all;
+  transform: translateY(0);
+}
+.shop-card {
+  background: rgba(6, 16, 10, 0.95);
+  border: 1px solid rgba(34, 200, 100, 0.45);
+  border-radius: 14px;
+  padding: 14px 18px;
+  min-width: 288px;
+  box-shadow: 0 4px 28px rgba(0, 0, 0, 0.55);
+}
+.shop-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.shop-header h3 {
+  margin: 0;
+  font-size: 14px;
+  color: #2eed88;
+  font-weight: 700;
+}
+.shop-hint {
+  font-size: 11px;
+  color: #666;
+  margin: 0 0 10px;
+}
+.shop-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+.shop-item:last-child { border-bottom: none; }
+.shop-item-icon { font-size: 20px; flex-shrink: 0; }
+.shop-item-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.shop-item-name { font-size: 13px; font-weight: 700; color: #eee; }
+.shop-item-desc { font-size: 11px; color: #888; }
+.shop-item-buy {
+  background: rgba(34, 200, 100, 0.18);
+  border: 1px solid rgba(34, 200, 100, 0.38);
+  border-radius: 6px;
+  color: #2eed88;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 5px 13px;
+  cursor: pointer;
+  transition: background 0.15s;
+  white-space: nowrap;
+}
+.shop-item-buy:hover { background: rgba(34, 200, 100, 0.32); }
 
 /* ===== 暂停面板 ===== */
 .pause-overlay {
@@ -1353,9 +1793,10 @@ html[data-theme="dark"] .toast-center {
   border-color: rgba(224, 88, 88, 0.45);
 }
 
-html[data-theme="dark"] .toast-side {
+html[data-theme="dark"] .toast-side-item {
   background: rgba(34, 40, 48, 0.94);
   color: var(--ink-light);
+  border-color: rgba(226, 232, 240, 0.12);
 }
 
 html[data-theme="dark"] .gacha-feature,
@@ -1408,6 +1849,16 @@ html[data-theme="dark"] .stellar-skill-panel {
 
 html[data-theme="dark"] .stellar-skill-panel.active {
   background: rgba(48, 40, 38, 0.85);
+}
+
+html[data-theme="dark"] .stellar-skill-panel .active-skill-meta {
+  color: #f8fafc;
+}
+
+html[data-theme="dark"] .stellar-skill-panel .active-skill-meta kbd {
+  border-color: rgba(248, 250, 252, 0.35);
+  background: rgba(15, 23, 42, 0.55);
+  color: #f8fafc;
 }
 
 html[data-theme="dark"] .animation-editor {

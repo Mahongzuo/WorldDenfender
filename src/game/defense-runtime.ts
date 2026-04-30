@@ -59,13 +59,13 @@ export function createEnemyForWave(options: {
 
   const healthBar = new THREE.Mesh(
     new THREE.BoxGeometry(1.18 * scale, 0.12, 0.1),
-    new THREE.MeshBasicMaterial({ color: 0x34ff6a, transparent: true, opacity: 0.98, depthTest: false }),
+    new THREE.MeshBasicMaterial({ color: 0x34ff6a, transparent: true, opacity: 0.98, depthTest: false, depthWrite: false }),
   );
   healthBar.renderOrder = 30;
   healthBar.userData.isEnemyHealthBar = true;
   const healthBarBack = new THREE.Mesh(
     new THREE.BoxGeometry(1.32 * scale, 0.18, 0.11),
-    new THREE.MeshBasicMaterial({ color: 0x10131a, transparent: true, opacity: 0.78, depthTest: false }),
+    new THREE.MeshBasicMaterial({ color: 0x10131a, transparent: true, opacity: 0.78, depthTest: false, depthWrite: false }),
   );
   healthBarBack.renderOrder = 29;
   healthBarBack.userData.isEnemyHealthBar = true;

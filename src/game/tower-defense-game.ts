@@ -104,11 +104,14 @@ import type {
   EditorLevelMap,
   Enemy,
   EnemyType,
+  ExploreEnemy,
+  ExploreProjectile,
   GameAssetConfig,
   GameMode,
   GachaFocusBanner,
   GachaPool,
   GridCell,
+  InventoryItem,
   MapDefinition,
   MapTheme,
   ModelTarget,
@@ -185,6 +188,17 @@ export class TowerDefenseGame {
     },
   });
   private readonly keys = new Set<string>();
+  private readonly billboardCamWPos = new THREE.Vector3();
+  private readonly billboardHudWPos = new THREE.Vector3();
+  private readonly billboardZ = new THREE.Vector3();
+  private readonly billboardX = new THREE.Vector3();
+  private readonly billboardY = new THREE.Vector3();
+  private readonly billboardCamUpW = new THREE.Vector3();
+  private readonly billboardBasisM = new THREE.Matrix4();
+  private readonly billboardWorldM = new THREE.Matrix4();
+  private readonly billboardParentInvM = new THREE.Matrix4();
+  private readonly billboardLocalM = new THREE.Matrix4();
+  private readonly billboardCamQuat = new THREE.Quaternion();
 
   private playerMixer?: THREE.AnimationMixer;
   private playerActions: Record<string, THREE.AnimationAction> = {};
@@ -207,6 +221,7 @@ export class TowerDefenseGame {
   private selectedUnitPanel!: HTMLElement;
   private selectedUnitName!: HTMLElement;
   private selectedUnitStats!: HTMLElement;
+  private activeSkillMeta!: HTMLElement;
   private activeSkillButton!: HTMLButtonElement;
   private gachaPanel!: HTMLElement;
   private homeOverlay!: HTMLElement;
@@ -228,6 +243,46 @@ export class TowerDefenseGame {
   private player!: THREE.Group;
   private playfieldVisualScale = 1;
   private playfieldYOffset = 0;
+
+  // Explore HUD and inventory DOM refs (populated via Object.assign from ui-shell)
+  private exploreHud!: HTMLElement;
+  private exploreLevelBadge!: HTMLElement;
+  private exploreXpBar!: HTMLElement;
+  private exploreHpBar!: HTMLElement;
+  private exploreHpText!: HTMLElement;
+  private exploreSkillAttackCd!: HTMLElement;
+  private exploreSkillECd!: HTMLElement;
+  private exploreSkillRCd!: HTMLElement;
+  private inventoryPanel!: HTMLElement;
+  private inventoryGrid!: HTMLElement;
+
+  // Explore combat system
+  private playerHp = 100;
+  private playerMaxHp = 100;
+  private playerLevel = 1;
+  private playerXp = 0;
+  private playerXpToNext = 50;
+  private inventoryItems: InventoryItem[] = [];
+  private inventoryOpen = false;
+  private exploreEnemies: ExploreEnemy[] = [];
+  private readonly exploreEnemyGroup = new THREE.Group();
+  private exploreProjectiles: ExploreProjectile[] = [];
+  private readonly exploreProjectileGroup = new THREE.Group();
+  private attackCooldown = 0;
+  private readonly attackMaxCooldown = 0.42;
+  private skillECooldown = 0;
+  private readonly skillEMaxCooldown = 10;
+  private skillRCooldown = 0;
+  private readonly skillRMaxCooldown = 20;
+  private exploreEnemySpawnTimer = 0;
+  private exploreSafeZoneCells = new Set<string>();
+
+  // Game-over state
+  private gameOverPanel!: HTMLElement;
+  private safeZoneShopPanel!: HTMLElement;
+  private gameOverActive = false;
+  // Safe-zone shop state
+  private inSafeZone = false;
 
   private defenseMapIndex = 0;
   private exploreMapIndex = 0;
@@ -252,7 +307,7 @@ export class TowerDefenseGame {
   private selectedBuilding: Building | null = null;
   private dropTimer = 5;
   private toastTimer = 0;
-  private sideToastTimer = 0;
+  private readonly sideToastLines: { el: HTMLElement; timer: number }[] = [];
   private elapsed = 0;
   private lastFrameTime = performance.now();
   private nextUid = 1;
@@ -365,6 +420,7 @@ export class TowerDefenseGame {
     this.selectedUnitPanel = this.requiredElement("#selectedUnitPanel");
     this.selectedUnitName = this.requiredElement("#selectedUnitName");
     this.selectedUnitStats = this.requiredElement("#selectedUnitStats");
+    this.activeSkillMeta = this.requiredElement("#activeSkillMeta");
     this.activeSkillButton = this.requiredElement<HTMLButtonElement>("#activeSkillButton");
     
     this.activeSkillButton.addEventListener("click", () => this.castActiveSkill());
@@ -386,6 +442,14 @@ export class TowerDefenseGame {
     this.requiredElement("#uiThemeTogglePause").addEventListener("click", onUiThemeClick);
     this.requiredElement("#rightTerminalHideBtn").addEventListener("click", () => this.setTerminalPanelCollapsed(true));
     this.requiredElement("#rightTerminalShowBtn").addEventListener("click", () => this.setTerminalPanelCollapsed(false));
+    this.requiredElement("#inventoryCloseBtn").addEventListener("click", () => this.toggleInventory());
+    this.requiredElement("#gameOverRestartBtn").addEventListener("click", () => this.restartAfterGameOver());
+    this.requiredElement("#gameOverMapBtn").addEventListener("click", () => this.returnToHomeFromGameOver());
+    this.requiredElement("#shopCloseBtn").addEventListener("click", () => this.closeSafeZoneShop());
+    this.requiredElement("#shopItems").addEventListener("click", (e) => {
+      const btn = (e.target as HTMLElement).closest<HTMLButtonElement>(".shop-item-buy");
+      if (btn?.dataset.item) this.buySafeZoneItem(btn.dataset.item);
+    });
     const { toolbar } = uiShell;
     for (const spec of Object.values(BUILD_SPECS)) {
       const card = document.createElement("div");
@@ -1057,6 +1121,12 @@ export class TowerDefenseGame {
     });
     this.geoGroup.name = "geo-backdrop";
     this.scene.add(this.geoGroup);
+    this.exploreEnemyGroup.name = "explore-enemies";
+    this.scene.add(this.exploreEnemyGroup);
+    this.exploreProjectileGroup.name = "explore-projectiles";
+    this.scene.add(this.exploreProjectileGroup);
+    this.exploreEnemyGroup.visible = false;
+    this.exploreProjectileGroup.visible = false;
   }
 
   private bindEvents(): void {
@@ -1086,6 +1156,10 @@ export class TowerDefenseGame {
           return;
         }
         if (event.button === 0) {
+          if (this.mode === "explore") {
+            this.fireBasicAttack();
+            return;
+          }
           if (this.mode === "defense" && this.hoverCell) {
             const clickedBuilding = this.buildings.find((building) => sameCell(building.cell, this.hoverCell!));
             if (clickedBuilding) {
@@ -1166,12 +1240,27 @@ export class TowerDefenseGame {
         ) {
           this.exploreWalkMode = !this.exploreWalkMode;
         }
+        if (pressed && meta?.repeat !== true && this.mode === "explore") {
+          if (code === "KeyB") {
+            // B = open safe zone shop (only when in safe zone)
+            if (this.inSafeZone) {
+              const hidden = this.safeZoneShopPanel.getAttribute("aria-hidden") !== "false";
+              this.safeZoneShopPanel.setAttribute("aria-hidden", String(!hidden));
+            } else {
+              this.showToast("\u8fdb\u5165\u5b89\u5168\u533a\u624d\u80fd\u8d2d\u4e70");
+            }
+          }
+          if (code === "KeyI") this.toggleInventory();
+          if (code === "KeyE") this.castOrbSkill();
+          if (code === "KeyR") this.castRSkill();
+        }
         if (pressed) {
           this.keys.add(code);
         } else {
           this.keys.delete(code);
         }
       },
+      onClearAllKeys: () => this.keys.clear(),
     });
   }
 
@@ -1558,15 +1647,22 @@ export class TowerDefenseGame {
     this.updateUi();
   }
 
-  private loadExploreMap(index: number, resetExploration: boolean): void {
+  private loadExploreMap(
+    index: number,
+    resetExploration: boolean,
+    options?: { skipViewRefresh?: boolean; silent?: boolean },
+  ): void {
     this.exploreMapIndex = index;
     this.exploreMapInitialized = true;
     const map = EXPLORE_MAPS[this.exploreMapIndex];
     const runtimeState = buildRuntimeMapState(map);
     this.explorePathCells = runtimeState.pathCells;
     this.exploreObstacleCells = runtimeState.obstacleCells;
-    this.pathCells = this.explorePathCells;
-    this.obstacleCells = this.exploreObstacleCells;
+    if (!options?.skipViewRefresh) {
+      this.pathCells = this.explorePathCells;
+      this.obstacleCells = this.exploreObstacleCells;
+    }
+    this.exploreSafeZoneCells = new Set((map.safeZones ?? []).map((c) => cellKey(c)));
 
     if (resetExploration) {
       this.exploreWalkMode = false;
@@ -1576,17 +1672,49 @@ export class TowerDefenseGame {
       }
       this.drops = this.drops.filter((item) => item.source !== "explore");
       this.positionPlayerAtStart();
+
+      // Clear explore enemies and projectiles
+      for (const enemy of this.exploreEnemies) {
+        this.exploreEnemyGroup.remove(enemy.mesh);
+      }
+      this.exploreEnemies = [];
+      for (const proj of this.exploreProjectiles) {
+        this.exploreProjectileGroup.remove(proj.mesh);
+      }
+      this.exploreProjectiles = [];
+      this.exploreEnemySpawnTimer = 4;
+      this.playerHp = this.playerMaxHp;
     }
 
-    this.showExploreView();
     if (resetExploration) {
       this.spawnExploreMoneyDrops(5);
     }
-    this.showToast(`\u5df2\u8fdb\u5165\u63a2\u7d22\u5730\u56fe\uff1a${map.name}`);
+
+    if (options?.skipViewRefresh) {
+      return;
+    }
+
+    this.showExploreView();
+    if (!options?.silent) {
+      this.showToast(`\u5df2\u8fdb\u5165\u63a2\u7d22\u5730\u56fe\uff1a${map.name}`);
+    }
     this.updateUi();
   }
 
   private showDefenseView(): void {
+    // Clear stuck keys so the camera/player can't drift after mode switch
+    this.keys.clear();
+    // Purge any in-flight defense effects so they don't ghost at the wrong
+    // scale after applyPlayfieldVisualScale rescales fxGroup
+    this.clearGroup(this.fxGroup);
+    this.effects = [];
+    // Expire all explore skill/projectile rings immediately – they don't tick
+    // when in defense mode and would otherwise accumulate indefinitely
+    for (const proj of this.exploreProjectiles) {
+      this.exploreProjectileGroup.remove(proj.mesh);
+    }
+    this.exploreProjectiles = [];
+
     const map = MAPS[this.defenseMapIndex];
     const hasGeoBackdrop = canUseGeoTiles(map.geo);
     setActiveRuntimeGrid(map);
@@ -1626,10 +1754,23 @@ export class TowerDefenseGame {
     this.enemyGroup.visible = true;
     this.fxGroup.visible = true;
     this.actorGroup.visible = false;
+    this.exploreEnemyGroup.visible = false;
+    this.exploreProjectileGroup.visible = false;
+    this.exploreHud.setAttribute("aria-hidden", "true");
+    this.safeZoneShopPanel.setAttribute("aria-hidden", "true");
+    this.inSafeZone = false;
+    this.gameRootEl.classList.remove("game-root--explore");
+    if (this.inventoryOpen) {
+      this.inventoryOpen = false;
+      this.inventoryPanel.setAttribute("aria-hidden", "true");
+    }
     this.updateDropVisibility();
   }
 
   private showExploreView(): void {
+    // Clear stuck keys so the player can't auto-walk after mode switch
+    this.keys.clear();
+
     if (!this.exploreMapInitialized) {
       this.loadExploreMap(this.exploreMapIndex, true);
       return;
@@ -1653,6 +1794,7 @@ export class TowerDefenseGame {
       currentCity: this.currentCity,
       mode: this.mode,
       useGeoBackdrop: canUseGeoTiles(map.geo),
+      safeZoneCells: this.exploreSafeZoneCells,
     });
     this.geoTilesRuntime.load(map.geo);
     const expActorGen = ++this.mapActorGen;
@@ -1666,6 +1808,13 @@ export class TowerDefenseGame {
     this.enemyGroup.visible = false;
     this.fxGroup.visible = false;
     this.actorGroup.visible = true;
+    this.exploreEnemyGroup.visible = true;
+    this.exploreProjectileGroup.visible = true;
+    this.exploreHud.setAttribute("aria-hidden", "false");
+    this.gameRootEl.classList.add("game-root--explore");
+    // Close gacha panel if it was open
+    this.gachaPanel.classList.remove("show");
+    this.gachaPanel.setAttribute("aria-hidden", "true");
     this.updateDropVisibility();
   }
 
@@ -1677,6 +1826,8 @@ export class TowerDefenseGame {
       group.scale.set(scale, 1, scale);
       group.position.y = yOffset;
     }
+    this.syncBuildingSkillHudScaleCorrection();
+    this.layoutBuildingHuds();
   }
 
   /** 地图组使用 (sx,1,sz) 拉大棋盘会与真实底板对齐，但会令子物体的 Y 被相对“拍扁”；对单位根结点补偿 Y，使占位与 GLTF 等高宽比恢复正常。 */
@@ -1688,6 +1839,27 @@ export class TowerDefenseGame {
       mesh.scale.y *= s;
       mesh.userData.geoSquashCompensatedScale = s;
     }
+  }
+
+  private getEnemyHealthBarHalfWidth(enemy: Enemy): number {
+    enemy.healthBar.geometry.computeBoundingBox();
+    const box = enemy.healthBar.geometry.boundingBox;
+    return box ? Math.max(0.01, (box.max.x - box.min.x) * 0.5) : 0.59;
+  }
+
+  private applyEnemyHealthBarScale(enemy: Enemy): void {
+    const hudScale = this.getBuildingHudScale();
+    const ratio = clamp(enemy.hp / enemy.maxHp, 0, 1);
+    const halfWidth = this.getEnemyHealthBarHalfWidth(enemy);
+    const barRoot = enemy.mesh.children.find((ch) => ch.userData.isEnemyHealthBarRoot);
+    const healthBarBack =
+      barRoot?.children.find((ch) => ch !== enemy.healthBar && ch.userData.isEnemyHealthBar) ??
+      enemy.mesh.children.find((ch) => ch !== enemy.healthBar && ch.userData.isEnemyHealthBar && !ch.userData.isEnemyHealthBarRoot);
+
+    healthBarBack?.scale.set(hudScale, hudScale, 1);
+    enemy.healthBar.scale.set(hudScale * Math.max(0.02, ratio), hudScale, 1);
+    enemy.healthBar.position.x = -(1 - ratio) * halfWidth * hudScale;
+    enemy.healthBar.position.z = 0.02;
   }
 
   /** 根据除血条外的子物体包围盒，将血条移到模型顶缘上方（与新 GLB / 球体占位一致）。 */
@@ -1705,8 +1877,7 @@ export class TowerDefenseGame {
     }
     const cx = (box.min.x + box.max.x) * 0.5;
     const cz = (box.min.z + box.max.z) * 0.5;
-    const ratio = Math.max(enemy.hp / enemy.maxHp, 0);
-    const worldTop = new THREE.Vector3(cx, box.max.y + 0.24, cz);
+    const worldTop = new THREE.Vector3(cx, box.max.y + 0.24 * this.getBuildingHudScale(), cz);
     const localTop = enemy.mesh.worldToLocal(worldTop.clone());
     const barRoot = enemy.mesh.children.find((ch) => ch.userData.isEnemyHealthBarRoot);
     if (barRoot) {
@@ -1715,13 +1886,12 @@ export class TowerDefenseGame {
     } else {
       bar.position.y = localTop.y;
     }
-    bar.position.z = 0.02;
-    bar.position.x = -(1 - ratio) * 0.59;
     for (const ch of enemy.mesh.children) {
       if (ch.userData.isEnemyHealthBar && ch !== bar && !ch.userData.isEnemyHealthBarRoot) {
         ch.position.set(0, localTop.y, 0);
       }
     }
+    this.applyEnemyHealthBarScale(enemy);
   }
 
   /** 塔开火瞄准点：敌人模型世界空间包围盒中心（比固定 y=0.7 更准确）。 */
@@ -2088,66 +2258,203 @@ export class TowerDefenseGame {
     return root;
   }
 
+  /** buildGroup(scale,1,scale) 会使 Sprite BillBoard 误判世界缩放比例，标牌被横向压扁；用锚点拉回各向一致。 */
+  private syncBuildingSkillHudScaleCorrection(): void {
+    const sx = this.buildGroup.scale.x;
+    const inv = sx > 1e-9 ? 1 / sx : 1;
+    const ax = sx === 1 ? 1 : inv;
+    for (const b of this.buildings) {
+      const anchor = b.skillHudAnchor;
+      if (!anchor) {
+        continue;
+      }
+      anchor.scale.set(ax, 1, ax);
+    }
+  }
+
+  private getBuildingHudScale(): number {
+    if (this.playfieldVisualScale <= 1) {
+      return 1;
+    }
+    return THREE.MathUtils.clamp(Math.sqrt(this.playfieldVisualScale) * 2.3, 1, 10.5);
+  }
+
+  private getBuildingVisualTopLocal(building: Building, fallback: number): number {
+    const visual = building.mesh.children[0];
+    if (!visual) {
+      return fallback;
+    }
+
+    const mesh = building.mesh;
+    mesh.updateWorldMatrix(true, true);
+    const worldBox = new THREE.Box3().setFromObject(visual);
+    if (worldBox.isEmpty()) {
+      return fallback;
+    }
+
+    const corner = new THREE.Vector3();
+    let maxLocalY = -Infinity;
+    const b = worldBox;
+    for (let i = 0; i < 8; i++) {
+      corner.set(i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z);
+      mesh.worldToLocal(corner);
+      maxLocalY = Math.max(maxLocalY, corner.y);
+    }
+    return Number.isFinite(maxLocalY) ? maxLocalY : fallback;
+  }
+
+  private layoutBuildingHuds(): void {
+    for (const building of this.buildings) {
+      this.layoutHealthHudForBuilding(building);
+      this.layoutSkillHudForBuilding(building);
+    }
+  }
+
+  private layoutHealthHudForBuilding(building: Building): void {
+    if (!building.healthBarGroup) {
+      return;
+    }
+
+    const hudScale = this.getBuildingHudScale();
+    const top = this.getBuildingVisualTopLocal(building, 2.05);
+    building.healthBarGroup.position.set(0, Math.max(top + 0.22 * hudScale, 2.05), 0);
+  }
+
   private attachBuildingHud(building: Building): void {
     building.healthBarGroup = undefined;
     building.healthBarFill = undefined;
-    building.skillHud = undefined;
+    building.skillHudBillboard = undefined;
+    building.skillHudPlane = undefined;
     building.skillHudText = undefined;
+    building.skillHudAnchor = undefined;
 
     const barGroup = new THREE.Group();
     barGroup.position.y = 2.05;
     barGroup.visible = false;
     const background = new THREE.Mesh(
       new THREE.PlaneGeometry(1.34, 0.16),
-      new THREE.MeshBasicMaterial({ color: 0x111827, transparent: true, opacity: 0.72, depthTest: false }),
+      new THREE.MeshBasicMaterial({ color: 0x111827, depthTest: false, depthWrite: false }),
     );
     const fill = new THREE.Mesh(
       new THREE.PlaneGeometry(1.18, 0.1),
-      new THREE.MeshBasicMaterial({ color: 0x52ff7f, transparent: true, opacity: 0.95, depthTest: false }),
+      new THREE.MeshBasicMaterial({ color: 0x52ff7f, depthTest: false, depthWrite: false }),
     );
     fill.position.z = 0.01;
+    background.renderOrder = 998;
+    fill.renderOrder = 999;
     barGroup.add(background, fill);
     building.mesh.add(barGroup);
     building.healthBarGroup = barGroup;
     building.healthBarFill = fill;
+    this.layoutHealthHudForBuilding(building);
 
     if (building.spec.activeSkill) {
-      const skillHud = new THREE.Sprite(
-        new THREE.SpriteMaterial({
-          map: this.createHudTexture("技能准备中", false),
-          transparent: true,
-          depthTest: false,
-          depthWrite: false,
-        }),
-      );
-      skillHud.position.set(0, 2.75, 0);
-      skillHud.scale.set(2.7, 1, 1);
-      skillHud.visible = false;
-      building.mesh.add(skillHud);
-      building.skillHud = skillHud;
+      const hudAnchor = new THREE.Group();
+      building.skillHudAnchor = hudAnchor;
+
+      const skillBillboard = new THREE.Group();
+      building.skillHudBillboard = skillBillboard;
+
+      const planeMat = new THREE.MeshBasicMaterial({
+        map: this.createHudTexture("技能准备中", false),
+        transparent: true,
+        depthTest: false,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      planeMat.depthFunc = THREE.AlwaysDepth;
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), planeMat);
+      plane.frustumCulled = false;
+      plane.renderOrder = 999;
+      building.skillHudPlane = plane;
+
+      skillBillboard.visible = false;
+      skillBillboard.add(plane);
+      hudAnchor.add(skillBillboard);
+      building.mesh.add(hudAnchor);
       building.skillHudText = "";
+
+      this.syncBuildingSkillHudScaleCorrection();
+      this.layoutSkillHudForBuilding(building);
     }
+  }
+
+  /** 抬高技能浮层；用 Mesh 平面 + 每帧 camera quaternion（与同塔血条一致），俯视时也能正对镜头读字。 */
+  private layoutSkillHudForBuilding(building: Building): void {
+    const billboard = building.skillHudBillboard;
+    const plane = building.skillHudPlane;
+    if (!billboard || !plane) {
+      return;
+    }
+
+    const setPlaneSize = (sx: number, sy: number): void => {
+      plane.scale.set(sx, sy, 1);
+      plane.position.set(0, sy * 0.5, 0);
+    };
+
+    const hudScale = this.getBuildingHudScale();
+    if (!building.mesh.children[0]) {
+      billboard.position.set(0, 3.55 * hudScale, 0);
+      const sx = 3.85 * hudScale;
+      const sy = sx * (152 / 448) * 1.05;
+      setPlaneSize(sx, sy);
+      return;
+    }
+    const mesh = building.mesh;
+    const visual = mesh.children[0];
+    mesh.updateWorldMatrix(true, true);
+    const worldBox = new THREE.Box3().setFromObject(visual);
+    if (worldBox.isEmpty()) {
+      billboard.position.set(0, 3.55 * hudScale, 0);
+      const sx = 3.85 * hudScale;
+      const sy = sx * (152 / 448) * 1.05;
+      setPlaneSize(sx, sy);
+      return;
+    }
+    const corner = new THREE.Vector3();
+    let maxLocalY = -Infinity;
+    const b = worldBox;
+    for (let i = 0; i < 8; i++) {
+      corner.set(
+        i & 1 ? b.max.x : b.min.x,
+        i & 2 ? b.max.y : b.min.y,
+        i & 4 ? b.max.z : b.min.z,
+      );
+      mesh.worldToLocal(corner);
+      maxLocalY = Math.max(maxLocalY, corner.y);
+    }
+    const top = Number.isFinite(maxLocalY) ? Math.max(maxLocalY + 0.62 * hudScale, 2.85 * hudScale) : 3.55 * hudScale;
+    billboard.position.set(0, top, 0);
+    const silhouette = Number.isFinite(maxLocalY) ? Math.max(maxLocalY + 2.55, 3.95) : 4.85;
+    const sx = THREE.MathUtils.clamp(1.95 + silhouette * 0.22, 3.5, 6.25) * hudScale;
+    const sy = sx * (152 / 448) * 1.05;
+    setPlaneSize(sx, sy);
   }
 
   private createHudTexture(text: string, ready: boolean): THREE.CanvasTexture {
     const canvas = document.createElement("canvas");
-    canvas.width = 384;
-    canvas.height = 128;
+    canvas.width = 448;
+    canvas.height = 152;
     const context = canvas.getContext("2d");
     if (context) {
       context.clearRect(0, 0, canvas.width, canvas.height);
-      context.fillStyle = ready ? "rgba(255, 214, 102, 0.92)" : "rgba(17, 24, 39, 0.82)";
-      context.strokeStyle = ready ? "rgba(255, 255, 255, 0.95)" : "rgba(148, 163, 184, 0.8)";
-      context.lineWidth = 4;
-      context.fillRect(12, 18, canvas.width - 24, canvas.height - 36);
-      context.strokeRect(12, 18, canvas.width - 24, canvas.height - 36);
-      context.fillStyle = ready ? "#1f1300" : "#e5e7eb";
-      context.font = "700 28px Microsoft YaHei, sans-serif";
+      context.fillStyle = ready ? "rgba(255, 214, 102, 0.96)" : "rgba(15, 23, 42, 0.9)";
+      context.strokeStyle = ready ? "rgba(120, 53, 15, 0.55)" : "rgba(226, 232, 240, 0.92)";
+      context.lineWidth = 5;
+      context.fillRect(10, 16, canvas.width - 20, canvas.height - 32);
+      context.strokeRect(10, 16, canvas.width - 20, canvas.height - 32);
+      const lines = text.split("\n");
       context.textAlign = "center";
       context.textBaseline = "middle";
-      const lines = text.split("\n");
+      context.font = "800 31px \"Microsoft YaHei\", ui-sans-serif, system-ui, sans-serif";
       lines.forEach((line, index) => {
-        context.fillText(line, canvas.width / 2, 50 + index * 34);
+        const y = 58 + index * 38;
+        context.strokeStyle = ready ? "rgba(255, 255, 255, 0.55)" : "rgba(0, 0, 0, 0.92)";
+        context.lineWidth = 6;
+        context.lineJoin = "round";
+        context.strokeText(line, canvas.width / 2, y);
+        context.fillStyle = ready ? "#1a0f00" : "#f8fafc";
+        context.fillText(line, canvas.width / 2, y);
       });
     }
     const texture = new THREE.CanvasTexture(canvas);
@@ -2156,11 +2463,11 @@ export class TowerDefenseGame {
   }
 
   private updateSkillHud(building: Building): void {
-    if (!building.skillHud || !building.spec.activeSkill) {
+    if (!building.skillHudBillboard || !building.skillHudPlane || !building.spec.activeSkill) {
       return;
     }
     const selected = this.selectedBuilding === building;
-    building.skillHud.visible = selected;
+    building.skillHudBillboard.visible = selected;
     if (!selected) {
       return;
     }
@@ -2172,7 +2479,7 @@ export class TowerDefenseGame {
       return;
     }
     building.skillHudText = text;
-    const material = building.skillHud.material as THREE.SpriteMaterial;
+    const material = building.skillHudPlane.material as THREE.MeshBasicMaterial;
     material.map?.dispose();
     material.map = this.createHudTexture(text, ready);
     material.needsUpdate = true;
@@ -2192,9 +2499,12 @@ export class TowerDefenseGame {
       if (building.healthBarGroup && building.healthBarFill) {
         building.healthBarGroup.visible = showHealth;
         if (showHealth) {
-          building.healthBarGroup.quaternion.copy(this.camera.quaternion);
-          building.healthBarFill.scale.x = Math.max(0.02, ratio);
-          building.healthBarFill.position.x = -(1 - ratio) * 0.59;
+          this.orientHudPlaneToCamera(building.healthBarGroup);
+          const hudScale = this.getBuildingHudScale();
+          const healthBarBack = building.healthBarGroup.children[0];
+          healthBarBack?.scale.set(hudScale, hudScale, 1);
+          building.healthBarFill.scale.set(hudScale * Math.max(0.02, ratio), hudScale, 1);
+          building.healthBarFill.position.x = -(1 - ratio) * 0.59 * hudScale;
           const material = building.healthBarFill.material as THREE.MeshBasicMaterial;
           material.color.set(ratio > 0.55 ? 0x52ff7f : ratio > 0.25 ? 0xffd166 : 0xff5e73);
         }
@@ -2207,6 +2517,10 @@ export class TowerDefenseGame {
       });
 
       this.updateSkillHud(building);
+
+      if (building.skillHudBillboard?.visible) {
+        this.orientHudPlaneToCamera(building.skillHudBillboard);
+      }
     }
   }
 
@@ -2217,7 +2531,7 @@ export class TowerDefenseGame {
     this.lastFrameTime = now;
     this.elapsed += dt;
 
-    if (this.gameStarted && !this.paused) {
+    if (this.gameStarted && !this.paused && !this.gameOverActive) {
       this.updateDefense(dt);
       if (this.mode === "explore") {
         this.updateExplore(dt);
@@ -2377,8 +2691,7 @@ export class TowerDefenseGame {
         this.baseHp -= 1;
         this.showToast("\u654c\u4eba\u7a81\u7834\u9632\u7ebf\uff0c\u57fa\u5730\u751f\u547d -1");
         if (this.baseHp <= 0) {
-          this.showToast("\u57fa\u5730\u88ab\u653b\u7834\uff0c\u6b63\u5728\u91cd\u7f6e\u5730\u56fe", true);
-          this.loadDefenseMap(this.defenseMapIndex, true);
+          this.triggerGameOver("defense");
           return;
         }
       }
@@ -2386,22 +2699,19 @@ export class TowerDefenseGame {
   }
 
   private updateEnemyHuds(): void {
-    const parentWorldQuaternion = new THREE.Quaternion();
-    const localBillboardQuaternion = new THREE.Quaternion();
     for (const enemy of this.enemies) {
-      enemy.mesh.getWorldQuaternion(parentWorldQuaternion);
-      localBillboardQuaternion.copy(parentWorldQuaternion).invert().multiply(this.camera.quaternion);
+      this.applyEnemyHealthBarScale(enemy);
       let rotatedRoot = false;
       for (const child of enemy.mesh.children) {
         if (child.userData.isEnemyHealthBarRoot) {
-          child.quaternion.copy(localBillboardQuaternion);
+          this.orientHudPlaneToCamera(child);
           rotatedRoot = true;
         }
       }
       if (!rotatedRoot) {
         for (const child of enemy.mesh.children) {
           if (child.userData.isEnemyHealthBar) {
-            child.quaternion.copy(localBillboardQuaternion);
+            this.orientHudPlaneToCamera(child);
           }
         }
       }
@@ -2427,7 +2737,7 @@ export class TowerDefenseGame {
     enemy.blockedBy = blocker;
     blocker.blockingEnemies.push(enemy);
     enemy.mesh.position.copy(cellToWorld(blocker.cell));
-    this.showToast(`${blocker.spec.name} \u963b\u6321\u4e86\u654c\u4eba`, true);
+    this.showToast(`${blocker.spec.name} \u963b\u6321\u4e86\u654c\u4eba`);
     return true;
   }
 
@@ -2689,8 +2999,7 @@ export class TowerDefenseGame {
 
     enemy.hp -= damage;
     const ratio = Math.max(enemy.hp / enemy.maxHp, 0);
-    enemy.healthBar.scale.x = ratio;
-    enemy.healthBar.position.x = -(1 - ratio) * 0.59;
+    this.applyEnemyHealthBarScale(enemy);
     const healthMaterial = enemy.healthBar.material as THREE.MeshBasicMaterial;
     healthMaterial.color.set(ratio > 0.55 ? 0x34ff6a : ratio > 0.25 ? 0xffd84a : 0xff3d5e);
 
@@ -2722,13 +3031,13 @@ export class TowerDefenseGame {
        for (let i = 0; i < 3; i++) {
           const healthBar = new THREE.Mesh(
             new THREE.BoxGeometry(0.9, 0.12, 0.1),
-            new THREE.MeshBasicMaterial({ color: 0x34ff6a, transparent: true, opacity: 0.98, depthTest: false }),
+            new THREE.MeshBasicMaterial({ color: 0x34ff6a, depthTest: false, depthWrite: false }),
           );
           healthBar.renderOrder = 30;
           healthBar.userData.isEnemyHealthBar = true;
           const healthBarBack = new THREE.Mesh(
             new THREE.BoxGeometry(1.02, 0.18, 0.11),
-            new THREE.MeshBasicMaterial({ color: 0x10131a, transparent: true, opacity: 0.78, depthTest: false }),
+            new THREE.MeshBasicMaterial({ color: 0x10131a, depthTest: false, depthWrite: false }),
           );
           healthBarBack.renderOrder = 29;
           healthBarBack.userData.isEnemyHealthBar = true;
@@ -2765,6 +3074,7 @@ export class TowerDefenseGame {
           healthBarBack.position.set(0, 0, 0);
           healthBarGroup.position.set(0, 0.82, 0);
           spawnEnemy.mesh.add(bMesh, healthBarGroup);
+          this.syncEnemyHealthBarVertical(spawnEnemy);
 
           const offset = new THREE.Vector3((Math.random() - 0.5) * TILE_SIZE, 0, (Math.random() - 0.5) * TILE_SIZE);
           spawnEnemy.mesh.position.copy(enemy.mesh.position).add(offset);
@@ -2795,9 +3105,627 @@ export class TowerDefenseGame {
         this.money += Math.round(drop.amount);
         this.freePulls += 1;
         this.showToast(`\u62fe\u53d6\u8d44\u6e90 +$${drop.amount}\uff0c\u83b7\u5f97 1 \u5f20\u7279\u6d3e\u8865\u7ed9\u5361\uff01`);
+        this.addInventoryItem({
+          id: `drop-${Date.now()}`,
+          name: "\u8d44\u6e90\u78c1\u7247",
+          quantity: 1,
+          type: "material",
+          icon: "\ud83d\udcbe",
+          collectedAt: Date.now(),
+        });
         this.updateUi();
       },
     });
+
+    // Update cooldowns
+    this.attackCooldown = Math.max(0, this.attackCooldown - dt);
+    this.skillECooldown = Math.max(0, this.skillECooldown - dt);
+    this.skillRCooldown = Math.max(0, this.skillRCooldown - dt);
+
+    // Update explore combat
+    this.updateExploreProjectiles(dt);
+    this.updateExploreEnemies(dt);
+
+    // Enemy spawning
+    this.exploreEnemySpawnTimer -= dt;
+    if (this.exploreEnemySpawnTimer <= 0) {
+      this.spawnExploreEnemy();
+      this.exploreEnemySpawnTimer = 8;
+    }
+
+    this.updateExploreHud();
+
+    // Safe-zone shop detection
+    const nowInSafe = this.exploreSafeZoneCells.size > 0 &&
+      this.exploreSafeZoneCells.has(cellKey(worldToCell(this.player.position)));
+    if (nowInSafe !== this.inSafeZone) {
+      this.inSafeZone = nowInSafe;
+      if (nowInSafe) {
+        this.safeZoneShopPanel.setAttribute("aria-hidden", "false");
+        this.showToast("\u8fdb\u5165\u5b89\u5168\u533a \u2014 \u53ef\u5728\u5de6\u4e0b\u89d2\u5546\u5e97\u8d2d\u4e70\u8865\u7ed9");
+      } else {
+        this.safeZoneShopPanel.setAttribute("aria-hidden", "true");
+      }
+    }
+  }
+
+  private triggerGameOver(mode: "defense" | "explore"): void {
+    if (this.gameOverActive) return;
+    this.gameOverActive = true;
+    const reason = mode === "defense"
+      ? "\u57fa\u5730\u5df2\u88ab\u6467\u6bc1"
+      : "\u89d2\u8272\u5df2\u5012\u5730";
+    this.requiredElement("#gameOverReason").textContent = reason;
+    this.gameOverPanel.setAttribute("aria-hidden", "false");
+  }
+
+  /** 塔防与探索共享一局进度；任意模式失败后「重新开始」会重置资金、补给、抽卡与双模式战场状态。 */
+  private resetSharedRunStateAfterFailure(): void {
+    if (this.gachaOpen) {
+      this.closeGacha();
+    }
+    this.money = INITIAL_MONEY;
+    this.freePulls = 100;
+    this.pityCounter = 0;
+    this.sTowerUnlocked = false;
+    this.playerHp = 100;
+    this.playerMaxHp = 100;
+    this.playerLevel = 1;
+    this.playerXp = 0;
+    this.playerXpToNext = 50;
+    this.inventoryItems = [];
+    this.inventoryOpen = false;
+    this.inventoryPanel.setAttribute("aria-hidden", "true");
+    this.exploreWalkMode = false;
+    this.attackCooldown = 0;
+    this.skillECooldown = 0;
+    this.skillRCooldown = 0;
+    this.elapsed = 0;
+    this.nextUid = 1;
+    this.selectedBuilding = null;
+    this.dropTimer = 5;
+    this.inSafeZone = false;
+    this.safeZoneShopPanel.setAttribute("aria-hidden", "true");
+    this.renderInventoryGrid();
+  }
+
+  private restartAfterGameOver(): void {
+    this.gameOverActive = false;
+    this.gameOverPanel.setAttribute("aria-hidden", "true");
+    this.resetSharedRunStateAfterFailure();
+    this.mode = "defense";
+    this.loadDefenseMap(this.defenseMapIndex, true);
+    this.loadExploreMap(this.exploreMapIndex, true, { skipViewRefresh: true });
+    this.saveGame(false);
+    this.showToast(
+      "\u5df2\u4ece\u5934\u5f00\u59cb\uff1a\u8d44\u91d1\u3001\u8865\u7ed9\u4e0e\u5854\u9632/\u63a2\u7d22\u8fdb\u5ea6\u5747\u5df2\u91cd\u7f6e",
+      true,
+    );
+    this.updateUi();
+  }
+
+  private returnToHomeFromGameOver(): void {
+    this.gameOverActive = false;
+    this.gameOverPanel.setAttribute("aria-hidden", "true");
+    this.backToSelection();
+  }
+
+  private closeSafeZoneShop(): void {
+    this.safeZoneShopPanel.setAttribute("aria-hidden", "true");
+  }
+
+  private buySafeZoneItem(item: string): void {
+    const costs: Record<string, number> = {
+      "hp-small": 30,
+      "hp-large": 60,
+      "max-hp": 100,
+      "full-heal": 80,
+    };
+    const cost = costs[item] ?? 0;
+    if (this.money < cost) {
+      this.showToast("\u8d44\u91d1\u4e0d\u8db3\uff01");
+      return;
+    }
+    this.money -= cost;
+    switch (item) {
+      case "hp-small":
+        this.playerHp = Math.min(this.playerHp + 50, this.playerMaxHp);
+        this.showToast("HP +50 \ud83d\udc8a");
+        break;
+      case "hp-large":
+        this.playerHp = Math.min(this.playerHp + 150, this.playerMaxHp);
+        this.showToast("HP +150 \ud83d\udc89");
+        break;
+      case "max-hp":
+        this.playerMaxHp += 50;
+        this.playerHp = this.playerMaxHp;
+        this.showToast("\u6700\u5927 HP +50\uff0c\u5b8c\u5168\u6062\u590d \u2764\ufe0f");
+        break;
+      case "full-heal":
+        this.playerHp = this.playerMaxHp;
+        this.showToast("\u5b8c\u5168\u6062\u590d \u2728");
+        break;
+    }
+    this.updateUi();
+  }
+
+  private fireBasicAttack(): void {
+    if (this.attackCooldown > 0) return;
+    this.attackCooldown = this.attackMaxCooldown;
+
+    // Find nearest enemy within 30 units for homing
+    const HOMING_RANGE = 10;
+    let nearestEnemy: ExploreEnemy | null = null;
+    let nearestDist = HOMING_RANGE;
+    for (const enemy of this.exploreEnemies) {
+      if (enemy.dead) continue;
+      const d = distanceXZ(this.player.position, enemy.mesh.position);
+      if (d < nearestDist) {
+        nearestDist = d;
+        nearestEnemy = enemy;
+      }
+    }
+
+    let velocity: THREE.Vector3;
+    if (nearestEnemy) {
+      const toEnemy = nearestEnemy.mesh.position.clone().sub(this.player.position).setY(0).normalize();
+      velocity = toEnemy.multiplyScalar(18);
+    } else {
+      const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.player.quaternion);
+      forward.y = 0;
+      if (forward.lengthSq() < 0.001) forward.set(0, 0, -1);
+      forward.normalize();
+      velocity = forward.multiplyScalar(18);
+    }
+
+    const geo = new THREE.SphereGeometry(0.15, 8, 6);
+    const mat = new THREE.MeshStandardMaterial({ color: 0xffec6e, emissive: 0xffaa00, emissiveIntensity: 1.2 });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.copy(this.player.position);
+    // Use enemy body center height so collision check matches enemy Y
+    mesh.position.y = 0.75;
+
+    this.exploreProjectileGroup.add(mesh);
+    this.exploreProjectiles.push({
+      mesh,
+      velocity,
+      damage: 25 + this.playerLevel * 3,
+      lifetime: 2.2,
+      type: "basic",
+      target: nearestEnemy,
+    });
+  }
+
+  private castOrbSkill(): void {
+    if (this.skillECooldown > 0) {
+      this.showToast(`E \u6280\u80fd CD: ${Math.ceil(this.skillECooldown)}s`);
+      return;
+    }
+    let nearestEnemy: ExploreEnemy | null = null;
+    let nearestDist = Infinity;
+    for (const enemy of this.exploreEnemies) {
+      if (enemy.dead) continue;
+      const dist = this.player.position.distanceTo(enemy.mesh.position);
+      if (dist < nearestDist) {
+        nearestDist = dist;
+        nearestEnemy = enemy;
+      }
+    }
+    if (!nearestEnemy) {
+      this.showToast("\u9644\u8fd1\u6ca1\u6709\u654c\u4eba\u53ef\u9501\u5b9a\uff01");
+      return;
+    }
+    this.skillECooldown = this.skillEMaxCooldown;
+
+    const targetPos = nearestEnemy.mesh.position.clone();
+
+    // Instantly deal damage
+    const damage = 120 + this.playerLevel * 15;
+    nearestEnemy.hp -= damage;
+    if (nearestEnemy.hp <= 0) this.killExploreEnemy(nearestEnemy);
+    this.exploreEnemies = this.exploreEnemies.filter((e) => !e.dead);
+
+    const push = (mesh: THREE.Mesh, velocity: THREE.Vector3, lifetime: number, type: "lightning" | "spark" | "blast") => {
+      this.exploreProjectileGroup.add(mesh);
+      this.exploreProjectiles.push({ mesh, velocity, damage: 0, lifetime, type, target: null });
+    };
+
+    // Main lightning bolt – tall white cylinder from sky to ground
+    const boltHeight = 22;
+    const boltGeo = new THREE.CylinderGeometry(0.06, 0.22, boltHeight, 6);
+    const boltMat = new THREE.MeshBasicMaterial({ color: 0xddeeff, transparent: true, opacity: 0.95 });
+    const bolt = new THREE.Mesh(boltGeo, boltMat);
+    bolt.position.set(targetPos.x, targetPos.y + boltHeight / 2, targetPos.z);
+    push(bolt, new THREE.Vector3(), 0.25, "lightning");
+
+    // Inner bright white core
+    const coreGeo = new THREE.CylinderGeometry(0.02, 0.07, boltHeight, 4);
+    const coreMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 1.0 });
+    const core = new THREE.Mesh(coreGeo, coreMat);
+    core.position.copy(bolt.position);
+    push(core, new THREE.Vector3(), 0.18, "lightning");
+
+    // Impact flash sphere (expands + fades via blast logic)
+    const flashGeo = new THREE.SphereGeometry(0.55, 12, 8);
+    const flashMat = new THREE.MeshBasicMaterial({ color: 0x99eeff, transparent: true, opacity: 0.9 });
+    const flash = new THREE.Mesh(flashGeo, flashMat);
+    flash.position.set(targetPos.x, targetPos.y + 0.5, targetPos.z);
+    push(flash, new THREE.Vector3(), 0.55, "blast");
+
+    // Ground electric ring
+    const ringGeo = new THREE.RingGeometry(0.1, 3.2, 24);
+    const ringMat = new THREE.MeshBasicMaterial({ color: 0x55ddff, transparent: true, opacity: 0.8, side: THREE.DoubleSide });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(targetPos.x, targetPos.y + 0.13, targetPos.z);
+    push(ring, new THREE.Vector3(), 0.55, "blast");
+
+    // Outer wide ring (shorter lifetime)
+    const outerGeo = new THREE.RingGeometry(0.1, 5.5, 32);
+    const outerMat = new THREE.MeshBasicMaterial({ color: 0x2299ee, transparent: true, opacity: 0.45, side: THREE.DoubleSide });
+    const outer = new THREE.Mesh(outerGeo, outerMat);
+    outer.rotation.x = -Math.PI / 2;
+    outer.position.set(targetPos.x, targetPos.y + 0.1, targetPos.z);
+    push(outer, new THREE.Vector3(), 0.35, "blast");
+
+    // Spark particles flying outward with arc
+    const sparkGeo = new THREE.SphereGeometry(0.09, 6, 4);
+    const sparkColors = [0xffffff, 0x88ddff, 0x44aaff, 0xaaddff];
+    const sparkCount = 14;
+    for (let i = 0; i < sparkCount; i++) {
+      const angle = (i / sparkCount) * Math.PI * 2 + Math.random() * 0.4;
+      const speed = 3.5 + Math.random() * 5;
+      const sparkMat = new THREE.MeshBasicMaterial({
+        color: sparkColors[i % sparkColors.length],
+        transparent: true,
+        opacity: 1.0,
+      });
+      const spark = new THREE.Mesh(sparkGeo, sparkMat);
+      spark.position.set(targetPos.x, targetPos.y + 0.4, targetPos.z);
+      push(
+        spark,
+        new THREE.Vector3(Math.cos(angle) * speed, 2.5 + Math.random() * 4, Math.sin(angle) * speed),
+        0.55 + Math.random() * 0.35,
+        "spark",
+      );
+    }
+
+    this.showToast("\u5929\u964d\u95ea\u7535\uff01");
+  }
+
+  private castRSkill(): void {
+    if (this.skillRCooldown > 0) {
+      this.showToast(`R \u6280\u80fd CD: ${Math.ceil(this.skillRCooldown)}s`);
+      return;
+    }
+    this.skillRCooldown = this.skillRMaxCooldown;
+
+    const blastRadius = 5;
+    let hitCount = 0;
+    for (const enemy of this.exploreEnemies) {
+      if (enemy.dead) continue;
+      if (this.player.position.distanceTo(enemy.mesh.position) <= blastRadius) {
+        enemy.hp -= 180 + this.playerLevel * 20;
+        hitCount++;
+        if (enemy.hp <= 0) this.killExploreEnemy(enemy);
+      }
+    }
+    this.exploreEnemies = this.exploreEnemies.filter((e) => !e.dead);
+
+    // Visual ring effect
+    const ringGeo = new THREE.RingGeometry(0.2, blastRadius, 36);
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: 0xff6b9d,
+      transparent: true,
+      opacity: 0.65,
+      side: THREE.DoubleSide,
+    });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.position.copy(this.player.position);
+    ring.position.y = 0.12;
+    ring.rotation.x = -Math.PI / 2;
+    this.exploreProjectileGroup.add(ring);
+    this.exploreProjectiles.push({
+      mesh: ring,
+      velocity: new THREE.Vector3(),
+      damage: 0,
+      lifetime: 0.55,
+      type: "blast",
+      target: null,
+    });
+
+    this.showToast(`\u51b2\u51fb\u7206\u53d1\uff01\u547d\u4e2d ${hitCount} \u4e2a\u654c\u4eba`);
+  }
+
+  private spawnExploreEnemy(): void {
+    if (this.exploreEnemies.length >= 10) return;
+    const map = EXPLORE_MAPS[this.exploreMapIndex];
+    const cols = map.cols ?? 28;
+    const rows = map.rows ?? 18;
+    let attempts = 0;
+    let spawnPos: THREE.Vector3 | null = null;
+    while (attempts < 25 && !spawnPos) {
+      const col = Math.floor(Math.random() * cols);
+      const row = Math.floor(Math.random() * rows);
+      const pos = cellToWorld({ col, row });
+      if (
+        !this.obstacleCells.has(cellKey({ col, row })) &&
+        pos.distanceTo(this.player.position) >= 6
+      ) {
+        spawnPos = pos;
+      }
+      attempts++;
+    }
+    if (!spawnPos) return;
+
+    const group = new THREE.Group();
+    const bodyGeo = new THREE.BoxGeometry(0.75, 1.5, 0.75);
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0xe55c5c });
+    const body = new THREE.Mesh(bodyGeo, bodyMat);
+    body.position.y = 0.75;
+    group.add(body);
+
+    const hpBarBgGeo = new THREE.PlaneGeometry(1, 0.1);
+    const hpBarBgMat = new THREE.MeshBasicMaterial({ color: 0x333333, depthTest: false });
+    const hpBarBg = new THREE.Mesh(hpBarBgGeo, hpBarBgMat);
+    hpBarBg.position.y = 1.9;
+    hpBarBg.rotation.x = -Math.PI / 8;
+    group.add(hpBarBg);
+
+    const hpBarGeo = new THREE.PlaneGeometry(1, 0.1);
+    const hpBarMat = new THREE.MeshBasicMaterial({ color: 0x44cc44, depthTest: false });
+    const hpBar = new THREE.Mesh(hpBarGeo, hpBarMat);
+    hpBar.position.y = 1.9;
+    hpBar.position.z = 0.005;
+    hpBar.rotation.x = -Math.PI / 8;
+    group.add(hpBar);
+
+    group.position.copy(spawnPos);
+    this.exploreEnemyGroup.add(group);
+
+    const maxHp = 55 + this.playerLevel * 18;
+    this.exploreEnemies.push({
+      id: `ee-${this.nextUid++}`,
+      mesh: group,
+      hpBar,
+      hp: maxHp,
+      maxHp,
+      speed: 2.2 + this.playerLevel * 0.15,
+      attackDamage: 7 + this.playerLevel * 2,
+      aggroRange: 8,
+      attackCooldown: 1.5,
+      attackTimer: 0,
+      dead: false,
+    });
+  }
+
+  private killExploreEnemy(enemy: ExploreEnemy): void {
+    enemy.dead = true;
+    this.exploreEnemyGroup.remove(enemy.mesh);
+
+    const itemPool = [
+      { name: "\u91d1\u5c5e\u788e\u7247", icon: "\ud83d\udd29" },
+      { name: "\u80fd\u91cf\u6676\u4f53", icon: "\ud83d\udc8e" },
+      { name: "\u6570\u636e\u82af\u7247", icon: "\ud83d\udcbe" },
+      { name: "\u5408\u91d1\u9f7f\u8f6e", icon: "\u2699\ufe0f" },
+      { name: "AI\u6838\u5fc3", icon: "\ud83e\udd16" },
+    ];
+    const pick = itemPool[Math.floor(Math.random() * itemPool.length)];
+    this.addInventoryItem({
+      id: `item-${this.nextUid++}`,
+      name: pick.name,
+      quantity: 1 + Math.floor(Math.random() * 3),
+      type: "material",
+      icon: pick.icon,
+      collectedAt: Date.now(),
+    });
+
+    this.playerXp += 15 + this.playerLevel * 5;
+    while (this.playerXp >= this.playerXpToNext) {
+      this.playerXp -= this.playerXpToNext;
+      this.playerLevel++;
+      this.playerMaxHp += 20;
+      this.playerHp = Math.min(this.playerHp + 20, this.playerMaxHp);
+      this.playerXpToNext = Math.floor(50 * Math.pow(1.3, this.playerLevel - 1));
+      this.showToast(`\u7b49\u7ea7\u63d0\u5347\uff01Lv.${this.playerLevel}`, true);
+    }
+  }
+
+  private addInventoryItem(item: InventoryItem): void {
+    const existing = this.inventoryItems.find((i) => i.name === item.name);
+    if (existing) {
+      existing.quantity += item.quantity;
+    } else {
+      this.inventoryItems.push(item);
+    }
+    if (this.inventoryOpen) this.renderInventoryGrid();
+  }
+
+  private toggleInventory(): void {
+    this.inventoryOpen = !this.inventoryOpen;
+    this.inventoryPanel.setAttribute("aria-hidden", String(!this.inventoryOpen));
+    if (this.inventoryOpen) this.renderInventoryGrid();
+  }
+
+  private renderInventoryGrid(): void {
+    if (!this.inventoryGrid) return;
+    if (!this.inventoryItems.length) {
+      this.inventoryGrid.innerHTML = '<div class="inventory-empty">\u80cc\u5305\u7a7a\u7a7a\u5982\u4e5f\uff0c\u53bb\u63a2\u7d22\u6a21\u5f0f\u4e2d\u6536\u96c6\u9053\u5177\u5427\uff01</div>';
+      return;
+    }
+    this.inventoryGrid.innerHTML = this.inventoryItems
+      .map(
+        (item, idx) => {
+          const isConsumable = item.type === "consumable" || item.name.includes("\u836f") || item.name.includes("HP") || item.name.includes("\u6062\u590d");
+          const useBtn = isConsumable
+            ? `<button class="inventory-item-use" data-idx="${idx}">\u4f7f\u7528</button>`
+            : "";
+          return `<div class="inventory-item" data-idx="${idx}">${useBtn}<div class="inventory-item-icon">${item.icon}</div><div class="inventory-item-name">${item.name}</div><div class="inventory-item-qty">\u00d7${item.quantity}</div></div>`;
+        },
+      )
+      .join("");
+    // Wire up use buttons
+    this.inventoryGrid.querySelectorAll<HTMLButtonElement>(".inventory-item-use").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const idx = Number(btn.dataset.idx);
+        this.useInventoryItem(idx);
+      });
+    });
+  }
+
+  private useInventoryItem(idx: number): void {
+    const item = this.inventoryItems[idx];
+    if (!item || item.quantity <= 0) return;
+    let used = false;
+    const name = item.name;
+    if (name.includes("HP") || name.includes("\u6062\u590d") || name.includes("\u836f")) {
+      const restore = name.includes("\u5f3a\u6548") || name.includes("\u5927") ? 150 : 50;
+      this.playerHp = Math.min(this.playerHp + restore, this.playerMaxHp);
+      this.showToast(`\u4f7f\u7528 ${item.icon}${item.name}\uff01HP +${restore}`);
+      used = true;
+    }
+    if (!used) {
+      this.showToast(`${item.icon}${item.name} \u65e0\u6cd5\u76f4\u63a5\u4f7f\u7528`);
+      return;
+    }
+    item.quantity -= 1;
+    if (item.quantity <= 0) {
+      this.inventoryItems.splice(idx, 1);
+    }
+    this.renderInventoryGrid();
+  }
+
+  private updateExploreEnemies(dt: number): void {
+    const playerPos = this.player.position;
+    const playerCell = worldToCell(playerPos);
+    const playerInSafeZone = this.exploreSafeZoneCells.has(cellKey(playerCell));
+
+    for (const enemy of this.exploreEnemies) {
+      if (enemy.dead) continue;
+      const dist = playerPos.distanceTo(enemy.mesh.position);
+
+      if (!playerInSafeZone && dist < enemy.aggroRange) {
+        const dir = playerPos.clone().sub(enemy.mesh.position).setY(0);
+        if (dir.lengthSq() > 0.001) {
+          dir.normalize();
+          const newPos = enemy.mesh.position.clone().addScaledVector(dir, enemy.speed * dt);
+          const cell = worldToCell(newPos);
+          if (!this.obstacleCells.has(cellKey(cell)) && this.isInsideGrid(cell)) {
+            enemy.mesh.position.copy(newPos);
+            enemy.mesh.lookAt(playerPos.x, enemy.mesh.position.y, playerPos.z);
+          }
+        }
+        // Enforce minimum separation to prevent clipping into the player
+        const sep = playerPos.distanceTo(enemy.mesh.position);
+        if (sep < 1.1) {
+          const away = enemy.mesh.position.clone().sub(playerPos).setY(0);
+          if (away.lengthSq() < 0.0001) {
+            const a = Math.random() * Math.PI * 2;
+            away.set(Math.cos(a), 0, Math.sin(a));
+          }
+          away.normalize();
+          enemy.mesh.position.x = playerPos.x + away.x * 1.1;
+          enemy.mesh.position.z = playerPos.z + away.z * 1.1;
+        }
+
+        if (dist < 1.4) {
+          enemy.attackTimer -= dt;
+          if (enemy.attackTimer <= 0) {
+            enemy.attackTimer = enemy.attackCooldown;
+            this.playerHp = Math.max(0, this.playerHp - enemy.attackDamage);
+            if (this.playerHp <= 0) {
+              this.triggerGameOver("explore");
+            }
+          }
+        }
+      } else {
+        enemy.attackTimer = Math.max(0, enemy.attackTimer - dt);
+      }
+
+      // Sync HP bar
+      const ratio = Math.max(0, enemy.hp / enemy.maxHp);
+      enemy.hpBar.scale.x = ratio;
+      enemy.hpBar.position.x = (ratio - 1) * 0.5;
+      (enemy.hpBar.material as THREE.MeshBasicMaterial).color.setHex(
+        ratio > 0.5 ? 0x44cc44 : ratio > 0.25 ? 0xffaa00 : 0xee3333,
+      );
+    }
+    this.exploreEnemies = this.exploreEnemies.filter((e) => !e.dead);
+  }
+
+  private updateExploreProjectiles(dt: number): void {
+    for (const proj of this.exploreProjectiles) {
+      proj.lifetime -= dt;
+
+      if (proj.type === "orb" && proj.target && !proj.target.dead) {
+        // Horizontal homing adjustment
+        const tPos = proj.target.mesh.position;
+        const dx = tPos.x - proj.mesh.position.x;
+        const dz = tPos.z - proj.mesh.position.z;
+        const hLen = Math.sqrt(dx * dx + dz * dz);
+        if (hLen > 0.1) {
+          proj.velocity.x += (dx / hLen) * 12 * dt;
+          proj.velocity.z += (dz / hLen) * 12 * dt;
+        }
+      }
+
+      if (proj.type === "blast") {
+        const progress = 1 - proj.lifetime / 0.55;
+        proj.mesh.scale.set(0.5 + progress * 1.5, 1, 0.5 + progress * 1.5);
+        (proj.mesh.material as THREE.MeshBasicMaterial).opacity = 0.65 * (1 - progress);
+      } else if (proj.type === "lightning") {
+        // Fade bolt opacity over its lifetime (initial lifetime stored as 0.28 for bolt, 0.18 for core)
+        const mat = proj.mesh.material as THREE.MeshBasicMaterial;
+        mat.opacity = Math.max(0, mat.opacity - (1.0 / 0.25) * dt);
+      } else if (proj.type === "spark") {
+        // Arc trajectory with gravity, fade out
+        proj.velocity.y -= 10 * dt;
+        proj.mesh.position.addScaledVector(proj.velocity, dt);
+        (proj.mesh.material as THREE.MeshBasicMaterial).opacity = Math.max(0, proj.lifetime / 0.9);
+      } else {
+        proj.mesh.position.addScaledVector(proj.velocity, dt);
+      }
+
+      // Collision check (skip blast/lightning/spark types)
+      if (proj.damage > 0 && proj.type !== "blast" && proj.type !== "lightning" && proj.type !== "spark") {
+        for (const enemy of this.exploreEnemies) {
+          if (enemy.dead) continue;
+          // Use XZ distance to avoid Y-offset mismatches between projectile and enemy root
+          const hitRadius = proj.type === "orb" ? 1.6 : 0.9;
+          if (distanceXZ(proj.mesh.position, enemy.mesh.position) < hitRadius) {
+            enemy.hp -= proj.damage;
+            if (enemy.hp <= 0) this.killExploreEnemy(enemy);
+            proj.lifetime = 0;
+            break;
+          }
+        }
+      }
+    }
+
+    // Cleanup
+    for (const proj of this.exploreProjectiles) {
+      if (proj.lifetime <= 0) {
+        this.exploreProjectileGroup.remove(proj.mesh);
+      }
+    }
+    this.exploreProjectiles = this.exploreProjectiles.filter((p) => p.lifetime > 0);
+    this.exploreEnemies = this.exploreEnemies.filter((e) => !e.dead);
+  }
+
+  private updateExploreHud(): void {
+    const hpPct = this.playerMaxHp > 0 ? (this.playerHp / this.playerMaxHp) * 100 : 100;
+    this.exploreHpBar.style.width = `${hpPct}%`;
+    this.exploreHpText.textContent = `${Math.ceil(this.playerHp)} / ${this.playerMaxHp}`;
+    this.exploreLevelBadge.textContent = String(this.playerLevel);
+    const xpPct = this.playerXpToNext > 0 ? (this.playerXp / this.playerXpToNext) * 100 : 0;
+    this.exploreXpBar.style.width = `${xpPct}%`;
+    this.exploreSkillAttackCd.style.height =
+      this.attackCooldown > 0 ? `${(this.attackCooldown / this.attackMaxCooldown) * 100}%` : "0%";
+    this.exploreSkillECd.style.height =
+      this.skillECooldown > 0 ? `${(this.skillECooldown / this.skillEMaxCooldown) * 100}%` : "0%";
+    this.exploreSkillRCd.style.height =
+      this.skillRCooldown > 0 ? `${(this.skillRCooldown / this.skillRMaxCooldown) * 100}%` : "0%";
   }
 
   private movePlayer(dt: number): void {
@@ -2928,13 +3856,14 @@ export class TowerDefenseGame {
   }
 
   private createMoneyDropMesh(amount: number): THREE.Group {
-    const mesh = createRenderedMoneyDropMesh({
+    // Do NOT apply GEO squash compensation here: drops live in dropGroup which
+    // already has scale (playfieldScale, 1, playfieldScale). Compensating Y
+    // would make coins 20x taller than intended on GEO maps.
+    return createRenderedMoneyDropMesh({
       amount,
       customDropModel: this.customDropModel,
       getClampedUserScale: (target) => this.getClampedUserScale(target),
     });
-    this.applyGeoPlayfieldSquashCompensation(mesh);
-    return mesh;
   }
 
   private updateDrops(dt: number): void {
@@ -2978,10 +3907,12 @@ export class TowerDefenseGame {
         this.toastElement.classList.remove("show");
       }
     }
-    if (this.sideToastTimer > 0) {
-      this.sideToastTimer -= dt;
-      if (this.sideToastTimer <= 0) {
-        this.sideToastElement.classList.remove("show");
+    for (let i = this.sideToastLines.length - 1; i >= 0; i--) {
+      const line = this.sideToastLines[i]!;
+      line.timer -= dt;
+      if (line.timer <= 0) {
+        line.el.remove();
+        this.sideToastLines.splice(i, 1);
       }
     }
   }
@@ -3149,15 +4080,82 @@ export class TowerDefenseGame {
     }, draw.unlockedNow ? 1400 : 900);
   }
 
-  private showToast(message: string, critical = false): void {
-    const element = critical ? this.toastElement : this.sideToastElement;
-    element.textContent = message;
-    element.classList.add("show");
-    if (critical) {
-      this.toastTimer = 1.65;
-    } else {
-      this.sideToastTimer = 1.25;
+  /**
+   * 面朝相机：
+   * - **战术俯视**：沿用相机自身 up（与代码里俯视 roll 一致），面板适合从正上/高俯往下看。
+   * - **斜视巡航**：用世界 Y 作为面板「竖起」方向（相当于相对顶视多读一层 90°），牌面垂直地面、侧身读字。
+   * 在非均匀缩放父级下，直接由目标世界矩阵反算局部矩阵，避免父级 scale 破坏朝向。
+   */
+  private orientHudPlaneToCamera(hudRoot: THREE.Object3D): void {
+    const parentObj = hudRoot.parent;
+    if (!parentObj) {
+      hudRoot.lookAt(this.camera.getWorldPosition(this.billboardCamWPos));
+      return;
     }
+
+    parentObj.updateWorldMatrix(true, false);
+    this.camera.updateMatrixWorld(false);
+    this.billboardHudWPos.copy(hudRoot.position).applyMatrix4(parentObj.matrixWorld);
+    this.camera.getWorldPosition(this.billboardCamWPos);
+
+    this.billboardZ.copy(this.billboardCamWPos).sub(this.billboardHudWPos);
+    if (this.billboardZ.lengthSq() < 1e-12) {
+      return;
+    }
+    this.billboardZ.normalize();
+
+    if (this.mode === "defense" && this.cameraMode === "free") {
+      /** 斜视角：以世界竖直为「牌面向上」，面板垂直于地面面朝相机；顶视若用 camera.up 会变成躺平。 */
+      this.billboardCamUpW.set(0, 1, 0);
+    } else {
+      this.camera.getWorldQuaternion(this.billboardCamQuat);
+      this.billboardCamUpW.copy(this.camera.up).applyQuaternion(this.billboardCamQuat).normalize();
+    }
+
+    this.billboardX.copy(this.billboardCamUpW).cross(this.billboardZ);
+    if (this.billboardX.lengthSq() < 1e-12) {
+      this.billboardX.set(1, 0, 0).cross(this.billboardZ);
+      if (this.billboardX.lengthSq() < 1e-12) {
+        this.billboardX.set(0, 1, 0).cross(this.billboardZ);
+      }
+    }
+    this.billboardX.normalize();
+    this.billboardY.copy(this.billboardZ).cross(this.billboardX).normalize();
+
+    this.billboardBasisM.makeBasis(this.billboardX, this.billboardY, this.billboardZ);
+    this.billboardWorldM.copy(this.billboardBasisM).setPosition(this.billboardHudWPos);
+    this.billboardParentInvM.copy(parentObj.matrixWorld).invert();
+    this.billboardLocalM.multiplyMatrices(this.billboardParentInvM, this.billboardWorldM);
+
+    hudRoot.matrixAutoUpdate = false;
+    hudRoot.matrix.copy(this.billboardLocalM);
+    hudRoot.matrixWorldNeedsUpdate = true;
+  }
+
+  private pushSideToast(message: string): void {
+    const el = document.createElement("div");
+    el.className = "toast-side-item";
+    el.setAttribute("role", "status");
+    el.textContent = message;
+    this.sideToastElement.prepend(el);
+    this.sideToastLines.unshift({ el, timer: 2.15 });
+    while (this.sideToastLines.length > 5) {
+      const dropped = this.sideToastLines.pop();
+      dropped?.el.remove();
+    }
+    requestAnimationFrame(() => {
+      el.classList.add("toast-side-item--in");
+    });
+  }
+
+  private showToast(message: string, critical = false): void {
+    if (critical) {
+      this.toastElement.textContent = message;
+      this.toastElement.classList.add("show");
+      this.toastTimer = 1.65;
+      return;
+    }
+    this.pushSideToast(message);
   }
 
   private updateUi(): void {
@@ -3201,9 +4199,43 @@ export class TowerDefenseGame {
         this.selectedBuilding.spec.maxHp ?? 1
       } | \u653b\u51fb\uff1a${this.selectedBuilding.spec.damage ?? 0}`;
 
-      this.activeSkillButton.style.display = "none";
+      const active = this.mode === "defense" ? this.selectedBuilding.spec.activeSkill : undefined;
+      if (active) {
+        this.selectedUnitPanel.classList.toggle("active", true);
+        this.activeSkillMeta.hidden = false;
+        const cd = Math.max(0, this.selectedBuilding.skillCooldownTimer);
+        const cooldownSec = Math.ceil(cd);
+        this.activeSkillButton.style.display = "block";
+        this.activeSkillMeta.textContent =
+          cooldownSec > 0
+            ? `\u6280\u80fd\uff1a${active.name}\uff0c\u5feb\u6377\u952e F\uff1b\u51b7\u5374 ${cooldownSec}s\uff08\u603b CD ${Math.round(active.cooldown)}s\uff09`
+            : `\u6280\u80fd\uff1a${active.name}\uff0c\u5feb\u6377\u952e F\u6216\u70b9\u4e0b\u65b9\u6309\u94ae\u91ca\u653e`;
+
+        if (cooldownSec > 0) {
+          this.activeSkillButton.textContent = `${active.name} \xb7 CD ${cooldownSec}s`;
+          this.activeSkillButton.disabled = true;
+          this.activeSkillButton.setAttribute(
+            "title",
+            `${active.description}\uff08\u5269\u4f59 ${cooldownSec}s\uff09`,
+          );
+        } else {
+          this.activeSkillButton.textContent = `\u91ca\u653e ${active.name}`;
+          this.activeSkillButton.disabled = false;
+          this.activeSkillButton.setAttribute(
+            "title",
+            `${active.description}\uff08\u6280\u80fd CD ${Math.round(active.cooldown)}s\uff09`,
+          );
+        }
+      } else {
+        this.selectedUnitPanel.classList.toggle("active", false);
+        this.activeSkillMeta.hidden = true;
+        this.activeSkillButton.style.display = "none";
+      }
     } else {
       this.selectedUnitPanel.style.display = "none";
+      this.selectedUnitPanel.classList.toggle("active", false);
+      this.activeSkillMeta.hidden = true;
+      this.activeSkillButton.style.display = "none";
     }
 
     document.querySelectorAll<HTMLButtonElement>(".build-button").forEach((button) => {

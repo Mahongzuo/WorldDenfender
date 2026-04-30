@@ -207,6 +207,9 @@ export function editorLevelToRuntimeMap(level: EditorLevel, mode: GameMode): Map
     path,
     obstacles,
     actors: extractEditorActors(editorMap),
+    safeZones: mode === "explore"
+      ? uniqueCells((exploreLayout?.safeZones ?? []).map(project), sourceCols, sourceRows)
+      : [],
   };
 }
 
