@@ -86,6 +86,15 @@
     var activeThemeScope = 'defense';
     var themeEditorCacheKey = '';
     var themeBoardUrlDebounce = 0;
+    var ERASER_RADIUS_STORAGE_KEY = 'earth-guardian.level-editor.eraserBrushRadius';
+    var ERASER_RADIUS_MAX = 12;
+    var eraserBrushRadius = 0;
+    /** @type {{ clientX: number, clientY: number } | null} */
+    var eraserPreviewLastPointer = null;
+    /** @type {{ pointerId:number, id:string, startClientX:number, startClientY:number, startLeft:number, startTop:number } | null} */
+    var boardImagePointerDrag = null;
+    /** @type {{ pointerId:number, handle:string, id:string, startX:number, startY:number, startLayer:{centerX:number,centerY:number,widthPct:number}, aspect:number, innerW:number, innerH:number } | null} */
+    var boardImageResize = null;
     var activeEditorMode = 'defense';
     var activeGameplayTab = 'enemies';
     var selectedGameplayEntryId = '';
@@ -169,6 +178,9 @@
         gameplayAssetType: document.getElementById('gameplayAssetType'),
         gameplayAssetList: document.getElementById('gameplayAssetList'),
         mapGrid: document.getElementById('mapGrid'),
+        eraserToolPanel: document.getElementById('eraserToolPanel'),
+        eraserRadiusSlider: document.getElementById('eraserRadiusSlider'),
+        eraserRadiusNumber: document.getElementById('eraserRadiusNumber'),
         mapStage: document.getElementById('mapStage'),
         activeToolLabel: document.getElementById('activeToolLabel'),
         fieldLevelName: document.getElementById('fieldLevelName'),
@@ -203,6 +215,7 @@
         towerModelList: document.getElementById('towerModelList'),
         gameAssetSection: document.getElementById('gameAssetSection'),
         boardViewport: document.getElementById('boardViewport'),
+        boardImagesPanel: document.getElementById('boardImagesPanel'),
         previewStageWrap: document.getElementById('previewStageWrap'),
         viewportViewTabs: document.getElementById('viewportViewTabs'),
         editorToolRibbon: document.getElementById('editorToolRibbon'),
@@ -310,7 +323,8 @@
         explorePoint: '探索点',
         safeZone: '安全区',
         actor: '模型 Actor',
-        erase: '橡皮擦'
+        erase: '橡皮擦',
+        boardImage: '棋盘配图'
     };
 
     var LEVEL_CONTENT_BROWSER_FILTER_ORDER = [
@@ -534,12 +548,12 @@
             exploreName: '北京·霓虹街区',
             geo: CITY_GEO_CONFIGS.beijing,
             defense: {
-                theme: { ground: '#98d94e', groundAlt: '#8bc34a', road: '#ffecb3', obstacle: '#ff7043', accent: '#ffeb3b', fog: '#e1f5fe' },
+                theme: { ground: '#3d524c', groundAlt: '#344844', road: '#4d6560', obstacle: '#5c4d56', accent: '#7fb5a5', fog: '#263832' },
                 path: [{ col: 0, row: 13 }, { col: 5, row: 13 }, { col: 5, row: 9 }, { col: 10, row: 9 }, { col: 10, row: 4 }, { col: 18, row: 4 }, { col: 18, row: 11 }, { col: 27, row: 11 }],
                 obstacles: cellsRect(2, 2, 4, 2).concat(cellsRect(12, 7, 3, 2), cellsRect(21, 3, 3, 3), cellsRect(2, 15, 5, 2), cellsRect(22, 14, 4, 2))
             },
             explore: {
-                theme: { ground: '#111827', groundAlt: '#1f2937', road: '#374151', obstacle: '#f43f5e', accent: '#fff1f2', fog: '#030712' },
+                theme: { ground: '#05080f', groundAlt: '#0a1220', road: '#1e3040', obstacle: '#382428', accent: '#4a9eaa', fog: '#03060c' },
                 path: [{ col: 3, row: 9 }, { col: 10, row: 9 }, { col: 10, row: 4 }, { col: 17, row: 4 }, { col: 17, row: 13 }, { col: 24, row: 13 }],
                 obstacles: cellsRect(1, 1, 5, 3).concat(cellsRect(21, 1, 5, 4), cellsRect(3, 14, 4, 3), cellsRect(12, 8, 4, 2), cellsRect(22, 8, 3, 3))
             }
@@ -550,12 +564,12 @@
             exploreName: '上海·学院环廊',
             geo: CITY_GEO_CONFIGS.shanghai,
             defense: {
-                theme: { ground: '#81d4fa', groundAlt: '#4fc3f7', road: '#ffffff', obstacle: '#ffab40', accent: '#ffe082', fog: '#e0f7fa' },
+                theme: { ground: '#6f9fa7', groundAlt: '#5f8f97', road: '#82b5bc', obstacle: '#b88772', accent: '#c9a882', fog: '#507880' },
                 path: [{ col: 0, row: 3 }, { col: 8, row: 3 }, { col: 8, row: 14 }, { col: 15, row: 14 }, { col: 15, row: 7 }, { col: 23, row: 7 }, { col: 23, row: 15 }, { col: 27, row: 15 }],
                 obstacles: cellsRect(3, 8, 3, 3).concat(cellsRect(11, 2, 4, 2), cellsRect(18, 11, 3, 4), cellsRect(24, 2, 3, 3), cellsRect(1, 15, 4, 2))
             },
             explore: {
-                theme: { ground: '#065f46', groundAlt: '#064e3b', road: '#047857', obstacle: '#10b981', accent: '#ecfdf5', fog: '#022c22' },
+                theme: { ground: '#1a4d3f', groundAlt: '#154038', road: '#276658', obstacle: '#3d8068', accent: '#6b9888', fog: '#0f3028' },
                 path: [{ col: 4, row: 3 }, { col: 23, row: 3 }, { col: 23, row: 14 }, { col: 4, row: 14 }, { col: 4, row: 3 }],
                 obstacles: cellsRect(8, 6, 4, 6).concat(cellsRect(16, 6, 4, 6), cellsRect(1, 7, 2, 4), cellsRect(25, 7, 2, 4))
             }
@@ -566,12 +580,12 @@
             exploreName: '广州·夜港平台',
             geo: CITY_GEO_CONFIGS.guangzhou,
             defense: {
-                theme: { ground: '#a5d6a7', groundAlt: '#81c784', road: '#fff9c4', obstacle: '#f06292', accent: '#ff8a65', fog: '#f1f8e9' },
+                theme: { ground: '#79967c', groundAlt: '#6a876e', road: '#8daa91', obstacle: '#a86878', accent: '#c49a7a', fog: '#536956' },
                 path: [{ col: 0, row: 9 }, { col: 4, row: 9 }, { col: 4, row: 3 }, { col: 12, row: 3 }, { col: 12, row: 12 }, { col: 20, row: 12 }, { col: 20, row: 5 }, { col: 27, row: 5 }],
                 obstacles: cellsRect(1, 1, 3, 2).concat(cellsRect(7, 7, 3, 4), cellsRect(15, 2, 3, 3), cellsRect(22, 10, 4, 4), cellsRect(9, 15, 8, 2))
             },
             explore: {
-                theme: { ground: '#1e3a8a', groundAlt: '#1e40af', road: '#1d4ed8', obstacle: '#60a5fa', accent: '#dbeafe', fog: '#172554' },
+                theme: { ground: '#2a4480', groundAlt: '#264078', road: '#3a5c9c', obstacle: '#5a78b0', accent: '#7a94b8', fog: '#1a2850' },
                 path: [{ col: 2, row: 5 }, { col: 9, row: 5 }, { col: 9, row: 11 }, { col: 18, row: 11 }, { col: 18, row: 6 }, { col: 26, row: 6 }],
                 obstacles: cellsRect(1, 13, 7, 3).concat(cellsRect(12, 2, 5, 3), cellsRect(20, 10, 5, 5), cellsRect(3, 8, 3, 2))
             }
@@ -582,12 +596,12 @@
             exploreName: '深圳·欢乐海岸',
             geo: CITY_GEO_CONFIGS.shenzhen,
             defense: {
-                theme: { ground: '#e1f5fe', groundAlt: '#b3e5fc', road: '#81d4fa', obstacle: '#ba68c8', accent: '#ffd54f', fog: '#f5f5f5' },
+                theme: { ground: '#9ebfcf', groundAlt: '#8babbf', road: '#b0ccd8', obstacle: '#957dad', accent: '#c4ae88', fog: '#708898' },
                 path: [{ col: 0, row: 15 }, { col: 6, row: 15 }, { col: 6, row: 11 }, { col: 14, row: 11 }, { col: 14, row: 6 }, { col: 8, row: 6 }, { col: 8, row: 2 }, { col: 21, row: 2 }, { col: 21, row: 9 }, { col: 27, row: 9 }],
                 obstacles: cellsRect(2, 3, 4, 4).concat(cellsRect(10, 14, 5, 3), cellsRect(17, 5, 3, 5), cellsRect(23, 12, 4, 4), cellsRect(11, 8, 2, 2))
             },
             explore: {
-                theme: { ground: '#4c1d95', groundAlt: '#5b21b6', road: '#6d28d9', obstacle: '#8b5cf6', accent: '#ede9fe', fog: '#2e1065' },
+                theme: { ground: '#5a2878', groundAlt: '#663090', road: '#7848a8', obstacle: '#8860b8', accent: '#a890c8', fog: '#3c1858' },
                 path: [{ col: 5, row: 15 }, { col: 5, row: 9 }, { col: 12, row: 9 }, { col: 12, row: 3 }, { col: 21, row: 3 }, { col: 21, row: 12 }, { col: 26, row: 12 }],
                 obstacles: cellsRect(1, 2, 5, 5).concat(cellsRect(8, 13, 5, 3), cellsRect(15, 7, 4, 4), cellsRect(22, 15, 4, 2))
             }
@@ -598,12 +612,12 @@
             exploreName: '济南·趵突露台',
             geo: CITY_GEO_CONFIGS.jinan,
             defense: {
-                theme: { ground: '#80cbc4', groundAlt: '#4db6ac', road: '#e0f2f1', obstacle: '#ffd54f', accent: '#ffab91', fog: '#e0f2f1' },
+                theme: { ground: '#6e9e96', groundAlt: '#5f8e86', road: '#82b0a6', obstacle: '#a89458', accent: '#b8a078', fog: '#4a7068' },
                 path: [{ col: 0, row: 6 }, { col: 7, row: 6 }, { col: 7, row: 12 }, { col: 13, row: 12 }, { col: 13, row: 8 }, { col: 19, row: 8 }, { col: 19, row: 3 }, { col: 24, row: 3 }, { col: 24, row: 13 }, { col: 27, row: 13 }],
                 obstacles: cellsRect(1, 1, 5, 3).concat(cellsRect(10, 3, 4, 3), cellsRect(15, 13, 5, 3), cellsRect(21, 6, 3, 4), cellsRect(3, 14, 5, 3))
             },
             explore: {
-                theme: { ground: '#90a0b8', groundAlt: '#8598ae', road: '#e2ecff', obstacle: '#6078a0', accent: '#befffc', fog: '#a0b0c8' },
+                theme: { ground: '#8898a8', groundAlt: '#7a8a9c', road: '#9cacb8', obstacle: '#607890', accent: '#80b0a8', fog: '#687884' },
                 path: [{ col: 2, row: 8 }, { col: 8, row: 8 }, { col: 8, row: 3 }, { col: 19, row: 3 }, { col: 19, row: 14 }, { col: 26, row: 14 }],
                 obstacles: cellsRect(1, 1, 4, 3).concat(cellsRect(10, 10, 4, 4), cellsRect(15, 6, 3, 3), cellsRect(23, 2, 4, 4), cellsRect(4, 14, 5, 2))
             }
@@ -673,6 +687,130 @@
         bumpShellLayoutDependentUi();
     }
 
+    function readPersistedEraserBrushRadius() {
+        try {
+            var n = Number(window.localStorage.getItem(ERASER_RADIUS_STORAGE_KEY));
+            eraserBrushRadius = clamp(Number.isFinite(n) ? Math.floor(n) : 0, 0, ERASER_RADIUS_MAX);
+        } catch (ignore) {
+            eraserBrushRadius = 0;
+        }
+    }
+
+    function persistEraserBrushRadius() {
+        try {
+            window.localStorage.setItem(ERASER_RADIUS_STORAGE_KEY, String(eraserBrushRadius));
+        } catch (ignore) {}
+    }
+
+    function syncEraserBrushUi() {
+        if (refs.eraserRadiusSlider) refs.eraserRadiusSlider.value = String(eraserBrushRadius);
+        if (refs.eraserRadiusNumber) refs.eraserRadiusNumber.value = String(eraserBrushRadius);
+    }
+
+    function bindEraserToolControls() {
+        readPersistedEraserBrushRadius();
+        syncEraserBrushUi();
+        if (!refs.eraserRadiusSlider || !refs.eraserRadiusNumber || refs.eraserRadiusSlider.dataset.bound === '1') return;
+        refs.eraserRadiusSlider.dataset.bound = '1';
+        refs.eraserRadiusSlider.addEventListener('input', function () {
+            eraserBrushRadius = clamp(parseInt(refs.eraserRadiusSlider.value, 10) || 0, 0, ERASER_RADIUS_MAX);
+            refs.eraserRadiusNumber.value = String(eraserBrushRadius);
+            persistEraserBrushRadius();
+            refreshEraserPreviewIfActive();
+        });
+        refs.eraserRadiusNumber.addEventListener('change', function () {
+            eraserBrushRadius = clamp(Math.floor(Number(refs.eraserRadiusNumber.value) || 0), 0, ERASER_RADIUS_MAX);
+            refs.eraserRadiusSlider.value = String(eraserBrushRadius);
+            refs.eraserRadiusNumber.value = String(eraserBrushRadius);
+            persistEraserBrushRadius();
+            refreshEraserPreviewIfActive();
+        });
+        refs.eraserRadiusNumber.addEventListener('input', function () {
+            eraserBrushRadius = clamp(Math.floor(Number(refs.eraserRadiusNumber.value) || 0), 0, ERASER_RADIUS_MAX);
+            refs.eraserRadiusSlider.value = String(eraserBrushRadius);
+            persistEraserBrushRadius();
+            refreshEraserPreviewIfActive();
+        });
+    }
+
+    function updateEraserToolPanelVisibility() {
+        if (!refs.eraserToolPanel) return;
+        var show = activeWorkbench === 'level' && activeTool === 'erase';
+        refs.eraserToolPanel.classList.toggle('view-hidden', !show);
+        if (!show) {
+            eraserPreviewLastPointer = null;
+            clearEraserBrushPreview();
+        }
+    }
+
+    function cellsInEraserBrush(centerCol, centerRow, radius, cols, rows) {
+        var r = clamp(Math.floor(Number(radius) || 0), 0, ERASER_RADIUS_MAX);
+        var out = [];
+        var c0 = Number(centerCol);
+        var r0 = Number(centerRow);
+        for (var dr = -r; dr <= r; dr += 1) {
+            for (var dc = -r; dc <= r; dc += 1) {
+                var c = c0 + dc;
+                var rw = r0 + dr;
+                if (c >= 0 && c < cols && rw >= 0 && rw < rows) out.push({ col: c, row: rw });
+            }
+        }
+        return out;
+    }
+
+    function clearEraserBrushPreview() {
+        if (!refs.mapGrid) return;
+        refs.mapGrid.querySelectorAll('.map-cell--eraser-preview').forEach(function (el) {
+            el.classList.remove('map-cell--eraser-preview');
+        });
+    }
+
+    function updateEraserBrushPreview(clientX, clientY) {
+        if (!refs.mapGrid) return;
+        var level = getLevel();
+        if (!level || !level.map || !level.map.grid) {
+            clearEraserBrushPreview();
+            return;
+        }
+        if (activeWorkbench !== 'level' || activeTool !== 'erase') {
+            clearEraserBrushPreview();
+            return;
+        }
+        var g = level.map.grid;
+        var pick = mapGridPickCellFromClientPoint(clientX, clientY, g);
+        clearEraserBrushPreview();
+        if (!pick) return;
+        var centerCol = Number(pick.getAttribute('data-col'));
+        var centerRow = Number(pick.getAttribute('data-row'));
+        if (!Number.isFinite(centerCol) || !Number.isFinite(centerRow)) return;
+        var cells = cellsInEraserBrush(centerCol, centerRow, eraserBrushRadius, g.cols, g.rows);
+        for (var i = 0; i < cells.length; i += 1) {
+            var sel =
+                '.map-grid-cells--floor .map-cell[data-col="' +
+                String(cells[i].col) +
+                '"][data-row="' +
+                String(cells[i].row) +
+                '"]';
+            var el = refs.mapGrid.querySelector(sel);
+            if (el) el.classList.add('map-cell--eraser-preview');
+        }
+    }
+
+    function refreshEraserPreviewIfActive() {
+        if (!eraserPreviewLastPointer) return;
+        updateEraserBrushPreview(eraserPreviewLastPointer.clientX, eraserPreviewLastPointer.clientY);
+    }
+
+    function applyEraserBrush(centerCol, centerRow) {
+        var level = getLevel();
+        if (!level || !level.map || !level.map.grid) return;
+        var g = level.map.grid;
+        var cells = cellsInEraserBrush(centerCol, centerRow, eraserBrushRadius, g.cols, g.rows);
+        for (var i = 0; i < cells.length; i += 1) {
+            eraseCellAt(cells[i].col, cells[i].row);
+        }
+    }
+
     function init() {
         initGeoMappingToggle();
         readShellCollapsedPrefsFromStorage();
@@ -693,6 +831,479 @@
         if (refs.toggleGeoMapping) {
             refs.toggleGeoMapping.checked = geoMappingEnabled;
         }
+    }
+
+    function renumberBoardImageOrders(level) {
+        if (!level || !Array.isArray(level.map.boardImageLayers) || !level.map.boardImageLayers.length) return;
+        level.map.boardImageLayers
+            .slice()
+            .sort(function (a, b) {
+                return (Number(a.order) || 0) - (Number(b.order) || 0);
+            })
+            .forEach(function (L, i) {
+                L.order = i;
+            });
+    }
+
+    function moveBoardLayerOrder(level, id, dir) {
+        if (!level || !Array.isArray(level.map.boardImageLayers) || level.map.boardImageLayers.length < 2) return;
+        renumberBoardImageOrders(level);
+        var sorted = level.map.boardImageLayers.slice().sort(function (a, b) {
+            return (Number(a.order) || 0) - (Number(b.order) || 0);
+        });
+        var i = sorted.findIndex(function (L) {
+            return L.id === id;
+        });
+        var j = i + dir;
+        if (i < 0 || j < 0 || j >= sorted.length) return;
+        var tmp = sorted[i].order;
+        sorted[i].order = sorted[j].order;
+        sorted[j].order = tmp;
+    }
+
+    function renderBoardImagesPanel() {
+        if (!refs.boardImagesPanel) return;
+        var show = activeWorkbench === 'level' && viewportViewMode === 'board';
+        refs.boardImagesPanel.classList.toggle('view-hidden', !show);
+        if (!show) return;
+        var level = getLevel();
+        if (!level) {
+            refs.boardImagesPanel.innerHTML =
+                '<p class="board-images-panel__title">棋盘配图</p>' +
+                '<div class="board-images-panel__empty">请先选择关卡。</div>';
+            return;
+        }
+        var layers = Array.isArray(level.map.boardImageLayers) ? level.map.boardImageLayers : [];
+        if (!layers.length) {
+            refs.boardImagesPanel.innerHTML =
+                '<p class="board-images-panel__title">棋盘配图</p>' +
+                '<div class="board-images-panel__empty">拖入 PNG / JPEG / WebP 等到棋盘添加图层。</div>';
+            return;
+        }
+        var raw = layers.slice().sort(function (a, b) {
+            return (Number(a.order) || 0) - (Number(b.order) || 0);
+        });
+        var sid = selectedObject && selectedObject.kind === 'boardImage' ? selectedObject.id : '';
+        var rows = raw
+            .map(function (L, idx) {
+                var selCls = L.id === sid ? ' board-images-layer-row--selected' : '';
+                var thumb =
+                    '<img class="board-images-layer-thumb" alt="" draggable="false" src="' +
+                    escapeAttr(L.src) +
+                    '">';
+                return (
+                    '<div class="board-images-layer-row' +
+                    selCls +
+                    '" data-board-panel-id="' +
+                    escapeAttr(L.id) +
+                    '" role="group">' +
+                    thumb +
+                    '<div class="board-images-layer-meta">' +
+                    '<strong>图层 ' +
+                    escapeHtml(String(idx + 1)) +
+                    '</strong>' +
+                    '<span>order ' +
+                    escapeHtml(String(L.order != null ? L.order : idx)) +
+                    ' · 位置 X' +
+                    escapeHtml(String(L.centerX)) +
+                    '% Y' +
+                    escapeHtml(String(L.centerY)) +
+                    '% · 宽度 ' +
+                    escapeHtml(String(L.widthPct)) +
+                    '%</span>' +
+                    '<div class="board-images-layer-actions">' +
+                    '<button type="button" class="mini-button" data-board-panel-act="bil-up" data-board-panel-id="' +
+                    escapeAttr(L.id) +
+                    '">上移</button>' +
+                    '<button type="button" class="mini-button" data-board-panel-act="bil-down" data-board-panel-id="' +
+                    escapeAttr(L.id) +
+                    '">下移</button>' +
+                    '<button type="button" class="mini-button" data-board-panel-act="bil-del" data-board-panel-id="' +
+                    escapeAttr(L.id) +
+                    '">删除</button>' +
+                    '</div></div></div>'
+                );
+            })
+            .join('');
+        refs.boardImagesPanel.innerHTML = '<p class="board-images-panel__title">棋盘配图</p>' + rows;
+    }
+
+    function ensureBoardImagesPanelDelegated() {
+        if (!refs.boardImagesPanel || refs.boardImagesPanel.dataset.bilDelegated === '1') return;
+        refs.boardImagesPanel.dataset.bilDelegated = '1';
+        refs.boardImagesPanel.addEventListener('click', function (event) {
+            var level = getLevel();
+            var btn = event.target.closest('[data-board-panel-act]');
+            var row = event.target.closest('.board-images-layer-row[data-board-panel-id]');
+            if (btn && level && level.map.boardImageLayers) {
+                var id = btn.getAttribute('data-board-panel-id') || '';
+                var act = btn.getAttribute('data-board-panel-act') || '';
+                if (act === 'bil-up') {
+                    moveBoardLayerOrder(level, id, -1);
+                    markDirty('已调整棋盘配图顺序');
+                    renderMap();
+                    schedulePreviewRefresh();
+                    renderBoardImagesPanel();
+                    return;
+                }
+                if (act === 'bil-down') {
+                    moveBoardLayerOrder(level, id, 1);
+                    markDirty('已调整棋盘配图顺序');
+                    renderMap();
+                    schedulePreviewRefresh();
+                    renderBoardImagesPanel();
+                    return;
+                }
+                if (act === 'bil-del') {
+                    selectedObject =
+                        selectedObject && selectedObject.kind === 'boardImage' && selectedObject.id === id
+                            ? null
+                            : selectedObject;
+                    boardImagePointerDrag = null;
+                    boardImageResize = null;
+                    level.map.boardImageLayers = level.map.boardImageLayers.filter(function (L) {
+                        return L.id !== id;
+                    });
+                    markDirty('已删除棋盘配图');
+                    renderSelectionInspector();
+                    renderMap();
+                    schedulePreviewRefresh();
+                    renderBoardImagesPanel();
+                    return;
+                }
+            }
+            if (row && !btn && level) {
+                var id2 = row.getAttribute('data-board-panel-id');
+                selectedObject = { kind: 'boardImage', id: id2 };
+                renderSelectionInspector();
+                renderMap();
+                renderBoardImagesPanel();
+            }
+        });
+    }
+
+    function clampBoardAspect(v) {
+        var x = Number(v);
+        if (!Number.isFinite(x) || x <= 0) return 0.75;
+        return Math.min(24, Math.max(0.04, x));
+    }
+
+    function readSpriteAspect(layer, spr) {
+        var asp = Number(layer.aspect);
+        if (Number.isFinite(asp) && asp > 0) return clampBoardAspect(asp);
+        var img = spr && spr.querySelector ? spr.querySelector('.bil-img-wrap img, img') : null;
+        if (img && img.naturalWidth > 0) {
+            var a = img.naturalHeight / img.naturalWidth;
+            layer.aspect = clampBoardAspect(a);
+            return layer.aspect;
+        }
+        return clampBoardAspect(0.75);
+    }
+
+    function toolAllowsBoardSpriteEdit() {
+        return activeTool === 'select' || activeTool === 'boardImage';
+    }
+
+    function applyBoardImageResizePointerMove(event) {
+        var r = boardImageResize;
+        if (!r) return;
+        var level = getLevel();
+        var layer = findBoardImageLayerById(level, r.id);
+        if (!layer || !level || !level.map.grid) return;
+        var iw = r.innerW;
+        var ih = r.innerH;
+        var dx = event.clientX - r.startX;
+        var dy = event.clientY - r.startY;
+        var asp = r.aspect > 0 ? r.aspect : 0.75;
+        var sl = r.startLayer;
+        var lx = ((Number(sl.centerX) || 0) / 100) * iw;
+        var ty = ((Number(sl.centerY) || 0) / 100) * ih;
+        var wp = ((Number(sl.widthPct) || 40) / 100) * iw;
+        var hp = wp * asp;
+        var minWp = (5 / 100) * iw;
+        var maxWp = (500 / 100) * iw;
+        var h = r.handle;
+
+        if (h === 'e') {
+            var nwE = clamp(wp + dx, minWp, maxWp);
+            layer.centerX = Number(sl.centerX) || 0;
+            layer.centerY = Number(sl.centerY) || 0;
+            layer.widthPct = (nwE / iw) * 100;
+        } else if (h === 'w') {
+            var right = lx + wp;
+            var nl = lx + dx;
+            var nwW = clamp(right - nl, minWp, maxWp);
+            nl = right - nwW;
+            layer.centerX = clamp((nl / iw) * 100, 0, 100);
+            layer.centerY = Number(sl.centerY) || 0;
+            layer.widthPct = (nwW / iw) * 100;
+        } else if (h === 's') {
+            var nb = ty + hp + dy;
+            var nhS = Math.max(minWp * asp, nb - ty);
+            var nwS = clamp(nhS / asp, minWp, maxWp);
+            layer.centerX = Number(sl.centerX) || 0;
+            layer.centerY = Number(sl.centerY) || 0;
+            layer.widthPct = (nwS / iw) * 100;
+        } else if (h === 'n') {
+            var botN = ty + hp;
+            var nt = ty + dy;
+            var nhN = Math.max(minWp * asp, botN - nt);
+            var nwN = clamp(nhN / asp, minWp, maxWp);
+            nhN = nwN * asp;
+            nt = botN - nhN;
+            layer.centerX = Number(sl.centerX) || 0;
+            layer.centerY = clamp((nt / ih) * 100, 0, 100);
+            layer.widthPct = (nwN / iw) * 100;
+        } else if (h === 'se') {
+            var sSe = Math.min((wp + dx) / wp, (hp + dy) / hp);
+            sSe = Math.max(minWp / wp, Math.min(maxWp / wp, sSe));
+            layer.centerX = Number(sl.centerX) || 0;
+            layer.centerY = Number(sl.centerY) || 0;
+            layer.widthPct = sl.widthPct * sSe;
+        } else if (h === 'nw') {
+            var sNw = Math.min((lx + wp - (lx + dx)) / wp, (ty + hp - (ty + dy)) / hp);
+            sNw = Math.max(minWp / wp, Math.min(maxWp / wp, sNw));
+            var nLeft = lx + wp - wp * sNw;
+            var nTop = ty + hp - hp * sNw;
+            layer.centerX = clamp((nLeft / iw) * 100, 0, 100);
+            layer.centerY = clamp((nTop / ih) * 100, 0, 100);
+            layer.widthPct = sl.widthPct * sNw;
+        } else if (h === 'ne') {
+            var fixBot = ty + hp;
+            var sNe = Math.min((wp + dx) / wp, (fixBot - (ty + dy)) / hp);
+            sNe = Math.max(minWp / wp, Math.min(maxWp / wp, sNe));
+            var nTop2 = fixBot - hp * sNe;
+            layer.centerX = Number(sl.centerX) || 0;
+            layer.centerY = clamp((nTop2 / ih) * 100, 0, 100);
+            layer.widthPct = sl.widthPct * sNe;
+        } else if (h === 'sw') {
+            var fixRw = lx + wp;
+            var sSw = Math.min((fixRw - (lx + dx)) / wp, (ty + hp + dy - ty) / hp);
+            sSw = Math.max(minWp / wp, Math.min(maxWp / wp, sSw));
+            var nLeft2 = fixRw - wp * sSw;
+            layer.centerX = clamp((nLeft2 / iw) * 100, 0, 100);
+            layer.centerY = Number(sl.centerY) || 0;
+            layer.widthPct = sl.widthPct * sSw;
+        }
+    }
+
+    function bindBoardImageGlobalHandlers() {
+        if (!refs.mapStage) return;
+        if (refs.mapStage.dataset.boardImgGlobalHandlers === '1') return;
+        refs.mapStage.dataset.boardImgGlobalHandlers = '1';
+        refs.mapStage.addEventListener(
+            'pointerdown',
+            function (event) {
+                if (activeWorkbench !== 'level' || viewportViewMode !== 'board' || !toolAllowsBoardSpriteEdit()) return;
+                var spr = event.target.closest('.map-board-image-sprite');
+                if (!spr) return;
+                var lid = spr.getAttribute('data-board-image-id') || '';
+                if (!lid) return;
+                var level = getLevel();
+                var layer = findBoardImageLayerById(level, lid);
+                if (!layer) return;
+                var handle = event.target.closest('[data-board-resize]');
+                if (handle && spr.contains(handle)) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    var aspectR = readSpriteAspect(layer, spr);
+                    var mMet = boardGridPaintMetrics(level.map.grid);
+                    if (!mMet || mMet.innerW <= 2 || mMet.innerH <= 2) return;
+                    boardImageResize = {
+                        pointerId: event.pointerId,
+                        handle: handle.getAttribute('data-board-resize') || 'se',
+                        id: lid,
+                        startX: event.clientX,
+                        startY: event.clientY,
+                        startLayer: {
+                            centerX: Number(layer.centerX) || 0,
+                            centerY: Number(layer.centerY) || 0,
+                            widthPct: Number(layer.widthPct) || 40
+                        },
+                        aspect: aspectR,
+                        innerW: mMet.innerW,
+                        innerH: mMet.innerH
+                    };
+                    boardImagePointerDrag = null;
+                    if (handle.setPointerCapture) handle.setPointerCapture(event.pointerId);
+                    renderBoardImagesPanel();
+                    return;
+                }
+                if (spr.setPointerCapture) spr.setPointerCapture(event.pointerId);
+                selectedObject = { kind: 'boardImage', id: lid };
+                boardImageResize = null;
+                boardImagePointerDrag = {
+                    pointerId: event.pointerId,
+                    id: lid,
+                    startX: event.clientX,
+                    startY: event.clientY,
+                    startLeft: Number(layer.centerX) || 0,
+                    startTop: Number(layer.centerY) || 0
+                };
+                event.preventDefault();
+                renderSelectionInspector();
+                renderMap();
+                renderBoardImagesPanel();
+            },
+            true
+        );
+        document.addEventListener(
+            'pointermove',
+            function (event) {
+                if (boardImageResize && event.pointerId === boardImageResize.pointerId) {
+                    applyBoardImageResizePointerMove(event);
+                    markDirty('已缩放棋盘配图');
+                    renderMap();
+                    schedulePreviewRefresh();
+                    return;
+                }
+                if (!boardImagePointerDrag || event.pointerId !== boardImagePointerDrag.pointerId) return;
+                var level = getLevel();
+                if (!level || !level.map.grid) return;
+                var layer = findBoardImageLayerById(level, boardImagePointerDrag.id);
+                if (!layer) return;
+                var m = boardGridPaintMetrics(level.map.grid);
+                if (!m || m.innerW <= 2 || m.innerH <= 2) return;
+                var dxPct = ((event.clientX - boardImagePointerDrag.startX) / m.innerW) * 100;
+                var dyPct = ((event.clientY - boardImagePointerDrag.startY) / m.innerH) * 100;
+                layer.centerX = Math.max(0, Math.min(100, boardImagePointerDrag.startLeft + dxPct));
+                layer.centerY = Math.max(0, Math.min(100, boardImagePointerDrag.startTop + dyPct));
+                markDirty('已移动棋盘配图');
+                renderMap();
+                schedulePreviewRefresh();
+            },
+            true
+        );
+        document.addEventListener(
+            'pointerup',
+            function (event) {
+                if (boardImagePointerDrag && event.pointerId === boardImagePointerDrag.pointerId) {
+                    boardImagePointerDrag = null;
+                    renderBoardImagesPanel();
+                }
+                if (boardImageResize && event.pointerId === boardImageResize.pointerId) {
+                    boardImageResize = null;
+                    renderBoardImagesPanel();
+                }
+            },
+            true
+        );
+        document.addEventListener('pointercancel', function () {
+            boardImagePointerDrag = null;
+            boardImageResize = null;
+        });
+        refs.mapStage.addEventListener(
+            'wheel',
+            function (event) {
+                if (activeWorkbench !== 'level' || viewportViewMode !== 'board' || !toolAllowsBoardSpriteEdit()) return;
+                var spr = event.target.closest('.map-board-image-sprite');
+                if (!spr) return;
+                event.preventDefault();
+                var lid = spr.getAttribute('data-board-image-id') || '';
+                if (!lid) return;
+                var level = getLevel();
+                var layer = findBoardImageLayerById(level, lid);
+                if (!layer) return;
+                readSpriteAspect(layer, spr);
+                var w = Number(layer.widthPct) || 40;
+                w *= event.deltaY < 0 ? 1.075 : 0.935;
+                w = clamp(w, 5, 500);
+                layer.widthPct = w;
+                markDirty('已缩放棋盘配图');
+                renderMap();
+                schedulePreviewRefresh();
+                renderBoardImagesPanel();
+            },
+            { passive: false }
+        );
+    }
+
+    function findBoardImageLayerById(level, id) {
+        if (!level || !level.map.boardImageLayers) return null;
+        return (
+            level.map.boardImageLayers.find(function (layer) {
+                return layer.id === id;
+            }) || null
+        );
+    }
+
+    function tryConsumeBoardImageFileDrop(event) {
+        var files = event.dataTransfer && event.dataTransfer.files;
+        if (!files || !files.length) return false;
+        var imgs = [];
+        for (var i = 0; i < files.length; i += 1) {
+            var f = files[i];
+            if (!f) continue;
+            if (/^image\//i.test(String(f.type || '')) || /\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(String(f.name || '')))
+                imgs.push(f);
+        }
+        if (!imgs.length) return false;
+        var level = getLevel();
+        if (!level || !level.map.grid) return true;
+        if (!Array.isArray(level.map.boardImageLayers)) level.map.boardImageLayers = [];
+        var base = clientPointToBoardLayerPercents(event.clientX, event.clientY, level.map.grid);
+        var maxOrd =
+            level.map.boardImageLayers.length === 0
+                ? -1
+                : Math.max.apply(
+                      null,
+                      level.map.boardImageLayers.map(function (layer) {
+                          return Number(layer.order) || 0;
+                      })
+                  );
+        var j = 0;
+        function ingestNext() {
+            if (j >= imgs.length) {
+                markDirty('已导入棋盘配图');
+                activeTool = 'boardImage';
+                document.querySelectorAll('[data-tool]').forEach(function (item) {
+                    item.classList.toggle('active', item.getAttribute('data-tool') === 'boardImage');
+                });
+                if (refs.activeToolLabel) refs.activeToolLabel.textContent = '当前工具：' + TOOL_LABELS.boardImage;
+                updateEraserToolPanelVisibility();
+                updateStageHintText();
+                renderAll();
+                schedulePreviewRefresh();
+                return;
+            }
+            var offset = j;
+            var reader = new FileReader();
+            reader.onload = function () {
+                var url = typeof reader.result === 'string' ? reader.result : '';
+                if (!url) {
+                    j += 1;
+                    ingestNext();
+                    return;
+                }
+                var im = new Image();
+                im.onload = function () {
+                    var id = uid('board-img');
+                    var asp =
+                        im.naturalWidth > 0 ? clampBoardAspect(im.naturalHeight / im.naturalWidth) : clampBoardAspect(0.75);
+                    level.map.boardImageLayers.push({
+                        id: id,
+                        src: url,
+                        centerX: clamp(base.lx + (offset % 3) * 3, 0, 100),
+                        centerY: clamp(base.ty + Math.floor(offset / 3) * 3, 0, 100),
+                        widthPct: 46,
+                        opacity: 1,
+                        order: maxOrd + 1 + offset,
+                        aspect: asp
+                    });
+                    selectedObject = { kind: 'boardImage', id: id };
+                    j += 1;
+                    ingestNext();
+                };
+                im.onerror = function () {
+                    j += 1;
+                    ingestNext();
+                };
+                im.src = url;
+            };
+            reader.readAsDataURL(imgs[offset]);
+        }
+        ingestNext();
+        return true;
     }
 
     function bindEvents() {
@@ -733,7 +1344,7 @@
             closeProjectMenu();
         });
         refs.btnReload.addEventListener('click', reloadState);
-        refs.btnSave.addEventListener('click', saveState);
+        if (refs.btnSave) refs.btnSave.addEventListener('click', saveState);
         refs.btnExport.addEventListener('click', exportState);
         refs.btnCreateLevel.addEventListener('click', createManualLevel);
         refs.btnGenerateRegions.addEventListener('click', function () { generateRegionLevelSkeletons(true); });
@@ -967,6 +1578,8 @@
                     item.classList.toggle('active', item === button);
                 });
                 refs.activeToolLabel.textContent = '当前工具：' + TOOL_LABELS[activeTool];
+                updateEraserToolPanelVisibility();
+                updateStageHintText();
             });
         });
 
@@ -987,6 +1600,17 @@
             handleCellAction(Number(cell.dataset.col), Number(cell.dataset.row));
         });
 
+        refs.mapGrid.addEventListener('mousemove', function (event) {
+            if (activeWorkbench !== 'level' || activeTool !== 'erase') return;
+            eraserPreviewLastPointer = { clientX: event.clientX, clientY: event.clientY };
+            updateEraserBrushPreview(event.clientX, event.clientY);
+        });
+        refs.mapGrid.addEventListener('mouseleave', function () {
+            if (activeWorkbench !== 'level' || activeTool !== 'erase') return;
+            eraserPreviewLastPointer = null;
+            clearEraserBrushPreview();
+        });
+
         refs.mapGrid.addEventListener('dragover', function (event) {
             /* gap:1px 与 padding 会导致 target 落到 #mapGrid 自身，不写 preventDefault 则浏览器禁止 drop */
             event.preventDefault();
@@ -997,7 +1621,8 @@
             event.preventDefault();
             var level = getLevel();
             if (!level || !level.map || !level.map.grid) return;
-            var cellEl = event.target.closest('.map-cell[data-col][data-row]');
+            if (tryConsumeBoardImageFileDrop(event)) return;
+            var cellEl = event.target.closest('.map-grid-cells--floor .map-cell[data-col][data-row]');
             var resolved =
                 cellEl ||
                 (function () {
@@ -1007,6 +1632,7 @@
                         if (
                             n.classList &&
                             n.classList.contains('map-cell') &&
+                            n.closest('.map-grid-cells--floor') &&
                             n.getAttribute('data-col') != null &&
                             n.getAttribute('data-row') != null
                         ) {
@@ -1140,11 +1766,30 @@
                 return;
             }
 
+            if (
+                e.key === 'Escape' &&
+                activeWorkbench === 'level' &&
+                selectedObject &&
+                selectedObject.kind === 'boardImage'
+            ) {
+                e.preventDefault();
+                selectedObject = null;
+                boardImagePointerDrag = null;
+                boardImageResize = null;
+                renderSelectionInspector();
+                renderMap();
+                renderBoardImagesPanel();
+                return;
+            }
+
             if (e.key !== 'Delete') return;
             if (activeWorkbench !== 'level' || !selectedObject) return;
             e.preventDefault();
             deleteSelection();
         });
+        bindEraserToolControls();
+        bindBoardImageGlobalHandlers();
+        ensureBoardImagesPanelDelegated();
     }
 
     function normalizeGameModelsForCatalog() {
@@ -1976,6 +2621,8 @@
         renderThemeEditor();
         syncViewportPanels();
         renderContentBrowser();
+        renderBoardImagesPanel();
+        updateEraserToolPanelVisibility();
     }
 
     function ensureLevelContentBrowserUiWired() {
@@ -2370,12 +3017,7 @@
     }
 
     function themeColorInput(hex) {
-        var s = String(hex || '').trim();
-        if (/^#[0-9a-fA-F]{6}$/.test(s)) return s;
-        if (/^#[0-9a-fA-F]{3}$/.test(s)) {
-            return '#' + s[1] + s[1] + s[2] + s[2] + s[3] + s[3];
-        }
-        return '#456a78';
+        return normalizeEditorThemeColorHex(hex, '#5a7d82');
     }
 
     function fillThemeFormFromLevel() {
@@ -2916,7 +3558,13 @@
                 '鼠标左键拖拽旋转场景，滚轮缩放，右键平移；左键点中 Actor（或拖拽 Gizmo：移动·旋转·缩放）会优先编辑对象。Esc 取消选择；F 聚焦所选 Actor；顶部「内容浏览器」或 Ctrl+空格 弹出项目模型（可拖拽缩放窗口），卡片拖入三维场景；右侧「关卡内容浏览器」可点选并按 Delete；Inspector 可精确数值。';
             return;
         }
-        refs.stageHintExtra.textContent = '点击格子放置，拖拽已有 Actor 移动，右侧可精确编辑属性。';
+        if (activeTool === 'boardImage') {
+            refs.stageHintExtra.textContent =
+                '拖入配图到棋盘；图层叠在格子上方、路径与标记手柄之下。棋盘配图工具下拖拽移动，四角/四边手柄或滚轮调宽度；右侧「棋盘配图」可排序与删除；Esc 取消选中。亦可切到「选择/拖拽」后点选配图编辑。';
+            return;
+        }
+        refs.stageHintExtra.textContent =
+            '点击格子放置道路/障碍等；拖拽移动 Actor。「选择/拖拽」下仍可点选棋盘配图并用边角手柄调整大小；配图列表在画布右侧；Esc 取消配图选中后再点格子以避免误拖图层。';
     }
 
     function initPreviewLayer() {
@@ -3509,11 +4157,78 @@
         }).join('');
     }
 
+    function boardSpriteLayersHtml(level) {
+        var raw = Array.isArray(level.map.boardImageLayers) ? level.map.boardImageLayers : [];
+        if (!raw.length) return '';
+        var list = raw
+            .slice()
+            .sort(function (a, b) {
+                return (Number(a.order) || 0) - (Number(b.order) || 0);
+            });
+        return list
+            .map(function (layer) {
+                var sel =
+                    selectedObject &&
+                    selectedObject.kind === 'boardImage' &&
+                    selectedObject.id === layer.id
+                        ? ' map-board-image-sprite--selected'
+                        : '';
+                var op = Number(layer.opacity);
+                if (!Number.isFinite(op)) op = 1;
+                op = clamp(op, 0, 1);
+                var zi = Math.round(20 + Number(layer.order || 0));
+                var st =
+                    'left:' +
+                    escapeAttr(String(layer.centerX)) +
+                    '%;top:' +
+                    escapeAttr(String(layer.centerY)) +
+                    '%;width:' +
+                    escapeAttr(String(layer.widthPct)) +
+                    '%;opacity:' +
+                    escapeAttr(String(op)) +
+                    ';z-index:' +
+                    escapeAttr(String(zi));
+                var handlesHtml = sel
+                    ? '<div class="bil-handles" aria-hidden="true">' +
+                      ['nw', 'n', 'ne', 'w', 'e', 'sw', 's', 'se']
+                          .map(function (hk) {
+                              return (
+                                  '<button type="button" class="bil-handle bil-handle--' +
+                                  hk +
+                                  '" data-board-resize="' +
+                                  hk +
+                                  '" tabindex="-1" aria-label="缩放 ' +
+                                  hk +
+                                  '"></button>'
+                              );
+                          })
+                          .join('') +
+                      '</div>'
+                    : '';
+                return (
+                    '<div class="map-board-image-sprite' +
+                    sel +
+                    '" draggable="false" tabindex="-1" data-board-image-id="' +
+                    escapeAttr(layer.id) +
+                    '" style="' +
+                    st +
+                    '">' +
+                    handlesHtml +
+                    '<div class="bil-img-wrap"><img alt="" draggable="false" loading="lazy" src="' +
+                    escapeAttr(layer.src) +
+                    '"></div></div>'
+                );
+            })
+            .join('');
+    }
+
     function renderMap() {
         var level = getLevel();
         if (!level) {
             refs.mapGrid.innerHTML = '';
             refs.mapGrid.classList.remove('map-grid--jinan-texture');
+            eraserPreviewLastPointer = null;
+            clearEraserBrushPreview();
             return;
         }
         var grid = level.map.grid;
@@ -3522,44 +4237,78 @@
         refs.mapGrid.style.setProperty('--grid-texture-width', (grid.cols * cellSize + Math.max(0, grid.cols - 1)) + 'px');
         refs.mapGrid.style.setProperty('--grid-texture-height', (grid.rows * cellSize + Math.max(0, grid.rows - 1)) + 'px');
         refs.mapGrid.style.setProperty('--jinan-map-texture', 'url("' + JINAN_MAP_TEXTURE_URL + '")');
-        refs.mapGrid.style.gridTemplateColumns = 'repeat(' + grid.cols + ', var(--cell-size))';
-        refs.mapGrid.style.gridTemplateRows = 'repeat(' + grid.rows + ', var(--cell-size))';
+        refs.mapGrid.style.gridTemplateColumns = '';
+        refs.mapGrid.style.gridTemplateRows = '';
         refs.mapGrid.classList.toggle('map-grid--jinan-texture', isJinanLevel(level));
 
-        var html = [];
+        var floorHtml = [];
+        var pathOverlayHtml = [];
+        var markersHtml = [];
         var defensePathKeys = activeEditorMode === 'defense' ? getDefenseEditorPathKeys(level) : null;
         for (var row = 0; row < grid.rows; row += 1) {
             for (var col = 0; col < grid.cols; col += 1) {
-                html.push(renderCell(level, col, row, defensePathKeys));
+                floorHtml.push(renderPlateCell(level, col, row));
+                pathOverlayHtml.push(renderPathOverlayCell(level, col, row, defensePathKeys));
+                markersHtml.push(renderMarkersOverlayCell(level, col, row));
             }
         }
-        refs.mapGrid.innerHTML = html.join('');
+        var stackCls = 'map-grid-stack';
+        refs.mapGrid.innerHTML =
+            '<div class="' +
+            stackCls +
+            '">' +
+            '<div class="map-grid-cells map-grid-cells--floor">' +
+            floorHtml.join('') +
+            '</div>' +
+            '<div class="map-board-overlays-mount" aria-hidden="true">' +
+            boardSpriteLayersHtml(level) +
+            '</div>' +
+            '<div class="map-grid-cells map-grid-cells--path-overlay">' +
+            pathOverlayHtml.join('') +
+            '</div>' +
+            '<div class="map-grid-cells map-grid-cells--markers">' +
+            markersHtml.join('') +
+            '</div>' +
+            '</div>';
+        refs.mapGrid
+            .querySelectorAll('.map-grid-cells--floor, .map-grid-cells--path-overlay, .map-grid-cells--markers')
+            .forEach(function (bucket) {
+                bucket.style.display = 'grid';
+                bucket.style.gap = '1px';
+                bucket.style.gridTemplateColumns = 'repeat(' + grid.cols + ', var(--cell-size))';
+                bucket.style.gridTemplateRows = 'repeat(' + grid.rows + ', var(--cell-size))';
+            });
         bindMarkerDrag();
+        refreshEraserPreviewIfActive();
     }
 
     function boardCellMatchesSelection(level, col, row) {
         if (!selectedObject) return false;
         var k = selectedObject.kind;
         if (k === 'obstacleCell' || k === 'pathCell' || k === 'buildSlotCell' || k === 'safeZoneCell')
-            return selectedObject.col === col && selectedObject.row === row;
+            return Number(selectedObject.col) === col && Number(selectedObject.row) === row;
         var obj = findSelectedObject(level);
         if (obj && obj.item != null && Number(obj.item.col) === col && Number(obj.item.row) === row) return true;
         return false;
     }
 
-    function renderCell(level, col, row, defensePathKeys) {
+    function buildPlateCellClasses(level, col, row) {
         var classes = ['map-cell'];
         var exploreLayout = ensureExplorationLayout(level.map);
         if (activeEditorMode === 'explore') {
-            if (hasCell(exploreLayout.path, col, row)) classes.push('path');
+            /* 探索路径高光在配图之上的 path-overlay 层绘制 */
             if (hasCell(exploreLayout.obstacles, col, row)) classes.push('obstacle');
             if (Array.isArray(exploreLayout.safeZones) && hasCell(exploreLayout.safeZones, col, row)) classes.push('safe-zone');
         } else {
             if (hasCell(level.map.obstacles, col, row)) classes.push('obstacle');
-            else if (defensePathKeys && defensePathKeys.has(String(col) + ',' + String(row))) classes.push('path');
             if (hasCell(level.map.buildSlots, col, row)) classes.push('build-slot');
         }
         if (boardCellMatchesSelection(level, col, row)) classes.push('map-cell--lcb-selected');
+        return classes;
+    }
+
+    function buildCellMarkersFragments(level, col, row) {
+        var exploreLayout = ensureExplorationLayout(level.map);
         var markers = [];
         if (activeEditorMode === 'explore') {
             if (exploreLayout.startPoint && exploreLayout.startPoint.col === col && exploreLayout.startPoint.row === row) {
@@ -3582,7 +4331,39 @@
         level.map.actors.filter(atCell(col, row)).forEach(function (actor) {
             markers.push(markerHtml('actor', actor.id, actor.icon || actor.name.charAt(0), 'actor-marker ' + actor.category, selectedObject));
         });
-        return '<div class="' + classes.join(' ') + '" data-col="' + col + '" data-row="' + row + '">' + markers.join('') + '</div>';
+        return markers;
+    }
+
+    function renderPlateCell(level, col, row) {
+        var classes = buildPlateCellClasses(level, col, row);
+        return '<div class="' + classes.join(' ') + '" data-col="' + col + '" data-row="' + row + '"></div>';
+    }
+
+    /** 敌军/探索路径格：插在配图之上，避免被棋盘配图压住 */
+    function renderPathOverlayCell(level, col, row, defensePathKeys) {
+        var exploreLayout = ensureExplorationLayout(level.map);
+        var isPath = false;
+        if (activeEditorMode === 'explore') {
+            if (hasCell(exploreLayout.path, col, row)) isPath = true;
+        } else if (!hasCell(level.map.obstacles, col, row) && defensePathKeys && defensePathKeys.has(String(col) + ',' + String(row))) {
+            isPath = true;
+        }
+        var cls = ['map-cell', 'map-cell--path-overlay'];
+        if (isPath) cls.push('path');
+        return '<div class="' + cls.join(' ') + '" data-col="' + col + '" data-row="' + row + '"></div>';
+    }
+
+    function renderMarkersOverlayCell(level, col, row) {
+        var markers = buildCellMarkersFragments(level, col, row);
+        return (
+            '<div class="map-cell map-cell--markers-overlay" data-col="' +
+            col +
+            '" data-row="' +
+            row +
+            '">' +
+            markers.join('') +
+            '</div>'
+        );
     }
 
     function markerHtml(kind, id, label, className, selection) {
@@ -3591,7 +4372,10 @@
     }
 
     function bindMarkerDrag() {
-        refs.mapGrid.querySelectorAll('[data-object-kind]').forEach(function (marker) {
+        if (!refs.mapGrid) return;
+        var bucket = refs.mapGrid.querySelector('.map-grid-cells--markers');
+        var root = bucket || refs.mapGrid;
+        root.querySelectorAll('[data-object-kind]').forEach(function (marker) {
             marker.addEventListener('dragstart', function (event) {
                 event.dataTransfer.setData('application/json', JSON.stringify({
                     kind: marker.dataset.objectKind === 'actor' ? 'actor' : 'marker',
@@ -3605,6 +4389,9 @@
     function handleCellAction(col, row) {
         var level = getLevel();
         if (!level) return;
+        if (activeTool === 'boardImage') {
+            return;
+        }
         if (activeTool === 'select') {
             selectedObject = null;
             renderSelectionInspector();
@@ -3632,10 +4419,11 @@
         }
         if (activeTool === 'explorePoint') addExplorePoint(col, row);
         if (activeTool === 'actor') placeActorFromTemplate(selectedTemplateId, col, row);
-        if (activeTool === 'erase') eraseCell(col, row);
+        if (activeTool === 'erase') applyEraserBrush(col, row);
         level.status = level.status === 'draft' ? 'needs-work' : level.status;
         markDirty('已更新地图');
         renderAll();
+        schedulePreviewRefresh();
     }
 
     function togglePathCell(level, col, row) {
@@ -3767,27 +4555,36 @@
         renderAll();
     }
 
-    function eraseCell(col, row) {
+    function eraseCellAt(col, row) {
         var level = getLevel();
+        if (!level) return;
         var layout = ensureExplorationLayout(level.map);
-        if (activeEditorMode === 'explore') {
-            removeCell(layout.path, col, row);
-            removeCell(layout.obstacles, col, row);
-            if (Array.isArray(layout.safeZones)) removeCell(layout.safeZones, col, row);
-            if (layout.startPoint && layout.startPoint.col === col && layout.startPoint.row === row) layout.startPoint = null;
-            if (layout.exitPoint && layout.exitPoint.col === col && layout.exitPoint.row === row) layout.exitPoint = null;
-        } else {
-            removeCell(level.map.roads, col, row);
-            removeCell(level.map.obstacles, col, row);
-            removeCell(level.map.buildSlots, col, row);
-            level.map.enemyPaths.forEach(function (path) { removeCell(path.cells, col, row); });
-            level.map.spawnPoints = level.map.spawnPoints.filter(notAtCell(col, row));
-            if (level.map.objectivePoint && level.map.objectivePoint.col === col && level.map.objectivePoint.row === row) {
-                level.map.objectivePoint = null;
-            }
+        var c = Number(col);
+        var r = Number(row);
+        removeCell(layout.path, c, r);
+        removeCell(layout.obstacles, c, r);
+        if (Array.isArray(layout.safeZones)) removeCell(layout.safeZones, c, r);
+        if (layout.startPoint && Number(layout.startPoint.col) === c && Number(layout.startPoint.row) === r) layout.startPoint = null;
+        if (layout.exitPoint && Number(layout.exitPoint.col) === c && Number(layout.exitPoint.row) === r) layout.exitPoint = null;
+
+        removeCell(level.map.roads, c, r);
+        removeCell(level.map.obstacles, c, r);
+        removeCell(level.map.buildSlots, c, r);
+        level.map.enemyPaths.forEach(function (path) {
+            removeCell(path.cells, c, r);
+        });
+        level.map.spawnPoints = level.map.spawnPoints.filter(notAtCell(c, r));
+        if (
+            level.map.objectivePoint &&
+            Number(level.map.objectivePoint.col) === c &&
+            Number(level.map.objectivePoint.row) === r
+        ) {
+            level.map.objectivePoint = null;
         }
-        level.map.explorationPoints = level.map.explorationPoints.filter(notAtCell(col, row));
-        level.map.actors = level.map.actors.filter(notAtCell(col, row));
+
+        level.map.explorationPoints = level.map.explorationPoints.filter(notAtCell(c, r));
+        level.map.actors = level.map.actors.filter(notAtCell(c, r));
+        if (Array.isArray(level.map.terrain)) removeCell(level.map.terrain, c, r);
         selectedObject = null;
     }
 
@@ -3960,6 +4757,34 @@
                 '）。按 Delete 键从关卡移除。</p>';
             return;
         }
+        if (selectedObject && selectedObject.kind === 'boardImage') {
+            var bl = level && findBoardImageLayerById(level, selectedObject.id);
+            if (!bl) {
+                selectedObject = null;
+                refs.selectionInspector.className = 'selection-inspector empty-state';
+                refs.selectionInspector.innerHTML = '未选择对象。';
+                return;
+            }
+            refs.selectionInspector.className = 'selection-inspector';
+            refs.selectionInspector.innerHTML =
+                '<p class="section-hint">数据写入 <code>map.boardImageLayers</code>。Delete 移除该配图层。</p>' +
+                '<div class="form-grid two">' +
+                boardLayerFieldHtml('左上角 X%', 'centerX', bl.centerX, 0.5) +
+                boardLayerFieldHtml('左上角 Y%', 'centerY', bl.centerY, 0.5) +
+                boardLayerFieldHtml('宽度 %（相对棋盘格宽）', 'widthPct', bl.widthPct, 1) +
+                boardLayerFieldHtml('不透明度 0–1', 'opacity', bl.opacity == null ? 1 : bl.opacity, 0.02) +
+                boardLayerFieldHtml('层级顺序 order', 'order', bl.order, 1) +
+                '</div>';
+            refs.selectionInspector.querySelectorAll('[data-board-layer-field]').forEach(function (inp) {
+                inp.addEventListener('input', function () {
+                    syncBoardLayerFieldFromInspector(inp);
+                });
+                inp.addEventListener('change', function () {
+                    syncBoardLayerFieldFromInspector(inp);
+                });
+            });
+            return;
+        }
         var target = findSelectedObject(level);
         if (!target) {
             refs.selectionInspector.className = 'selection-inspector empty-state';
@@ -4010,6 +4835,41 @@
         }
         base.push('</div>');
         return base.join('');
+    }
+
+    function boardLayerFieldHtml(label, key, val, step) {
+        var s = step != null ? ' step="' + step + '"' : '';
+        return (
+            '<label class="field-block"><span>' +
+            escapeHtml(label) +
+            '</span><input data-board-layer-field="' +
+            escapeAttr(key) +
+            '" type="number"' +
+            s +
+            ' value="' +
+            escapeAttr(val == null ? '' : val) +
+            '"></label>'
+        );
+    }
+
+    function syncBoardLayerFieldFromInspector(input) {
+        var level = getLevel();
+        if (!level || !selectedObject || selectedObject.kind !== 'boardImage') return;
+        var lyr = findBoardImageLayerById(level, selectedObject.id);
+        if (!lyr) return;
+        var key = input.getAttribute('data-board-layer-field');
+        if (!key) return;
+        var raw =
+            input.value === '' || input.value === '-' || input.value === '.' ? NaN : Number(input.value);
+        if (!Number.isFinite(raw)) return;
+        if (key === 'centerX' || key === 'centerY') lyr[key] = clamp(raw, 0, 100);
+        else if (key === 'widthPct') lyr.widthPct = clamp(raw, 5, 500);
+        else if (key === 'opacity') lyr.opacity = clamp(raw, 0, 1);
+        else if (key === 'order') lyr.order = Math.round(raw);
+        markDirty('已更新棋盘配图');
+        renderMap();
+        renderBoardImagesPanel();
+        schedulePreviewRefresh();
     }
 
     function fieldHtml(label, path, value, type, step) {
@@ -4625,6 +5485,7 @@
         selectedObject = null;
         selectedGameplayEntryId = '';
         selectedGameplayAssetId = '';
+        themeEditorCacheKey = '';
         renderAll();
         syncPreviewIfOpen({ preserveView: false });
     }
@@ -4679,6 +5540,15 @@
         if (selectedObject.kind === 'safeZoneCell') {
             if (!Array.isArray(layout.safeZones)) layout.safeZones = [];
             removeCell(layout.safeZones, selectedObject.col, selectedObject.row);
+        }
+        if (selectedObject.kind === 'boardImage') {
+            if (Array.isArray(level.map.boardImageLayers)) {
+                level.map.boardImageLayers = level.map.boardImageLayers.filter(function (layer) {
+                    return layer.id !== selectedObject.id;
+                });
+            }
+            boardImagePointerDrag = null;
+            boardImageResize = null;
         }
         selectedObject = null;
         markDirty('已删除选中对象');
@@ -5597,6 +6467,77 @@
         };
     }
 
+    function normalizeBoardImageLayers(raw) {
+        if (!Array.isArray(raw)) return [];
+        var list = [];
+        for (var i = 0; i < raw.length; i += 1) {
+            var L = raw[i];
+            if (!L || typeof L !== 'object') continue;
+            var src = typeof L.src === 'string' ? L.src.trim() : '';
+            if (!src) continue;
+            function pPct(v, fb) {
+                var x = Number(v);
+                return Number.isFinite(x) ? Math.max(0, Math.min(100, x)) : fb;
+            }
+            function pWidth(v) {
+                var x = Number(v);
+                return Number.isFinite(x) ? Math.max(5, Math.min(500, x)) : 48;
+            }
+            function pOp(v) {
+                var x = Number(v);
+                return Number.isFinite(x) ? Math.max(0, Math.min(1, x)) : 1;
+            }
+            var ordRaw = Number(L.order);
+            var ord = Number.isFinite(ordRaw) ? Math.round(ordRaw) : list.length;
+            var bilEntry = {
+                id: String(L.id || uid('board-img')),
+                src: src,
+                centerX: pPct(L.centerX, 0),
+                centerY: pPct(L.centerY, 0),
+                widthPct: pWidth(L.widthPct),
+                opacity: pOp(L.opacity),
+                order: ord
+            };
+            var ar = Number(L.aspect);
+            if (Number.isFinite(ar) && ar > 0) bilEntry.aspect = Math.min(24, Math.max(0.04, ar));
+            list.push(bilEntry);
+        }
+        list.sort(function (a, b) {
+            return a.order - b.order;
+        });
+        return list;
+    }
+
+    function boardGridPaintMetrics(grid) {
+        if (!refs.mapGrid || !grid) return null;
+        var el = refs.mapGrid;
+        var rect = el.getBoundingClientRect();
+        var st = getComputedStyle(el);
+        var padL = parseFloat(st.paddingLeft) || 0;
+        var padT = parseFloat(st.paddingTop) || 0;
+        var cols = grid.cols;
+        var rows = grid.rows;
+        var csStr =
+            el.style.getPropertyValue('--cell-size') || getComputedStyle(el).getPropertyValue('--cell-size');
+        var cs = parseFloat(csStr) || 28;
+        var gap = parseFloat(st.rowGap || st.columnGap || st.gap) || 1;
+        var stride = cs + gap;
+        var innerW = cols * stride - gap;
+        var innerH = rows * stride - gap;
+        return { rect: rect, padL: padL, padT: padT, cs: cs, gap: gap, stride: stride, innerW: innerW, innerH: innerH, cols: cols, rows: rows };
+    }
+
+    function clientPointToBoardLayerPercents(clientX, clientY, grid) {
+        var m = boardGridPaintMetrics(grid);
+        if (!m || m.innerW <= 0 || m.innerH <= 0) return { lx: 0, ty: 0 };
+        var x = clientX - m.rect.left - m.padL;
+        var y = clientY - m.rect.top - m.padT;
+        return {
+            lx: Math.max(0, Math.min(100, (x / m.innerW) * 100)),
+            ty: Math.max(0, Math.min(100, (y / m.innerH) * 100))
+        };
+    }
+
     function normalizeMap(map, seed) {
         var source = map && typeof map === 'object' ? map : {};
         var legacyTd = seed.modeProfiles && seed.modeProfiles.towerDefense || {};
@@ -5620,6 +6561,7 @@
         normalized.explorationPoints = normalizeExplorePoints(source.explorationPoints, legacyExplore);
         normalized.explorationLayout = normalizeExplorationLayout(source.explorationLayout, normalized);
         normalized.actors = normalizeActors(source.actors, seed);
+        normalized.boardImageLayers = normalizeBoardImageLayers(source.boardImageLayers);
         trimMapToBounds(normalized);
         return normalized;
     }
@@ -5627,7 +6569,14 @@
     function createDefaultMap() {
         return {
             grid: { cols: DEFAULT_GRID_COLS, rows: DEFAULT_GRID_ROWS, tileSize: DEFAULT_TILE_SIZE },
-            theme: { ground: '#456a78', road: '#c8a96b', obstacle: '#52616b', accent: '#c8ff3d' },
+            theme: {
+                ground: '#5a7d82',
+                groundAlt: '#4f7178',
+                road: '#6f9288',
+                obstacle: '#5d6870',
+                accent: '#8fb8ae',
+                fog: '#445c60'
+            },
             terrain: [],
             roads: [],
             enemyPaths: [{ id: 'path-main', name: '主敌人路径', cells: [] }],
@@ -5639,14 +6588,22 @@
             explorationPoints: [],
             explorationLayout: {
                 grid: { cols: DEFAULT_GRID_COLS, rows: DEFAULT_GRID_ROWS, tileSize: DEFAULT_TILE_SIZE },
-                theme: { ground: '#456a78', road: '#c8a96b', obstacle: '#52616b', accent: '#c8ff3d' },
+                theme: {
+                    ground: '#5a7d82',
+                    groundAlt: '#4f7178',
+                    road: '#6f9288',
+                    obstacle: '#5d6870',
+                    accent: '#8fb8ae',
+                    fog: '#445c60'
+                },
                 path: [],
                 obstacles: [],
                 startPoint: { id: 'explore-start', name: '探索起点', col: 0, row: 9 },
                 exitPoint: { id: 'explore-exit', name: '探索终点', col: 24, row: 9 }
             },
             geo: { enabled: false, provider: 'cesium-ion', assetId: DEFAULT_CESIUM_ION_3D_TILES_ASSET_ID, center: { lat: 0, lon: 0, heightMeters: 0 }, extentMeters: 1000, rotationDeg: 0, yOffsetMeters: 0, boardHeightMeters: 32 },
-            actors: []
+            actors: [],
+            boardImageLayers: []
         };
     }
 
@@ -5747,6 +6704,31 @@
         value.forEach(function (item) { visitCoordinatePairs(item, visitor); });
     }
 
+    function normalizeEditorThemeColorHex(raw, fallbackHex) {
+        var fb =
+            typeof fallbackHex === 'string' && /^#[0-9a-fA-F]{6}$/.test(fallbackHex)
+                ? ('#' + fallbackHex.slice(1).toLowerCase())
+                : '#5a7d82';
+        if (raw === null || raw === undefined || raw === '') return fb;
+        if (typeof raw === 'number' && Number.isFinite(raw)) {
+            return '#' + ((Math.floor(raw) >>> 0) & 0xffffff).toString(16).padStart(6, '0');
+        }
+        var s = String(raw).trim();
+        if (/^#[0-9a-fA-F]{6}$/i.test(s)) return ('#' + s.slice(1).toLowerCase());
+        if (/^#[0-9a-fA-F]{3}$/i.test(s)) {
+            return ('#' + s[1] + s[1] + s[2] + s[2] + s[3] + s[3]).toLowerCase();
+        }
+        if (/^0x[0-9a-fA-F]{1,8}$/i.test(s)) {
+            var px = Number.parseInt(s.slice(2), 16);
+            if (Number.isFinite(px)) return '#' + ((px >>> 0) & 0xffffff).toString(16).padStart(6, '0');
+        }
+        var decDig = /^[0-9]+$/.test(s) ? Number(s) : NaN;
+        if (Number.isFinite(decDig) && decDig >= 0 && decDig <= 0xffffff) {
+            return '#' + ((Math.floor(decDig) >>> 0) & 0xffffff).toString(16).padStart(6, '0');
+        }
+        return fb;
+    }
+
     function normalizeTheme(theme) {
         var source = theme && typeof theme === 'object' ? theme : {};
         function clamp01(val, def) {
@@ -5754,14 +6736,29 @@
             if (!Number.isFinite(n)) return def;
             return Math.max(0, Math.min(1, n));
         }
+        var ground = normalizeEditorThemeColorHex(source.ground, '#5a7d82');
+        var groundAlt = normalizeEditorThemeColorHex(
+            source.groundAlt != null ? source.groundAlt : source.ground,
+            '#4f7178'
+        );
+        var pathCol = normalizeEditorThemeColorHex(
+            source.path != null ? source.path : source.road,
+            '#6f9288'
+        );
         return {
-            ground: String(source.ground || '#456a78'),
-            groundAlt: String(source.groundAlt || source.ground || '#456a78'),
-            road: String(source.road || source.path || '#c8a96b'),
-            path: String(source.path || source.road || '#c8a96b'),
-            obstacle: String(source.obstacle || '#52616b'),
-            accent: String(source.accent || '#c8ff3d'),
-            fog: String(source.fog || source.groundAlt || source.ground || '#456a78'),
+            ground: ground,
+            groundAlt: groundAlt,
+            road: normalizeEditorThemeColorHex(
+                source.road != null ? source.road : source.path != null ? source.path : pathCol,
+                pathCol
+            ),
+            path: pathCol,
+            obstacle: normalizeEditorThemeColorHex(source.obstacle, '#5d6870'),
+            accent: normalizeEditorThemeColorHex(source.accent, '#8fb8ae'),
+            fog: normalizeEditorThemeColorHex(
+                source.fog != null ? source.fog : source.groundAlt != null ? source.groundAlt : source.ground,
+                '#445c60'
+            ),
             boardTextureUrl: String(source.boardTextureUrl || '').trim(),
             geoTileOpacity: clamp01(source.geoTileOpacity, 0.48),
             geoPathOpacity: clamp01(source.geoPathOpacity, 0.92),
@@ -5771,8 +6768,8 @@
             pathGlowOpacity: clamp01(source.pathGlowOpacity, 0.46),
             pathDetailOpacity: clamp01(source.pathDetailOpacity, 0.82),
             hoverCellOpacity: clamp01(source.hoverCellOpacity, 0.42),
-            hoverColorOk: String(source.hoverColorOk || '#8be9ff'),
-            hoverColorBad: String(source.hoverColorBad || '#ff5e73')
+            hoverColorOk: normalizeEditorThemeColorHex(source.hoverColorOk, '#6a988c'),
+            hoverColorBad: normalizeEditorThemeColorHex(source.hoverColorBad, '#d87880')
         };
     }
 
@@ -6215,6 +7212,11 @@
         if (selectedObject.kind === 'spawn') item = activeEditorMode === 'explore' ? layout.startPoint : level.map.spawnPoints.find(byId(selectedObject.id));
         if (selectedObject.kind === 'explorePoint') item = level.map.explorationPoints.find(byId(selectedObject.id));
         if (selectedObject.kind === 'objective') item = activeEditorMode === 'explore' ? layout.exitPoint : level.map.objectivePoint;
+        if (selectedObject.kind === 'boardImage') {
+            var bile = findBoardImageLayerById(level, selectedObject.id);
+            if (!bile) return null;
+            return { kind: 'boardImage', item: bile };
+        }
         if (item) return { kind: selectedObject.kind, item: item };
         return null;
     }
@@ -6313,6 +7315,9 @@
         if (map.explorationLayout) {
             map.explorationLayout.path = map.explorationLayout.path.filter(inBounds(cols, rows));
             map.explorationLayout.obstacles = map.explorationLayout.obstacles.filter(inBounds(cols, rows));
+            if (Array.isArray(map.explorationLayout.safeZones)) {
+                map.explorationLayout.safeZones = map.explorationLayout.safeZones.filter(inBounds(cols, rows));
+            }
             if (map.explorationLayout.startPoint && !inBounds(cols, rows)(map.explorationLayout.startPoint)) map.explorationLayout.startPoint = { id: 'explore-start', name: '探索起点', col: 0, row: Math.floor(rows / 2) };
             if (map.explorationLayout.exitPoint && !inBounds(cols, rows)(map.explorationLayout.exitPoint)) map.explorationLayout.exitPoint = { id: 'explore-exit', name: '探索终点', col: Math.max(0, cols - 4), row: Math.floor(rows / 2) };
         }
@@ -6445,18 +7450,31 @@
     }
 
     function toggleCell(cells, col, row) {
-        var index = cells.findIndex(function (cell) { return cell.col === col && cell.row === row; });
+        var c = Number(col);
+        var r = Number(row);
+        var index = cells.findIndex(function (cell) {
+            return Number(cell.col) === c && Number(cell.row) === r;
+        });
         if (index >= 0) cells.splice(index, 1);
-        else cells.push({ col: col, row: row });
+        else cells.push({ col: c, row: r });
     }
 
     function removeCell(cells, col, row) {
-        var index = cells.findIndex(function (cell) { return cell.col === col && cell.row === row; });
+        var c = Number(col);
+        var r = Number(row);
+        var index = cells.findIndex(function (cell) {
+            return Number(cell.col) === c && Number(cell.row) === r;
+        });
         if (index >= 0) cells.splice(index, 1);
     }
 
     function hasCell(cells, col, row) {
-        return Array.isArray(cells) && cells.some(function (cell) { return cell.col === col && cell.row === row; });
+        if (!Array.isArray(cells)) return false;
+        var c = Number(col);
+        var r = Number(row);
+        return cells.some(function (cell) {
+            return Number(cell.col) === c && Number(cell.row) === r;
+        });
     }
 
     function ensureExplorationLayout(map) {
@@ -6490,15 +7508,27 @@
     }
 
     function atCell(col, row) {
-        return function (item) { return item.col === col && item.row === row; };
+        var c = Number(col);
+        var r = Number(row);
+        return function (item) {
+            return Number(item.col) === c && Number(item.row) === r;
+        };
     }
 
     function notAtCell(col, row) {
-        return function (item) { return item.col !== col || item.row !== row; };
+        var c = Number(col);
+        var r = Number(row);
+        return function (item) {
+            return Number(item.col) !== c || Number(item.row) !== r;
+        };
     }
 
     function inBounds(cols, rows) {
-        return function (item) { return item.col >= 0 && item.col < cols && item.row >= 0 && item.row < rows; };
+        return function (item) {
+            var c = Number(item.col);
+            var r = Number(item.row);
+            return c >= 0 && c < cols && r >= 0 && r < rows;
+        };
     }
 
     function byId(id) {

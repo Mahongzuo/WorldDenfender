@@ -1,7 +1,50 @@
 import { hasEditorDefenseLayout, hasEditorExploreLayout, parseEditorColor, parseEditorOpacity, runtimeMapToEditorExplorationLayout, runtimeMapToEditorMap } from "./editor-runtime";
 import { CITY_GEO_CONFIG } from "./content";
 import { clamp, orderEditorPathCells, sameCell, uniqueCells, GRID_COLS, GRID_ROWS } from "./runtime-grid";
-import type { EditorCell, EditorLevel, EditorLevelMap, GameMode, GeoMapConfig, GridCell, MapActorDef, MapDefinition } from "./types";
+import type { EditorCell, EditorLevel, EditorLevelMap, GameMode, GeoMapConfig, GridCell, MapActorDef, MapBoardImageLayer, MapDefinition } from "./types";
+
+function sanitizeBoardImageLayers(raw: unknown): MapBoardImageLayer[] | undefined {
+  if (!Array.isArray(raw)) {
+    return undefined;
+  }
+  const out: MapBoardImageLayer[] = [];
+  for (let i = 0; i < raw.length; i += 1) {
+    const item = raw[i];
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const o = item as Record<string, unknown>;
+    const src = typeof o.src === "string" ? o.src.trim() : "";
+    if (!src) {
+      continue;
+    }
+    const clampPct = (n: unknown, fallback: number) => {
+      const v = Number(n);
+      if (!Number.isFinite(v)) return fallback;
+      return Math.max(0, Math.min(100, v));
+    };
+    const widthPct = Number(o.widthPct);
+    const wp = Number.isFinite(widthPct) ? Math.max(5, Math.min(500, widthPct)) : 40;
+    const aspectRaw = Number(o.aspect);
+    const aspectOk = Number.isFinite(aspectRaw) && aspectRaw > 0 ? Math.min(24, Math.max(0.04, aspectRaw)) : undefined;
+    const opacityRaw = Number(o.opacity);
+    const opacity = Number.isFinite(opacityRaw) ? Math.max(0, Math.min(1, opacityRaw)) : 1;
+    const orderRaw = Number(o.order);
+    const ord = Number.isFinite(orderRaw) ? Math.round(orderRaw) : i;
+
+    out.push({
+      id: typeof o.id === "string" && o.id.trim() ? o.id.trim() : `bil-${i + 1}`,
+      src,
+      centerX: clampPct(o.centerX, 0),
+      centerY: clampPct(o.centerY, 0),
+      widthPct: wp,
+      ...(opacity !== 1 ? { opacity } : {}),
+      ...(aspectOk !== undefined ? { aspect: aspectOk } : {}),
+      order: ord,
+    });
+  }
+  return out.length ? out.sort((a, b) => (a.order ?? 0) - (b.order ?? 0)) : undefined;
+}
 
 export interface CityRuntimeMapInfo {
   label: string;
@@ -186,9 +229,10 @@ export function editorLevelToRuntimeMap(level: EditorLevel, mode: GameMode): Map
   const obstacleSource = mode === "explore" ? exploreLayout?.obstacles ?? editorMap.obstacles ?? [] : editorMap.obstacles ?? [];
   const obstacles = uniqueCells(obstacleSource.map(project), sourceCols, sourceRows).filter((cell) => !path.some((pathCell) => sameCell(pathCell, cell)));
   const theme = exploreLayout?.theme ?? editorMap.theme ?? {};
+  const boardImageLayers = sanitizeBoardImageLayers(editorMap.boardImageLayers);
 
   const presetGeo = resolvePresetGeoForLevel(level);
-  
+
   const boardUrlRaw = typeof theme.boardTextureUrl === "string" ? theme.boardTextureUrl.trim() : "";
   const boardTextureUrl = boardUrlRaw ? boardUrlRaw : undefined;
 
@@ -200,12 +244,12 @@ export function editorLevelToRuntimeMap(level: EditorLevel, mode: GameMode): Map
     rows: sourceRows,
     geo: level.map?.geo ?? presetGeo ?? resolveEditorLevelGeo(level),
     theme: {
-      ground: parseEditorColor(theme.ground, mode === "explore" ? 0x55748a : 0x5a9aae),
-      groundAlt: parseEditorColor(theme.groundAlt, mode === "explore" ? 0x496a80 : 0x5090a4),
-      path: parseEditorColor(theme.path ?? theme.road, mode === "explore" ? 0x93b7c9 : 0xccab7e),
-      obstacle: parseEditorColor(theme.obstacle, mode === "explore" ? 0x354c5c : 0x3e6e80),
-      accent: parseEditorColor(theme.accent, 0x9eeeff),
-      fog: parseEditorColor(theme.fog, mode === "explore" ? 0x6d8798 : 0x7ab4c8),
+      ground: parseEditorColor(theme.ground, mode === "explore" ? 0x4e7578 : 0x5a7d82),
+      groundAlt: parseEditorColor(theme.groundAlt, mode === "explore" ? 0x44686c : 0x4f7178),
+      path: parseEditorColor(theme.path ?? theme.road, mode === "explore" ? 0x689892 : 0x6f9288),
+      obstacle: parseEditorColor(theme.obstacle, mode === "explore" ? 0x505a62 : 0x5d6870),
+      accent: parseEditorColor(theme.accent, mode === "explore" ? 0x7cad9e : 0x8fb8ae),
+      fog: parseEditorColor(theme.fog, mode === "explore" ? 0x3a5054 : 0x445c60),
       ...(boardTextureUrl ? { boardTextureUrl } : {}),
       geoTileOpacity: parseEditorOpacity(theme.geoTileOpacity, 0.48),
       geoPathOpacity: parseEditorOpacity(theme.geoPathOpacity, 0.92),
@@ -215,8 +259,8 @@ export function editorLevelToRuntimeMap(level: EditorLevel, mode: GameMode): Map
       pathGlowOpacity: parseEditorOpacity(theme.pathGlowOpacity, 0.46),
       pathDetailOpacity: parseEditorOpacity(theme.pathDetailOpacity, 0.82),
       hoverCellOpacity: parseEditorOpacity(theme.hoverCellOpacity, 0.42),
-      hoverColorOk: parseEditorColor(theme.hoverColorOk, 0x8be9ff),
-      hoverColorBad: parseEditorColor(theme.hoverColorBad, 0xff5e73),
+      hoverColorOk: parseEditorColor(theme.hoverColorOk, 0x6a988c),
+      hoverColorBad: parseEditorColor(theme.hoverColorBad, 0xd87880),
     },
     path,
     obstacles,
@@ -224,6 +268,7 @@ export function editorLevelToRuntimeMap(level: EditorLevel, mode: GameMode): Map
     safeZones: mode === "explore"
       ? uniqueCells((exploreLayout?.safeZones ?? []).map(project), sourceCols, sourceRows)
       : [],
+    ...(boardImageLayers?.length ? { boardImageLayers } : {}),
   };
 }
 

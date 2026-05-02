@@ -14,9 +14,10 @@ export interface GameSceneGroups {
 export function configureGameRenderer(renderer: THREE.WebGLRenderer, sceneHost: HTMLElement): void {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.localClippingEnabled = true;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.18;
+  renderer.toneMappingExposure = 0.96;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
   sceneHost.append(renderer.domElement);
@@ -25,9 +26,9 @@ export function configureGameRenderer(renderer: THREE.WebGLRenderer, sceneHost: 
 export function createHoverMesh(): THREE.Mesh {
   const hoverGeometry = new THREE.BoxGeometry(TILE_SIZE * 0.96, 0.08, TILE_SIZE * 0.96);
   const hoverMaterial = new THREE.MeshBasicMaterial({
-    color: 0x8be9ff,
+    color: 0x6a988c,
     transparent: true,
-    opacity: 0.42,
+    opacity: 0.38,
   });
   const hoverMesh = new THREE.Mesh(hoverGeometry, hoverMaterial);
   hoverMesh.visible = false;
@@ -48,8 +49,8 @@ export function configureGameScene(options: {
   camera.lookAt(0, 0, 0);
   scene.add(camera);
 
-  const ambient = new THREE.HemisphereLight(0xf7fbff, 0x8aa0b8, 1.85);
-  const sun = new THREE.DirectionalLight(0xfff6df, 3.45);
+  const ambient = new THREE.HemisphereLight(0xd5e8e4, 0x7a8894, 1.52);
+  const sun = new THREE.DirectionalLight(0xe8ddd0, 2.38);
   sun.position.set(-48, 72, 34);
   sun.castShadow = true;
   sun.shadow.mapSize.set(4096, 4096);
@@ -59,7 +60,7 @@ export function configureGameScene(options: {
   sun.shadow.camera.right = 90;
   sun.shadow.camera.top = 90;
   sun.shadow.camera.bottom = -90;
-  const skyFill = new THREE.DirectionalLight(0xbfdcff, 0.75);
+  const skyFill = new THREE.DirectionalLight(0xa8c4cc, 0.52);
   skyFill.position.set(36, 34, -52);
   scene.add(ambient, sun, skyFill);
 

@@ -15,6 +15,17 @@ import {
 } from "./runtime-grid";
 import type { GameMode, GridCell, MapDefinition } from "./types";
 
+/** 障碍物顶面纯色（不用贴图）：始终由底色与 accent 混合，避免出现贴图 UV + 高光造成的「发白顶」 */
+function obstacleTopFaceTint(obstacleHex: number, accentHex: number): number {
+  const base = new THREE.Color(obstacleHex);
+  const accent = new THREE.Color(accentHex);
+  return base.clone().lerp(accent, 0.34).offsetHSL(0, 0.035, 0.06).getHex();
+}
+
+function softPathGuideCenter(pathHex: number, accentHex: number): number {
+  return new THREE.Color(pathHex).lerp(new THREE.Color(accentHex), 0.42).offsetHSL(0, 0.02, 0.07).getHex();
+}
+
 export interface RuntimeMapState {
   pathCells: Set<string>;
   obstacleCells: Set<string>;
@@ -80,18 +91,12 @@ export function renderRuntimeMapScene(options: {
   const pathMaterial = new THREE.MeshStandardMaterial({
     color: map.theme.path,
     emissive: map.theme.path,
-    emissiveIntensity: 0.08,
-    roughness: 0.3,
+    emissiveIntensity: 0.025,
+    roughness: 0.55,
+    metalness: 0,
     polygonOffset: true,
     polygonOffsetFactor: -2.4,
     polygonOffsetUnits: -2.4,
-  });
-  const obstacleMaterial = new THREE.MeshStandardMaterial({
-    color: map.theme.obstacle,
-    emissive: map.theme.obstacle,
-    emissiveIntensity: 0.2,
-    roughness: 0.2,
-    metalness: 0.8,
   });
 
   const isJinan = currentCity === "jinan" || map.id.startsWith("jinan");
@@ -103,34 +108,52 @@ export function renderRuntimeMapScene(options: {
   const flatBoardMode = !usesGeoBackdrop && (jinanPresetBoard || hasCustomBoardImage);
   const pathGlowOpacity = map.theme.pathGlowOpacity ?? 0.46;
   const pathDetailOpacity = map.theme.pathDetailOpacity ?? 0.82;
-  scene.background = new THREE.Color(usesGeoBackdrop ? 0xcfe8ff : map.theme.fog);
-  scene.fog = usesGeoBackdrop ? new THREE.Fog(0xcfe8ff, 1500, 8500) : new THREE.Fog(map.theme.fog, 150, 320);
+  scene.background = new THREE.Color(usesGeoBackdrop ? 0x9eb8c4 : map.theme.fog);
+  scene.fog = usesGeoBackdrop ? new THREE.Fog(0x9eb8c4, 1500, 8500) : new THREE.Fog(map.theme.fog, 150, 320);
 
   const boardTexture = createBoardTexture(map.theme.ground, map.theme.groundAlt);
   const pathTexture = createPathTexture(map.theme.path, map.theme.accent);
   const obstacleTexture = createObstacleTexture(map.theme.obstacle, map.theme.accent);
 
+  const obstacleTopTint = obstacleTopFaceTint(map.theme.obstacle, map.theme.accent);
+  const obstacleSideMat = new THREE.MeshStandardMaterial({
+    map: obstacleTexture,
+    color: new THREE.Color(map.theme.obstacle).multiplyScalar(1.02),
+    roughness: 0.88,
+    metalness: 0,
+  });
+  const obstacleTopMat = new THREE.MeshStandardMaterial({
+    color: obstacleTopTint,
+    roughness: 0.94,
+    metalness: 0,
+  });
+  const obstacleBottomMat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(map.theme.obstacle).multiplyScalar(0.86),
+    roughness: 0.94,
+    metalness: 0,
+  });
+  const obstacleMaterials: THREE.MeshStandardMaterial[] = [obstacleSideMat, obstacleTopMat, obstacleBottomMat];
+
   groundMaterial.map = boardTexture;
-  groundMaterial.color.set(0xffffff);
-  groundMaterial.roughness = 0.62;
-  groundMaterial.metalness = 0.04;
+  groundMaterial.color.copy(new THREE.Color(map.theme.ground)).multiplyScalar(1.02);
+  groundMaterial.roughness = 0.9;
+  groundMaterial.metalness = 0;
   groundAltMaterial.map = boardTexture;
-  groundAltMaterial.color.set(0xdfe8ff);
-  groundAltMaterial.roughness = 0.68;
+  groundAltMaterial.color.copy(new THREE.Color(map.theme.groundAlt)).multiplyScalar(1.02);
+  groundAltMaterial.roughness = 0.92;
+  groundAltMaterial.metalness = 0;
   pathMaterial.map = pathTexture;
-  pathMaterial.color.set(0xffffff);
-  pathMaterial.emissiveIntensity = 0.16;
-  obstacleMaterial.map = obstacleTexture;
-  obstacleMaterial.color.set(0xffffff);
-  obstacleMaterial.roughness = 0.36;
-  obstacleMaterial.metalness = 0.18;
+  pathMaterial.color.copy(new THREE.Color(map.theme.path)).multiplyScalar(1.02);
+  pathMaterial.emissiveIntensity = 0.05;
 
   if (usesGeoBackdrop) {
     stampGeoBackdropDepthBias([
       groundMaterial,
       groundAltMaterial,
       pathMaterial,
-      obstacleMaterial,
+      obstacleSideMat,
+      obstacleTopMat,
+      obstacleBottomMat,
     ]);
     const groundOpacity = map.theme.geoTileOpacity ?? 0.48;
     for (const m of [groundMaterial, groundAltMaterial]) {
@@ -189,7 +212,7 @@ export function renderRuntimeMapScene(options: {
             new THREE.PlaneGeometry(TILE_SIZE, TILE_SIZE),
             new THREE.MeshStandardMaterial({ 
               map: beijingTextures["urban"], 
-              color: 0xaaaaaa, // Placeholder tint
+              color: 0x8a9e96,
               roughness: 0.8 
             })
           );
@@ -206,27 +229,19 @@ export function renderRuntimeMapScene(options: {
         }
       } else if (obstacleCells.has(key)) {
         if (usesGeoBackdrop) {
-          const mesh = new THREE.Mesh(obstacleGeometry, obstacleMaterial);
+          const mesh = new THREE.Mesh(obstacleGeometry, obstacleMaterials);
           mesh.rotation.y = ((col * 17 + row * 11) % 6) * (Math.PI / 6);
           mesh.position.set(position.x, 0.72, position.z);
           mesh.castShadow = true;
           mesh.receiveShadow = true;
           mapGroup.add(mesh);
-
-          const cap = new THREE.Mesh(
-            new THREE.CylinderGeometry(TILE_SIZE * 0.32, TILE_SIZE * 0.38, 0.12, 6),
-            new THREE.MeshStandardMaterial({ color: map.theme.accent, emissive: map.theme.accent, emissiveIntensity: 0.65, roughness: 0.22 }),
-          );
-          cap.rotation.y = mesh.rotation.y;
-          cap.position.set(position.x, 1.42, position.z);
-          mapGroup.add(cap);
         } else if (isBeijing && !flatBoardMode) {
           const buildingHeight = 1.0 + (Math.sin(col * 0.5) + Math.cos(row * 0.5)) * 0.5;
           const mesh = new THREE.Mesh(
             new THREE.BoxGeometry(TILE_SIZE * 0.85, buildingHeight, TILE_SIZE * 0.85),
             new THREE.MeshStandardMaterial({ 
               map: beijingTextures["house"],
-              color: 0xcccccc 
+              color: 0x948888,
             })
           );
           mesh.position.set(position.x, buildingHeight / 2, position.z);
@@ -234,23 +249,13 @@ export function renderRuntimeMapScene(options: {
           mesh.receiveShadow = true;
           mapGroup.add(mesh);
         } else {
-          const mesh = new THREE.Mesh(obstacleGeometry, obstacleMaterial);
+          const mesh = new THREE.Mesh(obstacleGeometry, obstacleMaterials);
           mesh.rotation.y = ((col * 17 + row * 11) % 6) * (Math.PI / 6);
           mesh.position.set(position.x, 0.72, position.z);
           mesh.castShadow = true;
           mesh.receiveShadow = true;
           if (!jinanPresetBoard) {
             mapGroup.add(mesh);
-          }
-
-          const cap = new THREE.Mesh(
-            new THREE.CylinderGeometry(TILE_SIZE * 0.32, TILE_SIZE * 0.38, 0.12, 6),
-            new THREE.MeshStandardMaterial({ color: map.theme.accent, emissive: map.theme.accent, emissiveIntensity: 0.65, roughness: 0.22 }),
-          );
-          cap.rotation.y = mesh.rotation.y;
-          cap.position.set(position.x, 1.42, position.z);
-          if (!jinanPresetBoard) {
-            mapGroup.add(cap);
           }
         }
       } else {
@@ -310,12 +315,16 @@ export function renderRuntimeMapScene(options: {
     plane.rotation.x = -Math.PI / 2;
     plane.position.y = 0.05;
     mapGroup.add(plane);
-    addJinanPathGuides(mapGroup, map.path, map.theme.path, 0xffffff);
+    addJinanPathGuides(mapGroup, map.path, map.theme.path, softPathGuideCenter(map.theme.path, map.theme.accent));
   }
 
+  /* 略高于程序性格子 / flat 整块底板，低于路径高亮与安全区 */
+  const decorY = usesGeoBackdrop ? 0.048 : flatBoardMode ? 0.063 : 0.098;
+  addBoardDecorImageLayers(mapGroup, map, decorY);
+
   if (mode === "defense") {
-    addEndpointMarker(mapGroup, map.path[0], 0x5eff88, "入口");
-    addEndpointMarker(mapGroup, map.path[map.path.length - 1], 0xff5e73, "基地");
+    addEndpointMarker(mapGroup, map.path[0], 0x6bbf90, "入口");
+    addEndpointMarker(mapGroup, map.path[map.path.length - 1], 0xd87880, "基地");
   } else {
     addEndpointMarker(mapGroup, map.path[0], map.theme.accent, "探索起点");
   }
@@ -361,6 +370,86 @@ export function renderRuntimeMapScene(options: {
   }
 }
 
+function boardFootprintClipPlanes(halfWidthX: number, halfDepthZ: number): THREE.Plane[] {
+  return [
+    new THREE.Plane(new THREE.Vector3(-1, 0, 0), halfWidthX),
+    new THREE.Plane(new THREE.Vector3(1, 0, 0), halfWidthX),
+    new THREE.Plane(new THREE.Vector3(0, 0, -1), halfDepthZ),
+    new THREE.Plane(new THREE.Vector3(0, 0, 1), halfDepthZ),
+  ];
+}
+
+function decorClampPct(v: number, fallback: number): number {
+  if (!Number.isFinite(v)) return fallback;
+  return Math.max(0, Math.min(100, v));
+}
+
+function decorClamp01(v: number, fallback: number): number {
+  if (!Number.isFinite(v)) return fallback;
+  return Math.max(0, Math.min(1, v));
+}
+
+function addBoardDecorImageLayers(mapGroup: THREE.Group, map: MapDefinition, y: number): void {
+  const layers = map.boardImageLayers;
+  if (!layers?.length) return;
+  const textureLoader = new THREE.TextureLoader();
+  const cols = mapCols(map);
+  const rows = mapRows(map);
+  const spanX = cols * TILE_SIZE;
+  const spanZ = rows * TILE_SIZE;
+  const clipPlanes = boardFootprintClipPlanes(spanX / 2, spanZ / 2);
+  [...layers].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).forEach(layer => {
+    textureLoader.load(
+      layer.src,
+      tex => {
+        tex.colorSpace = THREE.SRGBColorSpace;
+        tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+        let aspect = 1;
+        if (Number.isFinite(Number(layer.aspect)) && Number(layer.aspect) > 0) {
+          aspect = Number(layer.aspect);
+        }
+        if (tex.image && "width" in tex.image && (tex.image as HTMLImageElement).width > 0) {
+          aspect = (tex.image as HTMLImageElement).height / (tex.image as HTMLImageElement).width;
+        }
+        const widthPct = decorClampPct(layer.widthPct, 45);
+        const planeW = (widthPct / 100) * spanX;
+        const planeH = planeW * aspect;
+        const leftPct = decorClampPct(layer.centerX, 0);
+        const topPct = decorClampPct(layer.centerY, 0);
+        const wx0 = -spanX / 2 + (leftPct / 100) * spanX;
+        const wz0 = -spanZ / 2 + (topPct / 100) * spanZ;
+        const cx = wx0 + planeW / 2;
+        const cz = wz0 + planeH / 2;
+        const opacity = decorClamp01(layer.opacity ?? 1, 1);
+        const decoMat = new THREE.MeshBasicMaterial({
+          map: tex,
+          transparent: opacity < 0.999,
+          opacity,
+          depthWrite: false,
+          polygonOffset: true,
+          polygonOffsetFactor: -1.35,
+          polygonOffsetUnits: -1.35,
+        });
+        const decoAny = decoMat as THREE.MeshBasicMaterial & {
+          clipping: boolean;
+          clippingPlanes: THREE.Plane[];
+          clipIntersection: boolean;
+        };
+        decoAny.clipping = true;
+        decoAny.clippingPlanes = clipPlanes;
+        decoAny.clipIntersection = false;
+        const mesh = new THREE.Mesh(new THREE.PlaneGeometry(planeW, planeH), decoMat);
+        mesh.rotation.x = -Math.PI / 2;
+        mesh.position.set(cx, y, cz);
+        mesh.renderOrder = 4;
+        mapGroup.add(mesh);
+      },
+      undefined,
+      () => console.warn("[map-runtime] boardImageLayer load failed:", layer.src.slice(0, 80)),
+    );
+  });
+}
+
 function createDynamicTexture(type: string): THREE.Texture {
   const canvas = document.createElement("canvas");
   canvas.width = 64;
@@ -379,7 +468,9 @@ function createDynamicTexture(type: string): THREE.Texture {
   ctx.fillStyle = colors[type] || "#111";
   ctx.fillRect(0, 0, 64, 64);
   
-  ctx.strokeStyle = "rgba(255,255,255,0.03)";
+  const strokeRgb = colors[type] || "#111";
+  const strokeCol = new THREE.Color(strokeRgb);
+  ctx.strokeStyle = `rgba(${Math.round(strokeCol.r * 255)},${Math.round(strokeCol.g * 255)},${Math.round(strokeCol.b * 255)},0.09)`;
   for(let i=0; i<=64; i+=16) {
     ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, 64); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(64, i); ctx.stroke();
@@ -398,17 +489,19 @@ function createBoardTexture(primary: number, secondary: number): THREE.Texture {
   const p = new THREE.Color(primary);
   const s = new THREE.Color(secondary);
   const gradient = ctx.createLinearGradient(0, 0, 128, 128);
-  gradient.addColorStop(0, `#${p.clone().multiplyScalar(1.12).getHexString()}`);
-  gradient.addColorStop(1, `#${s.clone().multiplyScalar(0.78).getHexString()}`);
+  gradient.addColorStop(0, `#${p.clone().multiplyScalar(1.04).getHexString()}`);
+  gradient.addColorStop(1, `#${s.clone().multiplyScalar(0.88).getHexString()}`);
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, 128, 128);
-  ctx.strokeStyle = "rgba(255,255,255,0.18)";
+  const rimLit = p.clone().lerp(s, 0.5).offsetHSL(0, 0, 0.14);
+  ctx.strokeStyle = `rgba(${Math.round(rimLit.r * 255)},${Math.round(rimLit.g * 255)},${Math.round(rimLit.b * 255)},0.22)`;
   ctx.lineWidth = 3;
   ctx.strokeRect(5, 5, 118, 118);
   ctx.strokeStyle = "rgba(0,0,0,0.18)";
   ctx.lineWidth = 2;
   ctx.strokeRect(12, 12, 104, 104);
-  ctx.fillStyle = "rgba(255,255,255,0.08)";
+  const hi = p.clone().offsetHSL(0, -0.02, 0.05);
+  ctx.fillStyle = `rgba(${Math.round(hi.r * 255)},${Math.round(hi.g * 255)},${Math.round(hi.b * 255)},0.06)`;
   ctx.fillRect(8, 8, 18, 18);
   ctx.fillRect(102, 102, 18, 18);
   const texture = new THREE.CanvasTexture(canvas);
@@ -425,7 +518,7 @@ function createPathTexture(base: number, accent: number): THREE.Texture {
   const accentColor = new THREE.Color(accent);
   ctx.fillStyle = `#${baseColor.clone().multiplyScalar(0.84).getHexString()}`;
   ctx.fillRect(0, 0, 128, 128);
-  ctx.fillStyle = `#${baseColor.clone().multiplyScalar(1.18).getHexString()}`;
+  ctx.fillStyle = `#${baseColor.clone().multiplyScalar(1.08).getHexString()}`;
   ctx.fillRect(0, 14, 128, 100);
   ctx.strokeStyle = `#${accentColor.getHexString()}`;
   ctx.globalAlpha = 0.55;
@@ -436,8 +529,9 @@ function createPathTexture(base: number, accent: number): THREE.Texture {
   ctx.lineTo(128, 64);
   ctx.stroke();
   ctx.setLineDash([]);
-  ctx.globalAlpha = 0.28;
-  ctx.strokeStyle = "#ffffff";
+  ctx.globalAlpha = 0.26;
+  const pathRim = baseColor.clone().offsetHSL(0, 0, 0.12);
+  ctx.strokeStyle = `#${pathRim.getHexString()}`;
   ctx.lineWidth = 3;
   ctx.strokeRect(5, 5, 118, 118);
   const texture = new THREE.CanvasTexture(canvas);
@@ -454,7 +548,7 @@ function createObstacleTexture(base: number, accent: number): THREE.Texture {
   const accentColor = new THREE.Color(accent);
   ctx.fillStyle = `#${baseColor.clone().multiplyScalar(0.78).getHexString()}`;
   ctx.fillRect(0, 0, 128, 128);
-  ctx.fillStyle = `#${baseColor.clone().multiplyScalar(1.16).getHexString()}`;
+  ctx.fillStyle = `#${baseColor.clone().multiplyScalar(0.96).getHexString()}`;
   ctx.beginPath();
   ctx.moveTo(64, 8);
   ctx.lineTo(118, 38);
@@ -531,6 +625,7 @@ function addGridOverlay(mapGroup: THREE.Group, map: MapDefinition, color: number
 }
 
 function addPathOverlayTile(mapGroup: THREE.Group, position: THREE.Vector3, color: number, opacity: number): void {
+  const borderTint = new THREE.Color(color).offsetHSL(0, 0.02, 0.14).getHex();
   const glow = new THREE.Mesh(
     new THREE.PlaneGeometry(TILE_SIZE * 1.02, TILE_SIZE * 1.02),
     new THREE.MeshBasicMaterial({
@@ -546,7 +641,7 @@ function addPathOverlayTile(mapGroup: THREE.Group, position: THREE.Vector3, colo
 
   const border = new THREE.LineSegments(
     new THREE.EdgesGeometry(new THREE.PlaneGeometry(TILE_SIZE * 1.02, TILE_SIZE * 1.02)),
-    new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9 }),
+    new THREE.LineBasicMaterial({ color: borderTint, transparent: true, opacity: 0.82 }),
   );
   border.rotation.x = -Math.PI / 2;
   border.position.set(position.x, 0.17, position.z);

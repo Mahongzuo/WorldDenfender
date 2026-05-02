@@ -6,7 +6,7 @@
     --editor-line-strong: rgba(188, 239, 126, 0.38);
     --editor-text: #edf4ee;
     --editor-muted: rgba(237, 244, 238, 0.62);
-    --editor-accent: #c8ff3d;
+    --editor-accent: #8fb8ae;
     --editor-cyan: #67e8f9;
     --editor-orange: #ffb86b;
     --editor-red: #ff6b6b;
@@ -529,6 +529,53 @@ textarea:focus {
     flex-shrink: 0;
 }
 
+.eraser-tool-panel {
+    margin: -4px 0 4px;
+    padding: 8px 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 80, 120, 0.06);
+}
+
+.eraser-tool-panel__inner {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 14px;
+}
+
+.eraser-tool-panel__label {
+    font-size: 12px;
+    color: var(--editor-muted);
+    white-space: nowrap;
+}
+
+.eraser-tool-panel input[type='range'] {
+    flex: 1 1 140px;
+    min-width: 100px;
+    max-width: 220px;
+    accent-color: var(--editor-accent, #c8ff3d);
+}
+
+.eraser-tool-panel__num {
+    width: 52px;
+    padding: 4px 8px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(0, 0, 0, 0.25);
+    color: var(--editor-text);
+    font-size: 12px;
+}
+
+.eraser-tool-panel__hint {
+    flex: 1 1 100%;
+    margin: 0;
+    font-size: 11px;
+    color: var(--editor-muted);
+    line-height: 1.35;
+    opacity: 0.92;
+}
+
 .action-button,
 .mini-button,
 .filter-chip,
@@ -575,6 +622,24 @@ textarea:focus {
     transform: translateY(-1px);
     border-color: rgba(255, 255, 255, 0.24);
     background: rgba(255, 255, 255, 0.085);
+}
+
+/* 顶栏「保存」：与 .action-button 同权重但写在其后，避免灰底覆盖；配色同下拉强调项 */
+.action-button.topbar-save-button {
+    min-height: 34px;
+    padding: 0 16px;
+    font-size: 12px;
+    font-weight: 600;
+    flex-shrink: 0;
+    background: linear-gradient(135deg, rgba(195, 255, 120, 0.22), rgba(103, 232, 249, 0.18));
+    border-color: rgba(103, 232, 249, 0.4);
+    color: #e8fff4;
+}
+
+.action-button.topbar-save-button:hover {
+    border-color: rgba(103, 232, 249, 0.5);
+    color: #e8fff4;
+    background: linear-gradient(135deg, rgba(195, 255, 120, 0.28), rgba(103, 232, 249, 0.26));
 }
 
 .action-button.accent,
@@ -823,7 +888,103 @@ textarea:focus {
     flex: 1;
     min-height: 0;
     display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    gap: 10px;
+}
+
+.board-editor-main {
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex;
     flex-direction: column;
+    min-height: 0;
+}
+
+.board-images-panel {
+    width: 240px;
+    flex-shrink: 0;
+    align-self: stretch;
+    max-height: 100%;
+    overflow: auto;
+    border-radius: 16px;
+    padding: 12px 12px 14px;
+}
+
+.board-images-panel.view-hidden {
+    display: none !important;
+}
+
+.board-images-panel__title {
+    margin: 0 0 10px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: rgba(234, 246, 253, 0.92);
+}
+
+.board-images-panel__empty {
+    font-size: 0.78rem;
+    line-height: 1.45;
+    color: rgba(200, 220, 228, 0.55);
+}
+
+.board-images-layer-row {
+    display: flex;
+    flex-direction: row;
+    gap: 10px;
+    align-items: stretch;
+    padding: 8px;
+    margin-bottom: 8px;
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.22);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    cursor: pointer;
+    text-align: left;
+    width: 100%;
+    box-sizing: border-box;
+    color: inherit;
+    font: inherit;
+}
+
+.board-images-layer-row--selected {
+    border-color: rgba(103, 232, 249, 0.45);
+    box-shadow: 0 0 0 1px rgba(0, 212, 255, 0.22);
+}
+
+.board-images-layer-thumb {
+    width: 48px;
+    height: 48px;
+    border-radius: 6px;
+    object-fit: cover;
+    flex-shrink: 0;
+    background: rgba(0, 0, 0, 0.35);
+}
+
+.board-images-layer-meta {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 0.72rem;
+    color: rgba(200, 220, 228, 0.75);
+}
+
+.board-images-layer-meta strong {
+    font-size: 0.78rem;
+    color: rgba(234, 246, 253, 0.9);
+}
+
+.board-images-layer-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.board-images-layer-actions .mini-button {
+    padding: 3px 8px;
+    font-size: 0.68rem;
 }
 
 .preview-stage-wrap {
@@ -1381,12 +1542,208 @@ textarea:focus {
     --grid-texture-height: 100%;
     --jinan-map-texture: none;
     position: relative;
-    display: grid;
-    gap: 1px;
     width: max-content;
     min-width: 100%;
     min-height: 100%;
     padding: 22px;
+}
+
+.map-grid-stack {
+    position: relative;
+    width: fit-content;
+}
+
+.map-board-overlays-mount {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 3;
+}
+
+.map-board-image-sprite {
+    position: absolute;
+    transform-origin: left top;
+    border-radius: 6px;
+    overflow: visible;
+    box-sizing: border-box;
+    outline: 1px solid rgba(255, 255, 255, 0.08);
+    pointer-events: auto;
+}
+
+.map-board-image-sprite img {
+    display: block;
+    width: 100%;
+    height: auto;
+    user-select: none;
+    pointer-events: none;
+}
+
+.map-board-image-sprite--selected {
+    outline-color: rgba(103, 232, 249, 0.55);
+    box-shadow:
+        0 0 0 1px rgba(0, 212, 255, 0.35),
+        0 12px 32px rgba(0, 0, 0, 0.45);
+    z-index: 6;
+}
+
+.map-board-image-sprite .bil-handles {
+    position: absolute;
+    inset: -6px;
+    pointer-events: none;
+    z-index: 2;
+}
+
+.map-board-image-sprite .bil-handle {
+    position: absolute;
+    width: 11px;
+    height: 11px;
+    padding: 0;
+    margin: 0;
+    border: 1px solid rgba(0, 28, 48, 0.55);
+    border-radius: 3px;
+    background: rgba(103, 232, 249, 0.92);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+    pointer-events: auto;
+    box-sizing: border-box;
+}
+
+.map-board-image-sprite .bil-handle--n {
+    top: 0;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    cursor: ns-resize;
+}
+
+.map-board-image-sprite .bil-handle--s {
+    bottom: 0;
+    left: 50%;
+    transform: translate(-50%, 50%);
+    cursor: ns-resize;
+}
+
+.map-board-image-sprite .bil-handle--e {
+    top: 50%;
+    right: 0;
+    transform: translate(50%, -50%);
+    cursor: ew-resize;
+}
+
+.map-board-image-sprite .bil-handle--w {
+    top: 50%;
+    left: 0;
+    transform: translate(-50%, -50%);
+    cursor: ew-resize;
+}
+
+.map-board-image-sprite .bil-handle--ne {
+    top: 0;
+    right: 0;
+    transform: translate(50%, -50%);
+    cursor: nesw-resize;
+}
+
+.map-board-image-sprite .bil-handle--nw {
+    top: 0;
+    left: 0;
+    transform: translate(-50%, -50%);
+    cursor: nwse-resize;
+}
+
+.map-board-image-sprite .bil-handle--se {
+    bottom: 0;
+    right: 0;
+    transform: translate(50%, 50%);
+    cursor: nwse-resize;
+}
+
+.map-board-image-sprite .bil-handle--sw {
+    bottom: 0;
+    left: 0;
+    transform: translate(-50%, 50%);
+    cursor: nesw-resize;
+}
+
+.map-board-image-sprite .bil-img-wrap {
+    overflow: hidden;
+    border-radius: inherit;
+    width: 100%;
+}
+
+.map-grid-cells {
+    position: relative;
+    display: grid;
+    gap: 1px;
+}
+
+/* 底板层独占文档流高度，整块棋盘以此为尺寸基准 */
+.map-grid-cells--floor {
+    position: relative;
+    z-index: 1;
+}
+
+/*
+ * 必须与配图层一样脱离文档流铺满 stack，否则会排在底板下方，导致标记全部掉到棋盘外面。
+ */
+.map-grid-cells--markers {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    pointer-events: none;
+}
+
+/* 塔防敌军路线 / 探索路线：铺在配图之上、标记手柄之下 */
+.map-grid-cells--path-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    pointer-events: none;
+}
+
+.map-cell.map-cell--path-overlay {
+    pointer-events: none;
+}
+
+.map-cell.map-cell--path-overlay:not(.path) {
+    background: transparent !important;
+    border-color: transparent;
+    outline: none !important;
+    box-shadow: none !important;
+    cursor: default;
+}
+
+.map-grid--jinan-texture .map-cell.map-cell--path-overlay:not(.path) {
+    background: transparent !important;
+}
+
+.map-cell.map-cell--markers-overlay {
+    pointer-events: none;
+    background: transparent !important;
+    border-color: transparent;
+    outline: none !important;
+    box-shadow: none !important;
+    cursor: default;
+}
+
+.map-grid--jinan-texture .map-cell.map-cell--markers-overlay {
+    background: transparent !important;
+}
+
+.map-cell.map-cell--markers-overlay:hover {
+    outline: none !important;
+}
+
+.map-cell.map-cell--markers-overlay .cell-marker,
+.map-cell.map-cell--markers-overlay .actor-marker {
+    position: relative;
+    z-index: 2;
+    pointer-events: auto;
+    cursor: grab;
+}
+
+.map-cell:not(.map-cell--markers-overlay) .cell-marker,
+.map-cell:not(.map-cell--markers-overlay) .actor-marker {
+    position: relative;
+    z-index: 2;
 }
 
 .map-grid--jinan-texture {
@@ -1415,6 +1772,18 @@ textarea:focus {
 .map-cell:hover {
     outline: 1px solid rgba(200, 255, 61, 0.44);
     outline-offset: -1px;
+}
+
+.map-cell.map-cell--eraser-preview {
+    outline: 2px solid rgba(200, 255, 61, 0.72);
+    outline-offset: -2px;
+    box-shadow: inset 0 0 0 1px rgba(200, 255, 61, 0.38);
+    z-index: 1;
+}
+
+.map-grid--jinan-texture .map-cell.map-cell--eraser-preview {
+    outline-color: rgba(0, 212, 255, 0.75);
+    box-shadow: inset 0 0 0 1px rgba(0, 212, 255, 0.45);
 }
 
 .map-cell.road {
@@ -1452,6 +1821,16 @@ textarea:focus {
 .map-cell.safe-zone {
     background: rgba(34, 200, 100, 0.35);
     outline: 1px solid rgba(34, 200, 100, 0.6);
+}
+
+/* 济南实景棋盘底图上默认 cell 背景会盖住安全区色，提高对比便于即时看到落点 */
+.map-grid--jinan-texture .map-cell.safe-zone {
+    background: rgba(34, 255, 140, 0.45);
+    box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.55),
+        inset 0 0 0 3px rgba(34, 220, 120, 0.55),
+        0 0 14px rgba(34, 255, 160, 0.35);
+    outline: 1px solid rgba(120, 255, 200, 0.85);
 }
 
 .cell-marker,

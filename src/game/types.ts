@@ -103,6 +103,23 @@ export interface MapActorDef {
   scale?: number;
 }
 
+/** 编辑器棋盘配图：叠在程序性格子底板之上；路径高光与标记在它之上 */
+export interface MapBoardImageLayer {
+  id: string;
+  src: string;
+  /** 左上角起点水平位置 0–100（相对棋盘格内容区宽度）*/
+  centerX: number;
+  /** 左上角起点垂直位置 0–100（相对棋盘格内容区高度）*/
+  centerY: number;
+  /** 宽度占棋盘格内容区宽度的百分比 */
+  widthPct: number;
+  /** 高/宽像素比（用于边缘缩放）；缺省约为 1 */
+  aspect?: number;
+  opacity?: number;
+  /** 同关多张图 stacking，数值越小越靠下（先绘制） */
+  order?: number;
+}
+
 export interface MapDefinition {
   id: string;
   name: string;
@@ -116,6 +133,7 @@ export interface MapDefinition {
   actors?: MapActorDef[];
   /** Explore-mode safe zone cells: enemies will not attack the player here */
   safeZones?: GridCell[];
+  boardImageLayers?: MapBoardImageLayer[];
 }
 
 export interface EditorCell {
@@ -157,6 +175,7 @@ export interface EditorLevelMap {
   objectivePoint?: EditorCell & { id?: string; name?: string };
   explorationPoints?: Array<EditorCell & { id?: string; name?: string }>;
   explorationLayout?: EditorExplorationLayout;
+  boardImageLayers?: MapBoardImageLayer[];
 }
 
 export interface EditorExplorationLayout {

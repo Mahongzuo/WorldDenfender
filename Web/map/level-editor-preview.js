@@ -152,6 +152,7 @@ export function createPreview(options) {
   renderer.toneMappingExposure = 1.18;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
+  renderer.localClippingEnabled = true;
   host.innerHTML = '';
   host.appendChild(renderer.domElement);
   renderer.domElement.style.display = 'block';
@@ -159,12 +160,12 @@ export function createPreview(options) {
   renderer.domElement.style.height = '100%';
 
   /* TowerDefenseGame.configureScene — 与环境一致（主游戏共用） */
-  var ambientLight = new THREE.HemisphereLight(0xf7fbff, 0x8aa0b8, 1.85);
-  var dirLight = new THREE.DirectionalLight(0xfff6df, 3.45);
+  var ambientLight = new THREE.HemisphereLight(0xd5e8e4, 0x7a8894, 1.52);
+  var dirLight = new THREE.DirectionalLight(0xe8ddd0, 2.38);
   dirLight.position.set(-48, 72, 34);
   dirLight.castShadow = true;
   dirLight.shadow.mapSize.set(2048, 2048);
-  var skyFill = new THREE.DirectionalLight(0xbfdcff, 0.75);
+  var skyFill = new THREE.DirectionalLight(0xa8c4cc, 0.52);
   skyFill.position.set(36, 34, -52);
   scene.add(ambientLight, dirLight, skyFill);
 
@@ -237,9 +238,9 @@ export function createPreview(options) {
   placementGhost = new THREE.Mesh(
     new THREE.BoxGeometry(1, 1, 1),
     new THREE.MeshBasicMaterial({
-      color: 0x67e8f9,
+      color: 0x5a9088,
       transparent: true,
-      opacity: 0.4,
+      opacity: 0.35,
       depthWrite: false,
     }),
   );
@@ -373,6 +374,16 @@ export function createPreview(options) {
     return fallbackHex >>> 0;
   }
 
+  function obstacleTopFaceTint(obstacleHex, accentHex) {
+    var base = new THREE.Color(obstacleHex);
+    var accent = new THREE.Color(accentHex);
+    return base.clone().lerp(accent, 0.34).offsetHSL(0, 0.035, 0.06).getHex();
+  }
+
+  function softPathGuideCenterHex(pathHex, accentHex) {
+    return new THREE.Color(pathHex).lerp(new THREE.Color(accentHex), 0.42).offsetHSL(0, 0.02, 0.07).getHex();
+  }
+
   function resolveThemePalette(level) {
     var map = level.map || {};
     var explore = getActiveEditorMode() === 'explore';
@@ -381,11 +392,11 @@ export function createPreview(options) {
       Object.assign(raw, map.explorationLayout.theme);
     var fogFallback = raw.fog || raw.groundAlt || raw.ground || '#334455';
     return {
-      ground: parseCssColor(raw.ground, 0x456a78),
-      groundAlt: parseCssColor(raw.groundAlt || raw.ground, 0x456a78),
-      path: parseCssColor(raw.path || raw.road, 0xc8a96b),
-      obstacle: parseCssColor(raw.obstacle, 0x52616b),
-      accent: parseCssColor(raw.accent, 0xc8ff3d),
+      ground: parseCssColor(raw.ground, 0x5a7d82),
+      groundAlt: parseCssColor(raw.groundAlt || raw.ground, 0x4f7178),
+      path: parseCssColor(raw.path || raw.road, 0x6f9288),
+      obstacle: parseCssColor(raw.obstacle, 0x5d6870),
+      accent: parseCssColor(raw.accent, 0x8fb8ae),
       fogHex: fogFallback,
     };
   }
@@ -548,6 +559,17 @@ export function createPreview(options) {
     if (explore && map.explorationLayout && Array.isArray(map.explorationLayout.obstacles))
       map.explorationLayout.obstacles.forEach(function (c) { bucket.add(cellKeyNum(c.col, c.row)); });
     else if (Array.isArray(map.obstacles)) map.obstacles.forEach(function (c) { bucket.add(cellKeyNum(c.col, c.row)); });
+    return bucket;
+  }
+
+  function safeZoneCellSet(level) {
+    /** @type {Set<string>} */
+    var bucket = new Set();
+    if (getActiveEditorMode() !== 'explore') return bucket;
+    var map = level.map || {};
+    var raw = map.explorationLayout && map.explorationLayout.safeZones;
+    if (!Array.isArray(raw)) return bucket;
+    raw.forEach(function (c) { bucket.add(cellKeyNum(c.col, c.row)); });
     return bucket;
   }
 
@@ -833,16 +855,16 @@ export function createPreview(options) {
     terrainGroup.add(plane);
   }
 
-  function addJinanPathGuides(path, cols, rows, ts) {
+  function addJinanPathGuides(path, cols, rows, ts, pathHex, accentHex) {
     if (!Array.isArray(path) || path.length < 2) return;
     var laneMat = new THREE.MeshBasicMaterial({
-      color: 0x00d4ff,
+      color: pathHex,
       transparent: true,
-      opacity: 0.48,
+      opacity: 0.38,
       depthWrite: false,
     });
     var centerMat = new THREE.MeshBasicMaterial({
-      color: 0xffffff,
+      color: softPathGuideCenterHex(pathHex, accentHex),
       transparent: true,
       opacity: 0.72,
       depthWrite: false,
@@ -893,6 +915,89 @@ export function createPreview(options) {
     });
   }
 
+  function previewBoardFootprintClipPlanes(halfWidthX, halfDepthZ) {
+    return [
+      new THREE.Plane(new THREE.Vector3(-1, 0, 0), halfWidthX),
+      new THREE.Plane(new THREE.Vector3(1, 0, 0), halfWidthX),
+      new THREE.Plane(new THREE.Vector3(0, 0, -1), halfDepthZ),
+      new THREE.Plane(new THREE.Vector3(0, 0, 1), halfDepthZ),
+    ];
+  }
+
+  function decorClampPctPreview(v, fallback) {
+    var n = Number(v);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.max(0, Math.min(100, n));
+  }
+
+  function decorClamp01Preview(v, fallback) {
+    var n = Number(v);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.max(0, Math.min(1, n));
+  }
+
+  /** 与 map-runtime `addBoardDecorImageLayers` 对齐；裁剪范围按 terrainGroup 世界缩放计算 */
+  function addBoardDecorImageLayersPreview(map, cols, rows, ts, decorYLocal) {
+    var layers = map.boardImageLayers;
+    if (!layers || !layers.length) return;
+    var spanX = cols * ts;
+    var spanZ = rows * ts;
+    var sc = Number(previewPlayfieldScale);
+    if (!Number.isFinite(sc) || sc <= 0) sc = 1;
+    var clipPlanes = previewBoardFootprintClipPlanes((spanX * 0.5) * sc, (spanZ * 0.5) * sc);
+    var sorted = layers.slice().sort(function (a, b) {
+      return (Number(a.order) || 0) - (Number(b.order) || 0);
+    });
+    sorted.forEach(function (layer) {
+      var src = typeof layer.src === 'string' ? layer.src.trim() : '';
+      if (!src) return;
+      var url = src.indexOf('data:') === 0 ? src : resolveAssetPath(src);
+      textureLoader.load(
+        url,
+        function (tex) {
+          if (THREE.SRGBColorSpace) tex.colorSpace = THREE.SRGBColorSpace;
+          tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+          var aspect = 1;
+          if (Number.isFinite(Number(layer.aspect)) && Number(layer.aspect) > 0) aspect = Number(layer.aspect);
+          if (tex.image && tex.image.width > 0) aspect = tex.image.height / tex.image.width;
+          var widthPct = decorClampPctPreview(layer.widthPct, 45);
+          var planeW = (widthPct / 100) * spanX;
+          var planeH = planeW * aspect;
+          var leftPct = decorClampPctPreview(layer.centerX, 0);
+          var topPct = decorClampPctPreview(layer.centerY, 0);
+          var wx0 = -spanX / 2 + (leftPct / 100) * spanX;
+          var wz0 = -spanZ / 2 + (topPct / 100) * spanZ;
+          var cx = wx0 + planeW / 2;
+          var cz = wz0 + planeH / 2;
+          var opacity = decorClamp01Preview(layer.opacity != null ? layer.opacity : 1, 1);
+          var mesh = new THREE.Mesh(
+            new THREE.PlaneGeometry(planeW, planeH),
+            new THREE.MeshBasicMaterial({
+              map: tex,
+              transparent: opacity < 0.999,
+              opacity: opacity,
+              depthWrite: false,
+              polygonOffset: true,
+              polygonOffsetFactor: -1.35,
+              polygonOffsetUnits: -1.35,
+              clipping: true,
+              clippingPlanes: clipPlanes,
+              clipIntersection: false,
+            }),
+          );
+          mesh.rotation.x = -Math.PI / 2;
+          mesh.position.set(cx, decorYLocal, cz);
+          mesh.renderOrder = 4;
+          terrainGroup.add(mesh);
+        },
+        undefined,
+        function () {
+          console.warn('[Preview] boardImageLayer load failed:', src.slice(0, 80));
+        },
+      );
+    });
+  }
+
   /** 与 TowerDefenseGame.drawTerrain / renderVisibleMap 一致 */
   function buildTerrainFromGameLogic(level) {
     clearTerrain();
@@ -909,9 +1014,9 @@ export function createPreview(options) {
       usesGeoBackdrop && getActiveEditorMode() === 'defense' ? 20 : 1,
       usesGeoBackdrop && getActiveEditorMode() === 'defense' ? boardHeightForLevel(level) : 0,
     );
-    scene.background = new THREE.Color(usesGeoBackdrop ? 0xcfe8ff : fogHex);
+    scene.background = new THREE.Color(usesGeoBackdrop ? 0x9eb8c4 : fogHex);
     scene.fog = null;
-    scene.fog = usesGeoBackdrop ? new THREE.Fog(0xcfe8ff, 1500, 8500) : new THREE.Fog(fogHex, 150, 320);
+    scene.fog = usesGeoBackdrop ? new THREE.Fog(0x9eb8c4, 1500, 8500) : new THREE.Fog(fogHex, 150, 320);
 
     /* 与运行时 TowerDefenseGame 对齐：Cesium 底图不随棋盘 XZ 缩放，只有关卡棋盘和 Actor 放大到城市尺度。 */
     if (usesGeoBackdrop) loadGeoTilesForLevel(level);
@@ -919,17 +1024,28 @@ export function createPreview(options) {
 
     var pathCells = pathCellSet(level);
     var obstacleCells = obstacleCellSet(level);
+    var safeZoneCells = safeZoneCellSet(level);
+
+    var safeZonePreviewMat = new THREE.MeshBasicMaterial({
+      color: 0x22dd77,
+      transparent: true,
+      opacity: 0.38,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -3,
+      polygonOffsetUnits: -3,
+    });
 
     var tileGeom = new THREE.BoxGeometry(ts * 0.96, 0.18, ts * 0.96);
     var pathGeom = new THREE.BoxGeometry(ts * 0.98, 0.22, ts * 0.98);
     var obstacleGeom = new THREE.BoxGeometry(ts * 0.85, 1.2, ts * 0.85);
 
-    var groundMat = new THREE.MeshStandardMaterial({ color: pal.ground, roughness: 0.4, metalness: 0.1 });
-    var groundAltMat = new THREE.MeshStandardMaterial({ color: pal.groundAlt, roughness: 0.4, metalness: 0.1 });
+    var groundMat = new THREE.MeshStandardMaterial({ color: pal.ground, roughness: 0.9, metalness: 0 });
+    var groundAltMat = new THREE.MeshStandardMaterial({ color: pal.groundAlt, roughness: 0.92, metalness: 0 });
     var pathMat = new THREE.MeshStandardMaterial({
       color: pal.path,
       emissive: pal.path,
-      emissiveIntensity: 0.08,
+      emissiveIntensity: 0.05,
       roughness: 0.3,
       polygonOffset: true,
       polygonOffsetFactor: -2.4,
@@ -937,15 +1053,14 @@ export function createPreview(options) {
     });
     var obstacleMat = new THREE.MeshStandardMaterial({
       color: pal.obstacle,
-      emissive: pal.obstacle,
-      emissiveIntensity: 0.2,
-      roughness: 0.2,
-      metalness: 0.8,
+      roughness: 0.88,
+      metalness: 0,
     });
+    var capHighlight = obstacleTopFaceTint(pal.obstacle, pal.accent);
     var capMat = new THREE.MeshStandardMaterial({
-      color: pal.accent,
-      emissive: pal.accent,
-      emissiveIntensity: 0.5,
+      color: capHighlight,
+      roughness: 0.94,
+      metalness: 0,
     });
     if (usesGeoBackdrop) {
       groundMat.transparent = true;
@@ -959,12 +1074,16 @@ export function createPreview(options) {
       pathMat.depthWrite = false;
     }
     var jinanGlowMat = new THREE.MeshBasicMaterial({
-      color: 0x00e5ff,
+      color: pal.path,
       transparent: true,
-      opacity: 0.42,
+      opacity: 0.34,
       depthWrite: false,
     });
-    var jinanBorderMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.82 });
+    var jinanBorderMat = new THREE.LineBasicMaterial({
+      color: new THREE.Color(pal.path).offsetHSL(0, 0.02, 0.14).getHex(),
+      transparent: true,
+      opacity: 0.78,
+    });
 
     for (var row = 0; row < rows; row += 1) {
       for (var col = 0; col < cols; col += 1) {
@@ -1015,6 +1134,13 @@ export function createPreview(options) {
           grass.receiveShadow = true;
           if (usesGeoBackdrop || !isJinan) terrainGroup.add(grass);
         }
+        if (getActiveEditorMode() === 'explore' && safeZoneCells.has(key)) {
+          var szPlane = new THREE.Mesh(new THREE.PlaneGeometry(ts * 0.94, ts * 0.94), safeZonePreviewMat);
+          szPlane.rotation.x = -Math.PI / 2;
+          szPlane.position.set(x, 0.16, z);
+          szPlane.renderOrder = 8;
+          terrainGroup.add(szPlane);
+        }
       }
     }
 
@@ -1023,8 +1149,15 @@ export function createPreview(options) {
       var guidePath = getActiveEditorMode() === 'explore' && map.explorationLayout && Array.isArray(map.explorationLayout.path)
         ? map.explorationLayout.path
         : defensePathSourceCellsPv(map);
-      addJinanPathGuides(guidePath, cols, rows, ts);
+      addJinanPathGuides(guidePath, cols, rows, ts, pal.path, pal.accent);
     }
+
+    var trimmedBoard = String((map.theme && map.theme.boardTextureUrl) || '').trim();
+    var hasCustomBoardImage = trimmedBoard.length > 0;
+    var jinanPresetBoard = isJinan && !hasCustomBoardImage;
+    var flatBoardMode = !usesGeoBackdrop && (jinanPresetBoard || hasCustomBoardImage);
+    var decorYPreview = usesGeoBackdrop ? 0.048 : flatBoardMode ? 0.063 : 0.098;
+    addBoardDecorImageLayersPreview(map, cols, rows, ts, decorYPreview);
   }
 
   function setPreviewPlayfieldScale(scale, yOffset) {
