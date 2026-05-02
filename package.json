@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "generate-preset-models": "node scripts/generate-editor-preset-models.mjs"
   },
   "dependencies": {
     "3d-tiles-renderer": "^0.4.24",

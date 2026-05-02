@@ -59,6 +59,22 @@ export interface MapTheme {
   obstacle: number;
   accent: number;
   fog: number;
+  /** 整块棋盘贴图（相对站点根路径，如 /Arts/Maps/foo.png）。设置后与济南默认图一样走「平面底板 + 路径叠层」逻辑 */
+  boardTextureUrl?: string;
+  /** Cesium / 地理底板模式下格子瓦片透明度，默认约 0.48 */
+  geoTileOpacity?: number;
+  geoPathOpacity?: number;
+  /** 地理模式下深色承托管透明度 */
+  boardBaseOpacity?: number;
+  /** 叠在底板上的网格线透明度 */
+  gridLineOpacity?: number;
+  rimOpacity?: number;
+  pathGlowOpacity?: number;
+  pathDetailOpacity?: number;
+  /** 塔防建造指针所在格半透明度 */
+  hoverCellOpacity?: number;
+  hoverColorOk?: number;
+  hoverColorBad?: number;
 }
 
 export interface GeoMapConfig {
@@ -110,7 +126,29 @@ export interface EditorCell {
 export interface EditorLevelMap {
   grid?: { cols?: number; rows?: number; tileSize?: number };
   geo?: GeoMapConfig;
-  theme?: Partial<Record<"ground" | "groundAlt" | "road" | "path" | "obstacle" | "accent" | "fog", string | number>>;
+  theme?: Partial<
+    Record<
+      | "ground"
+      | "groundAlt"
+      | "road"
+      | "path"
+      | "obstacle"
+      | "accent"
+      | "fog"
+      | "boardTextureUrl"
+      | "geoTileOpacity"
+      | "geoPathOpacity"
+      | "boardBaseOpacity"
+      | "gridLineOpacity"
+      | "rimOpacity"
+      | "pathGlowOpacity"
+      | "pathDetailOpacity"
+      | "hoverCellOpacity"
+      | "hoverColorOk"
+      | "hoverColorBad",
+      string | number
+    >
+  >;
   actors?: Array<Record<string, unknown>>;
   roads?: EditorCell[];
   enemyPaths?: Array<{ id?: string; name?: string; cells?: EditorCell[] }>;
@@ -123,7 +161,29 @@ export interface EditorLevelMap {
 
 export interface EditorExplorationLayout {
   grid?: { cols?: number; rows?: number; tileSize?: number };
-  theme?: Partial<Record<"ground" | "groundAlt" | "road" | "path" | "obstacle" | "accent" | "fog", string | number>>;
+  theme?: Partial<
+    Record<
+      | "ground"
+      | "groundAlt"
+      | "road"
+      | "path"
+      | "obstacle"
+      | "accent"
+      | "fog"
+      | "boardTextureUrl"
+      | "geoTileOpacity"
+      | "geoPathOpacity"
+      | "boardBaseOpacity"
+      | "gridLineOpacity"
+      | "rimOpacity"
+      | "pathGlowOpacity"
+      | "pathDetailOpacity"
+      | "hoverCellOpacity"
+      | "hoverColorOk"
+      | "hoverColorBad",
+      string | number
+    >
+  >;
   path?: EditorCell[];
   obstacles?: EditorCell[];
   startPoint?: EditorCell & { id?: string; name?: string };

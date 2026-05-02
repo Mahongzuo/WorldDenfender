@@ -1,8 +1,10 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 
-const loader = new GLTFLoader();
+const gltfLoader = new GLTFLoader();
+const objLoader = new OBJLoader();
 const cache = new Map();
 
 function resolveAssetPath(path) {
@@ -12,13 +14,20 @@ function resolveAssetPath(path) {
   return '/' + value.replace(/^\/+/, '');
 }
 
-async function loadModel(url) {
+async function loadGltf(url) {
   if (cache.has(url)) return cache.get(url);
-  const root = await loader.loadAsync(url).then(function (gltf) {
+  const root = await gltfLoader.loadAsync(url).then(function (gltf) {
     return gltf.scene || gltf.scenes[0];
   });
   cache.set(url, root);
   return root;
+}
+
+async function loadObj(url) {
+  if (cache.has(url)) return cache.get(url);
+  const objRoot = await objLoader.loadAsync(url);
+  cache.set(url, objRoot);
+  return objRoot;
 }
 
 export function createGameplayAssetPreview(options) {
@@ -106,15 +115,27 @@ export function createGameplayAssetPreview(options) {
     var url = resolveAssetPath(path);
     try {
       if (/\.(glb|gltf)(\?|$)/i.test(url)) {
-        var root = (await loadModel(url)).clone(true);
-        root.traverse(function (child) {
+        var gltfRoot = (await loadGltf(url)).clone(true);
+        gltfRoot.traverse(function (child) {
           if (child.isMesh) {
             child.castShadow = true;
             child.receiveShadow = true;
           }
         });
-        stage.add(root);
-        frameObject(root);
+        stage.add(gltfRoot);
+        frameObject(gltfRoot);
+        return;
+      }
+      if (/\.obj(\?|$)/i.test(url)) {
+        var objRoot = (await loadObj(url)).clone(true);
+        objRoot.traverse(function (child) {
+          if (child.isMesh) {
+            child.castShadow = true;
+            child.receiveShadow = true;
+          }
+        });
+        stage.add(objRoot);
+        frameObject(objRoot);
         return;
       }
       var fallback = new THREE.Mesh(

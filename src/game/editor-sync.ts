@@ -1,4 +1,4 @@
-import { hasEditorDefenseLayout, hasEditorExploreLayout, parseEditorColor, runtimeMapToEditorExplorationLayout, runtimeMapToEditorMap } from "./editor-runtime";
+import { hasEditorDefenseLayout, hasEditorExploreLayout, parseEditorColor, parseEditorOpacity, runtimeMapToEditorExplorationLayout, runtimeMapToEditorMap } from "./editor-runtime";
 import { CITY_GEO_CONFIG } from "./content";
 import { clamp, orderEditorPathCells, sameCell, uniqueCells, GRID_COLS, GRID_ROWS } from "./runtime-grid";
 import type { EditorCell, EditorLevel, EditorLevelMap, GameMode, GeoMapConfig, GridCell, MapActorDef, MapDefinition } from "./types";
@@ -188,6 +188,9 @@ export function editorLevelToRuntimeMap(level: EditorLevel, mode: GameMode): Map
   const theme = exploreLayout?.theme ?? editorMap.theme ?? {};
 
   const presetGeo = resolvePresetGeoForLevel(level);
+  
+  const boardUrlRaw = typeof theme.boardTextureUrl === "string" ? theme.boardTextureUrl.trim() : "";
+  const boardTextureUrl = boardUrlRaw ? boardUrlRaw : undefined;
 
   return {
     id: `${level.id || "editor-level"}-${mode}`,
@@ -203,6 +206,17 @@ export function editorLevelToRuntimeMap(level: EditorLevel, mode: GameMode): Map
       obstacle: parseEditorColor(theme.obstacle, mode === "explore" ? 0x354c5c : 0x3e6e80),
       accent: parseEditorColor(theme.accent, 0x9eeeff),
       fog: parseEditorColor(theme.fog, mode === "explore" ? 0x6d8798 : 0x7ab4c8),
+      ...(boardTextureUrl ? { boardTextureUrl } : {}),
+      geoTileOpacity: parseEditorOpacity(theme.geoTileOpacity, 0.48),
+      geoPathOpacity: parseEditorOpacity(theme.geoPathOpacity, 0.92),
+      boardBaseOpacity: parseEditorOpacity(theme.boardBaseOpacity, 0.42),
+      gridLineOpacity: parseEditorOpacity(theme.gridLineOpacity, 0.42),
+      rimOpacity: parseEditorOpacity(theme.rimOpacity, 0.32),
+      pathGlowOpacity: parseEditorOpacity(theme.pathGlowOpacity, 0.46),
+      pathDetailOpacity: parseEditorOpacity(theme.pathDetailOpacity, 0.82),
+      hoverCellOpacity: parseEditorOpacity(theme.hoverCellOpacity, 0.42),
+      hoverColorOk: parseEditorColor(theme.hoverColorOk, 0x8be9ff),
+      hoverColorBad: parseEditorColor(theme.hoverColorBad, 0xff5e73),
     },
     path,
     obstacles,

@@ -235,6 +235,9 @@ textarea:focus {
 
 .level-strip--editor-toolbar .overview-stats {
     justify-self: end;
+    flex: 0 1 auto;
+    min-width: 0;
+    align-self: center;
 }
 
 .mode-ribbon--in-strip.mode-ribbon--split {
@@ -269,11 +272,28 @@ textarea:focus {
 
 .engine-topbar {
     grid-column: 1 / -1;
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
     align-items: center;
-    justify-content: space-between;
-    gap: 18px;
+    column-gap: 18px;
+    row-gap: 12px;
     padding: 18px 20px;
+    /* 高于侧栏/主栏 panel-surface（含 backdrop-filter）的层叠上下文，避免顶栏下拉菜单被挡住 */
+    position: relative;
+    z-index: 120;
+}
+
+.engine-topbar .brand-block {
+    justify-self: start;
+    min-width: 0;
+}
+
+.engine-topbar .workspace-switch {
+    justify-self: center;
+}
+
+.engine-topbar .topbar-actions {
+    justify-self: end;
 }
 
 .brand-block h1,
@@ -438,6 +458,75 @@ textarea:focus {
 
 .topbar-actions {
     justify-content: flex-end;
+    flex-wrap: nowrap;
+    gap: 10px;
+}
+
+.topbar-project-menu {
+    position: relative;
+}
+
+.topbar-project-menu__trigger {
+    min-height: 34px;
+    padding: 0 12px;
+    font-size: 12px;
+}
+
+.topbar-project-menu__dropdown {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 6px);
+    z-index: 500;
+    min-width: 232px;
+    padding: 6px;
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(14, 24, 34, 0.98);
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.topbar-project-menu__item {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    width: 100%;
+    margin: 0;
+    padding: 8px 12px;
+    border-radius: 10px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--editor-text);
+    font-size: 12px;
+    font-weight: 500;
+    text-align: left;
+    cursor: pointer;
+    min-height: 0;
+    line-height: 1.35;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.topbar-project-menu__item:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.topbar-project-menu__item--accent {
+    background: linear-gradient(135deg, rgba(195, 255, 120, 0.22), rgba(103, 232, 249, 0.18));
+    border-color: rgba(103, 232, 249, 0.35);
+    color: #e8fff4;
+}
+
+.topbar-project-menu__item--accent:hover {
+    background: linear-gradient(135deg, rgba(195, 255, 120, 0.28), rgba(103, 232, 249, 0.26));
+}
+
+.topbar-home-link {
+    min-height: 34px;
+    padding: 0 12px;
+    font-size: 12px;
+    flex-shrink: 0;
 }
 
 .action-button,
@@ -692,7 +781,7 @@ textarea:focus {
     display: grid;
     grid-template-columns: repeat(4, minmax(80px, 1fr));
     gap: 8px;
-    min-width: 360px;
+    min-width: 0;
 }
 
 .stat-card {
@@ -1495,6 +1584,38 @@ textarea:focus {
     min-width: min(320px, 100%);
 }
 
+/* 玩法分类：五个标签同一行，避免「技能」单独换行 */
+.gameplay-ribbon .mode-ribbon-inner:first-child {
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-gutter: stable;
+}
+
+.gameplay-ribbon .mode-ribbon-inner:first-child .mode-button {
+    flex: 1 1 0;
+    min-width: 0;
+    padding-inline: 10px;
+    white-space: nowrap;
+}
+
+/* 模型分类：六个标签同一行（窄屏横向滚动） */
+.model-ribbon .mode-ribbon-inner:first-child {
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-gutter: stable;
+}
+
+.model-ribbon .mode-ribbon-inner:first-child .mode-button {
+    flex: 1 1 0;
+    min-width: 0;
+    padding-inline: 10px;
+    white-space: nowrap;
+}
+
 .gameplay-search-field span {
     display: block;
     margin-bottom: 6px;
@@ -1502,11 +1623,167 @@ textarea:focus {
     color: var(--editor-muted);
 }
 
+/* 玩法库顶栏：五个统计同一行，字号缩小 */
+.gameplay-strip .overview-stats {
+    flex: 0 1 auto;
+    min-width: 0;
+    align-self: center;
+}
+
+#gameplayOverviewStats.overview-stats {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 6px;
+    min-width: 0;
+    max-width: min(100%, 520px);
+}
+
+#gameplayOverviewStats.overview-stats .stat-card {
+    padding: 5px 6px;
+    border-radius: 11px;
+    min-width: 0;
+}
+
+#gameplayOverviewStats.overview-stats .stat-card strong {
+    font-size: 13px;
+    line-height: 1.2;
+}
+
+#gameplayOverviewStats.overview-stats .stat-card span {
+    font-size: 9px;
+    letter-spacing: 0.02em;
+    line-height: 1.25;
+}
+
+/* 关卡编辑器顶栏统计：与玩法库同风格的紧凑单行 */
+#overviewStats.overview-stats {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+    min-width: 0;
+    max-width: min(100%, 440px);
+}
+
+#overviewStats.overview-stats .stat-card {
+    padding: 5px 6px;
+    border-radius: 11px;
+    min-width: 0;
+}
+
+#overviewStats.overview-stats .stat-card strong {
+    font-size: 13px;
+    line-height: 1.2;
+}
+
+#overviewStats.overview-stats .stat-card span {
+    font-size: 9px;
+    letter-spacing: 0.02em;
+    line-height: 1.25;
+}
+
+/* 模型库顶栏：6 类统计同一行（窄屏横向滚动） */
+.model-strip .overview-stats {
+    flex: 0 1 auto;
+    min-width: 0;
+    align-self: center;
+}
+
+#modelOverviewStats.overview-stats {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 6px;
+    min-width: 0;
+    max-width: min(100%, 680px);
+}
+
+#modelOverviewStats.overview-stats .stat-card {
+    padding: 5px 6px;
+    border-radius: 11px;
+    min-width: 0;
+}
+
+#modelOverviewStats.overview-stats .stat-card strong {
+    font-size: 12px;
+    line-height: 1.2;
+}
+
+#modelOverviewStats.overview-stats .stat-card span {
+    font-size: 8px;
+    letter-spacing: 0.02em;
+    line-height: 1.25;
+}
+
+/* 玩法侧栏：资源数量一行展示 */
+.gameplay-inspector-counts {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    gap: 6px;
+    padding: 8px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.04);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+}
+
+.gameplay-inspector-counts .gic-chip {
+    flex: 1 1 0;
+    min-width: 52px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    padding: 4px 6px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.gameplay-inspector-counts .gic-chip strong {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--editor-accent);
+    line-height: 1.15;
+}
+
+.gameplay-inspector-counts .gic-chip span {
+    font-size: 8px;
+    color: var(--editor-muted);
+    text-align: center;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+
 .gameplay-layout {
     display: grid;
     grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
     gap: 16px;
     min-height: 0;
+}
+
+/* 棋盘主题工作台只有一列表单，勿占用「列表窄栏」网格槽，应铺满中间主栏 */
+#themeWorkbench .gameplay-layout {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+#themeWorkbench .gameplay-column {
+    max-width: none;
+}
+
+#themeWorkbench.workbench-surface {
+    min-height: 0;
+    overflow: auto;
+}
+
+/* 模型编辑器：空分类下列表与预览区保留高度，减少切换分类时整页跳动 */
+#modelWorkbench .gameplay-column-list .compact-list {
+    min-height: 220px;
+}
+
+#modelWorkbench #modelPreviewHost {
+    min-height: 260px;
 }
 
 .gameplay-column {
@@ -1545,13 +1822,123 @@ textarea:focus {
 }
 
 .gameplay-entry-card {
-    cursor: pointer;
     text-align: left;
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 10px;
 }
 
 .gameplay-entry-card.active {
     border-color: var(--editor-line-strong);
     background: rgba(103, 232, 249, 0.08);
+}
+
+.gameplay-entry-thumb-btn {
+    flex-shrink: 0;
+    width: 56px;
+    height: 56px;
+    padding: 0;
+    border: none;
+    border-radius: 12px;
+    background: transparent;
+    cursor: pointer;
+    overflow: hidden;
+}
+
+.gameplay-entry-card .gameplay-asset-thumb {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.gameplay-entry-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.gameplay-entry-title-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    justify-content: space-between;
+}
+
+.gameplay-entry-select {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+}
+
+.gameplay-entry-select:hover {
+    color: var(--editor-cyan);
+}
+
+.gameplay-entry-summary {
+    font-size: 12px;
+    color: var(--editor-muted);
+    line-height: 1.35;
+}
+
+.gameplay-entry-menu-anchor {
+    position: relative;
+    flex-shrink: 0;
+}
+
+.gameplay-entry-ops-btn {
+    padding-inline: 10px;
+}
+
+.gameplay-entry-menu {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 4px);
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 132px;
+    padding: 6px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(14, 24, 34, 0.98);
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+}
+
+.gameplay-entry-menu-item {
+    display: block;
+    width: 100%;
+    margin: 0;
+    padding: 8px 10px;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-size: 12px;
+    text-align: left;
+    cursor: pointer;
+}
+
+.gameplay-entry-menu-item:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.gameplay-entry-menu-item.danger:hover {
+    background: rgba(255, 80, 80, 0.15);
 }
 
 .gameplay-entry-meta {
@@ -2024,7 +2411,20 @@ label.game-asset-upload {
         display: none !important;
     }
 
-    .engine-topbar,
+    .engine-topbar {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .engine-topbar .workspace-switch {
+        align-self: center;
+    }
+
+    .engine-topbar .topbar-actions {
+        justify-content: flex-end;
+    }
+
     .level-strip,
     .stage-hint {
         flex-direction: column;
@@ -2043,6 +2443,22 @@ label.game-asset-upload {
     .overview-stats {
         min-width: 0;
         grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    #gameplayOverviewStats.overview-stats {
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        overflow-x: auto;
+        max-width: 100%;
+        scrollbar-width: thin;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    #overviewStats.overview-stats,
+    #modelOverviewStats.overview-stats {
+        overflow-x: auto;
+        max-width: 100%;
+        scrollbar-width: thin;
+        -webkit-overflow-scrolling: touch;
     }
 
     .region-panel,

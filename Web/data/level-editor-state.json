@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "savedAt": "2026-04-30T04:00:16.786Z",
+  "savedAt": "2026-04-30T08:40:32.333Z",
   "catalog": {
     "gameTypes": [],
     "phaseTypes": [],
@@ -2194,7 +2194,32 @@
           },
           "path": [],
           "obstacles": [],
-          "safeZones": [],
+          "safeZones": [
+            {
+              "col": 17,
+              "row": 13
+            },
+            {
+              "col": 18,
+              "row": 13
+            },
+            {
+              "col": 18,
+              "row": 14
+            },
+            {
+              "col": 17,
+              "row": 14
+            },
+            {
+              "col": 16,
+              "row": 13
+            },
+            {
+              "col": 16,
+              "row": 14
+            }
+          ],
           "startPoint": {
             "id": "explore-start",
             "name": "探索起点",
@@ -51643,7 +51668,6 @@
             "category": "model",
             "icon": "M",
             "modelId": "gm-ricvf3-monsterb.glb",
-            "modelPath": "/GameModels/Enemy/monsterB.glb",
             "col": 6,
             "row": 17,
             "rotation": 0,
@@ -51653,6 +51677,7 @@
               "y": 1.2446824234745792,
               "z": -0.8735304006049027
             },
+            "modelPath": "/GameModels/Enemy/monsterB.glb",
             "team": "player",
             "stats": {
               "hp": 1,

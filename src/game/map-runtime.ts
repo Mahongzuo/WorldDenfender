@@ -97,6 +97,12 @@ export function renderRuntimeMapScene(options: {
   const isJinan = currentCity === "jinan" || map.id.startsWith("jinan");
   const isBeijing = currentCity === "beijing" || map.id.startsWith("beijing");
   const usesGeoBackdrop = !!useGeoBackdrop && !!map.geo?.enabled;
+  const trimmedBoard = (map.theme.boardTextureUrl ?? "").trim();
+  const hasCustomBoardImage = trimmedBoard.length > 0;
+  const jinanPresetBoard = isJinan && !hasCustomBoardImage;
+  const flatBoardMode = !usesGeoBackdrop && (jinanPresetBoard || hasCustomBoardImage);
+  const pathGlowOpacity = map.theme.pathGlowOpacity ?? 0.46;
+  const pathDetailOpacity = map.theme.pathDetailOpacity ?? 0.82;
   scene.background = new THREE.Color(usesGeoBackdrop ? 0xcfe8ff : map.theme.fog);
   scene.fog = usesGeoBackdrop ? new THREE.Fog(0xcfe8ff, 1500, 8500) : new THREE.Fog(map.theme.fog, 150, 320);
 
@@ -126,7 +132,7 @@ export function renderRuntimeMapScene(options: {
       pathMaterial,
       obstacleMaterial,
     ]);
-    const groundOpacity = 0.48;
+    const groundOpacity = map.theme.geoTileOpacity ?? 0.48;
     for (const m of [groundMaterial, groundAltMaterial]) {
       m.transparent = true;
       m.opacity = groundOpacity;
@@ -134,12 +140,12 @@ export function renderRuntimeMapScene(options: {
       m.needsUpdate = true;
     }
     pathMaterial.transparent = true;
-    pathMaterial.opacity = 0.92;
+    pathMaterial.opacity = map.theme.geoPathOpacity ?? 0.92;
     pathMaterial.depthWrite = false;
     pathMaterial.needsUpdate = true;
   }
 
-  if (usesGeoBackdrop || !isJinan) {
+  if (usesGeoBackdrop || (!flatBoardMode && !isJinan)) {
     addBoardBase(mapGroup, map, usesGeoBackdrop);
   }
   if (usesGeoBackdrop) {
@@ -175,10 +181,10 @@ export function renderRuntimeMapScene(options: {
           mesh.renderOrder = 6;
           mesh.receiveShadow = true;
           mapGroup.add(mesh);
-          addPathTileDetails(mapGroup, cell, position, map.theme.accent, pathCells);
-        } else if (isJinan) {
-          addPathOverlayTile(mapGroup, position, map.theme.path, 0.46);
-        } else if (isBeijing) {
+          addPathTileDetails(mapGroup, cell, position, map.theme.accent, pathCells, pathDetailOpacity);
+        } else if (flatBoardMode) {
+          addPathOverlayTile(mapGroup, position, map.theme.path, pathGlowOpacity);
+        } else if (isBeijing && !flatBoardMode) {
           const plane = new THREE.Mesh(
             new THREE.PlaneGeometry(TILE_SIZE, TILE_SIZE),
             new THREE.MeshStandardMaterial({ 
@@ -196,7 +202,7 @@ export function renderRuntimeMapScene(options: {
           mesh.position.set(position.x, 0.06, position.z);
           mesh.receiveShadow = true;
           mapGroup.add(mesh);
-          addPathTileDetails(mapGroup, cell, position, map.theme.accent, pathCells);
+          addPathTileDetails(mapGroup, cell, position, map.theme.accent, pathCells, pathDetailOpacity);
         }
       } else if (obstacleCells.has(key)) {
         if (usesGeoBackdrop) {
@@ -214,8 +220,7 @@ export function renderRuntimeMapScene(options: {
           cap.rotation.y = mesh.rotation.y;
           cap.position.set(position.x, 1.42, position.z);
           mapGroup.add(cap);
-        } else if (isBeijing) {
-          // Beijing obstacles could be buildings
+        } else if (isBeijing && !flatBoardMode) {
           const buildingHeight = 1.0 + (Math.sin(col * 0.5) + Math.cos(row * 0.5)) * 0.5;
           const mesh = new THREE.Mesh(
             new THREE.BoxGeometry(TILE_SIZE * 0.85, buildingHeight, TILE_SIZE * 0.85),
@@ -234,7 +239,7 @@ export function renderRuntimeMapScene(options: {
           mesh.position.set(position.x, 0.72, position.z);
           mesh.castShadow = true;
           mesh.receiveShadow = true;
-          if (!isJinan) {
+          if (!jinanPresetBoard) {
             mapGroup.add(mesh);
           }
 
@@ -244,7 +249,7 @@ export function renderRuntimeMapScene(options: {
           );
           cap.rotation.y = mesh.rotation.y;
           cap.position.set(position.x, 1.42, position.z);
-          if (!isJinan) {
+          if (!jinanPresetBoard) {
             mapGroup.add(cap);
           }
         }
@@ -254,7 +259,7 @@ export function renderRuntimeMapScene(options: {
           mesh.position.set(position.x, -0.01, position.z);
           mesh.receiveShadow = true;
           mapGroup.add(mesh);
-        } else if (isBeijing) {
+        } else if (isBeijing && !flatBoardMode) {
           // Use pseudo-random biomes for Beijing ground
           const noise = (Math.sin(col * 0.3) + Math.cos(row * 0.3) + 2) / 4;
           let type = "grass";
@@ -286,7 +291,7 @@ export function renderRuntimeMapScene(options: {
           const mesh = new THREE.Mesh(tileGeometry, (col + row) % 2 === 0 ? groundMaterial : groundAltMaterial);
           mesh.position.set(position.x, -0.01, position.z);
           mesh.receiveShadow = true;
-          if (!isJinan) {
+          if (!flatBoardMode) {
             mapGroup.add(mesh);
           }
         }
@@ -294,9 +299,10 @@ export function renderRuntimeMapScene(options: {
     }
   }
 
-  if (isJinan && !usesGeoBackdrop) {
+  if (flatBoardMode) {
+    const planeUrl = hasCustomBoardImage ? trimmedBoard : "/Arts/Maps/jinan_full_map.png";
     const textureLoader = new THREE.TextureLoader();
-    const texture = textureLoader.load("/Arts/Maps/jinan_full_map.png");
+    const texture = textureLoader.load(planeUrl);
     texture.colorSpace = THREE.SRGBColorSpace;
     const planeGeo = new THREE.PlaneGeometry(getActiveGridCols() * TILE_SIZE, getActiveGridRows() * TILE_SIZE);
     const planeMat = new THREE.MeshBasicMaterial({ map: texture });
@@ -304,7 +310,7 @@ export function renderRuntimeMapScene(options: {
     plane.rotation.x = -Math.PI / 2;
     plane.position.y = 0.05;
     mapGroup.add(plane);
-    addJinanPathGuides(mapGroup, map.path);
+    addJinanPathGuides(mapGroup, map.path, map.theme.path, 0xffffff);
   }
 
   if (mode === "defense") {
@@ -470,6 +476,7 @@ function createObstacleTexture(base: number, accent: number): THREE.Texture {
 function addBoardBase(mapGroup: THREE.Group, map: MapDefinition, usesGeoBackdrop: boolean): void {
   const width = mapCols(map) * TILE_SIZE + TILE_SIZE * 1.2;
   const height = mapRows(map) * TILE_SIZE + TILE_SIZE * 1.2;
+  const baseOpacity = map.theme.boardBaseOpacity ?? 0.42;
   const baseMat = new THREE.MeshStandardMaterial({
     color: new THREE.Color(map.theme.ground).multiplyScalar(0.72),
     roughness: 0.72,
@@ -478,7 +485,7 @@ function addBoardBase(mapGroup: THREE.Group, map: MapDefinition, usesGeoBackdrop
     polygonOffsetFactor: 1.06,
     polygonOffsetUnits: 1.06,
     ...(usesGeoBackdrop
-      ? { transparent: true, opacity: 0.42, depthWrite: false }
+      ? { transparent: true, opacity: baseOpacity, depthWrite: false }
       : {}),
   });
   const base = new THREE.Mesh(new THREE.BoxGeometry(width, 0.16, height), baseMat);
@@ -487,9 +494,10 @@ function addBoardBase(mapGroup: THREE.Group, map: MapDefinition, usesGeoBackdrop
   base.receiveShadow = true;
   mapGroup.add(base);
 
+  const rimOpacity = map.theme.rimOpacity ?? 0.32;
   const rim = new THREE.LineSegments(
     new THREE.EdgesGeometry(new THREE.BoxGeometry(width, 0.18, height)),
-    new THREE.LineBasicMaterial({ color: map.theme.accent, transparent: true, opacity: 0.32 }),
+    new THREE.LineBasicMaterial({ color: map.theme.accent, transparent: true, opacity: rimOpacity }),
   );
   rim.position.y = usesGeoBackdrop ? -0.24 : -0.22;
   mapGroup.add(rim);
@@ -510,10 +518,11 @@ function addGridOverlay(mapGroup: THREE.Group, map: MapDefinition, color: number
     points.push(new THREE.Vector3(-halfW, 0.38, z), new THREE.Vector3(halfW, 0.38, z));
   }
   const geometry = new THREE.BufferGeometry().setFromPoints(points);
+  const gridOpacity = map.theme.gridLineOpacity ?? 0.42;
   const lineMat = new THREE.LineBasicMaterial({
     color,
     transparent: true,
-    opacity: 0.42,
+    opacity: gridOpacity,
     depthWrite: false,
     ...(geoBias ? { polygonOffset: true as const, polygonOffsetFactor: -0.92, polygonOffsetUnits: -0.92 } : {}),
   });
@@ -550,11 +559,12 @@ function addPathTileDetails(
   position: THREE.Vector3,
   color: number,
   pathCells: Set<string>,
+  pathDetailOpacity = 0.82,
 ): void {
   const material = new THREE.MeshBasicMaterial({
     color,
     transparent: true,
-    opacity: 0.82,
+    opacity: pathDetailOpacity,
     depthWrite: false,
     polygonOffset: true,
     polygonOffsetFactor: -1.4,
@@ -590,15 +600,15 @@ function addPathTileDetails(
   mapGroup.add(hub);
 }
 
-function addJinanPathGuides(mapGroup: THREE.Group, path: GridCell[]): void {
+function addJinanPathGuides(mapGroup: THREE.Group, path: GridCell[], laneColor: number, centerColor: number): void {
   const laneMaterial = new THREE.MeshBasicMaterial({
-    color: 0x00d4ff,
+    color: laneColor,
     transparent: true,
     opacity: 0.48,
     depthWrite: false,
   });
   const centerMaterial = new THREE.MeshBasicMaterial({
-    color: 0xffffff,
+    color: centerColor,
     transparent: true,
     opacity: 0.72,
     depthWrite: false,

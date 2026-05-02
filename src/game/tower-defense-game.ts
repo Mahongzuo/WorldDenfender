@@ -2110,7 +2110,10 @@ export class TowerDefenseGame {
 
     const material = this.hoverMesh.material as THREE.MeshBasicMaterial;
     const validation = this.validateBuild(this.hoverCell, false);
-    material.color.set(validation.ok ? 0x8be9ff : 0xff5e73);
+    const map = this.currentMap();
+    const th = map.theme;
+    material.opacity = th.hoverCellOpacity ?? 0.42;
+    material.color.set(validation.ok ? (th.hoverColorOk ?? 0x8be9ff) : (th.hoverColorBad ?? 0xff5e73));
   }
 
   private selectBuild(id: BuildId): void {

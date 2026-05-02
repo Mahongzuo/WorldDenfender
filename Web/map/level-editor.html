@@ -45,15 +45,21 @@
                 <button class="workspace-button active" data-workbench="level">关卡编辑器</button>
                 <button class="workspace-button" data-workbench="gameplay">卡片/玩法编辑器</button>
                 <button class="workspace-button" data-workbench="model">模型编辑器</button>
+                <button class="workspace-button" data-workbench="theme">棋盘主题</button>
             </div>
 
             <div class="topbar-actions">
-                <button id="btnGenerateRegions" class="action-button">生成国家/城市关卡</button>
-                <button id="btnCreateLevel" class="action-button">新建关卡</button>
-                <button id="btnReload" class="action-button">重新载入</button>
-                <button id="btnExport" class="action-button">导出 JSON</button>
-                <button id="btnSave" class="action-button accent">保存到项目</button>
-                <a class="action-button ghost-link" href="home.html">返回首页</a>
+                <div class="topbar-project-menu">
+                    <button type="button" id="btnProjectMenu" class="action-button topbar-project-menu__trigger" aria-expanded="false" aria-haspopup="true" aria-controls="projectMenuDropdown">项目管理</button>
+                    <div id="projectMenuDropdown" class="topbar-project-menu__dropdown view-hidden" role="menu" aria-label="项目操作">
+                        <button type="button" role="menuitem" id="btnGenerateRegions" class="topbar-project-menu__item">生成国家/城市关卡</button>
+                        <button type="button" role="menuitem" id="btnCreateLevel" class="topbar-project-menu__item">新建关卡</button>
+                        <button type="button" role="menuitem" id="btnReload" class="topbar-project-menu__item">重新载入</button>
+                        <button type="button" role="menuitem" id="btnExport" class="topbar-project-menu__item">导出 JSON</button>
+                        <button type="button" role="menuitem" id="btnSave" class="topbar-project-menu__item topbar-project-menu__item--accent">保存到项目</button>
+                    </div>
+                </div>
+                <a class="action-button ghost-link topbar-home-link" href="home.html">返回首页</a>
             </div>
         </header>
 
@@ -341,6 +347,69 @@
                     </div>
                 </section>
             </section>
+
+            <section id="themeWorkbench" class="workbench-surface view-hidden" aria-hidden="true">
+                <section class="level-strip model-strip">
+                    <div>
+                        <div class="eyebrow">Board Theme</div>
+                        <h2 id="themeWorkbenchTitle">棋盘主题</h2>
+                        <p id="themeWorkbenchMeta">与主游戏 `map.theme` 同步：颜色、整块贴图、地理底板下半透明与悬停格参数均可编辑。</p>
+                    </div>
+                </section>
+                <section class="gameplay-layout">
+                    <div class="gameplay-column gameplay-column-editor panel-surface">
+                        <div class="panel-head panel-head-tight">
+                            <div>
+                                <div class="eyebrow">Scope</div>
+                                <h2>主题作用域</h2>
+                            </div>
+                        </div>
+                        <div class="form-grid two" style="margin-bottom: 16px;">
+                            <label class="field-block">
+                                <span>编辑对象</span>
+                                <select id="themeScopeSelect" aria-label="棋盘主题作用域">
+                                    <option value="defense">塔防 / 防守地图 (map.theme)</option>
+                                    <option value="explore">探索布局 (explorationLayout.theme)</option>
+                                </select>
+                            </label>
+                            <div class="form-grid two" style="align-items: end;">
+                                <button type="button" class="mini-button" id="btnThemeCopyToExplore">把防守主题复制到探索</button>
+                                <button type="button" class="mini-button" id="btnThemeCopyToDefense">把探索主题复制到防守</button>
+                            </div>
+                        </div>
+                        <form id="themeEditorForm" class="gameplay-form">
+                            <div class="section-title-row"><h3>颜色</h3></div>
+                            <div class="form-grid three">
+                                <label class="field-block"><span>主地面 ground</span><input id="themeGround" type="color" value="#456a78"></label>
+                                <label class="field-block"><span>交错格 groundAlt</span><input id="themeGroundAlt" type="color" value="#456a78"></label>
+                                <label class="field-block"><span>路径 path / road</span><input id="themePath" type="color" value="#c8a96b"></label>
+                                <label class="field-block"><span>障碍 obstacle</span><input id="themeObstacle" type="color" value="#52616b"></label>
+                                <label class="field-block"><span>强调色 accent</span><input id="themeAccent" type="color" value="#c8ff3d"></label>
+                                <label class="field-block"><span>雾色 / 天空底色 fog</span><input id="themeFog" type="color" value="#456a78"></label>
+                                <label class="field-block"><span>悬停：可建造 hoverColorOk</span><input id="themeHoverOk" type="color" value="#8be9ff"></label>
+                                <label class="field-block"><span>悬停：不可建 hoverColorBad</span><input id="themeHoverBad" type="color" value="#ff5e73"></label>
+                            </div>
+                            <label class="field-block">
+                                <span>整块棋盘贴图 URL（可选）</span>
+                                <input id="themeBoardTextureUrl" type="text" placeholder="留空=程序性格子；填如 /Arts/Maps/jinan_full_map.png">
+                            </label>
+                            <p class="section-hint">设置贴图后使用与济南关卡相同的平面底板 + 路径高亮；未开启地理底板时生效。</p>
+                            <div class="section-title-row"><h3>透明度与地理底板</h3></div>
+                            <p class="section-hint">以下数值 0～1，对应 `map-runtime` 中半透明瓦片、承托板、网格线、路径光晕与塔防指针格子。</p>
+                            <div class="form-grid three">
+                                <label class="field-block"><span>地理模式：格子瓦片 geoTileOpacity</span><input id="themeGeoTileOpacity" type="number" min="0" max="1" step="0.02" value="0.48"></label>
+                                <label class="field-block"><span>地理模式：路径格 geoPathOpacity</span><input id="themeGeoPathOpacity" type="number" min="0" max="1" step="0.02" value="0.92"></label>
+                                <label class="field-block"><span>地理模式：底承托板 boardBaseOpacity</span><input id="themeBoardBaseOpacity" type="number" min="0" max="1" step="0.02" value="0.42"></label>
+                                <label class="field-block"><span>叠层网格线 gridLineOpacity</span><input id="themeGridLineOpacity" type="number" min="0" max="1" step="0.02" value="0.42"></label>
+                                <label class="field-block"><span>承托板边缘 rimOpacity</span><input id="themeRimOpacity" type="number" min="0" max="1" step="0.02" value="0.32"></label>
+                                <label class="field-block"><span>路径格光晕 pathGlowOpacity</span><input id="themePathGlowOpacity" type="number" min="0" max="1" step="0.02" value="0.46"></label>
+                                <label class="field-block"><span>路径条纹细节 pathDetailOpacity</span><input id="themePathDetailOpacity" type="number" min="0" max="1" step="0.02" value="0.82"></label>
+                                <label class="field-block"><span>塔防悬停格 hoverCellOpacity</span><input id="themeHoverCellOpacity" type="number" min="0" max="1" step="0.02" value="0.42"></label>
+                            </div>
+                        </form>
+                    </div>
+                </section>
+            </section>
         </main>
 
         <aside class="inspector-panel panel-surface" id="inspectorPanel">
@@ -594,6 +663,13 @@
                         </label>
                     </div>
                     <p class="section-hint">新模型会写入 <code>public/GameModels/分类目录/</code>，扫描后自动出现在列表中。</p>
+                </section>
+            </div>
+
+            <div id="themeInspectorWorkspace" class="view-hidden" aria-hidden="true">
+                <section class="inspector-section">
+                    <h3>棋盘主题</h3>
+                    <p class="section-hint">主题保存在关卡 JSON 的 <code>map.theme</code> 与 <code>map.explorationLayout.theme</code>，主游戏通过编辑器同步读取。</p>
                 </section>
             </div>
             </div>

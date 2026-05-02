@@ -236,6 +236,11 @@ async function collectGameModelEntries(absRoot, publicFolder) {
 }
 
 export default defineConfig({
+  /** Windows Hyper-V/WSL 等常为 TCP 预留 5097–5196，在此期间默认 5173 会 EACCES */
+  server: {
+    host: "127.0.0.1",
+    port: 5200,
+  },
   plugins: [
     {
       name: "redirect-root",

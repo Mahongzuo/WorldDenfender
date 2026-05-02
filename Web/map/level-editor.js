@@ -83,6 +83,9 @@
     var activeTool = 'select';
     var activeStatusFilter = 'all';
     var activeWorkbench = 'level';
+    var activeThemeScope = 'defense';
+    var themeEditorCacheKey = '';
+    var themeBoardUrlDebounce = 0;
     var activeEditorMode = 'defense';
     var activeGameplayTab = 'enemies';
     var selectedGameplayEntryId = '';
@@ -115,6 +118,8 @@
     var refs = {
         toggleGeoMapping: document.getElementById('toggleGeoMapping'),
         levelSummary: document.getElementById('levelSummary'),
+        btnProjectMenu: document.getElementById('btnProjectMenu'),
+        projectMenuDropdown: document.getElementById('projectMenuDropdown'),
         btnGenerateRegions: document.getElementById('btnGenerateRegions'),
         btnCreateLevel: document.getElementById('btnCreateLevel'),
         btnReload: document.getElementById('btnReload'),
@@ -239,6 +244,31 @@
         modelInspectorUpload: document.getElementById('modelInspectorUpload'),
         modelInspectorUploadName: document.getElementById('modelInspectorUploadName'),
         modelInspectorUploadCategory: document.getElementById('modelInspectorUploadCategory'),
+        themeWorkbench: document.getElementById('themeWorkbench'),
+        themeWorkbenchTitle: document.getElementById('themeWorkbenchTitle'),
+        themeWorkbenchMeta: document.getElementById('themeWorkbenchMeta'),
+        themeInspectorWorkspace: document.getElementById('themeInspectorWorkspace'),
+        themeScopeSelect: document.getElementById('themeScopeSelect'),
+        themeEditorForm: document.getElementById('themeEditorForm'),
+        themeGround: document.getElementById('themeGround'),
+        themeGroundAlt: document.getElementById('themeGroundAlt'),
+        themePath: document.getElementById('themePath'),
+        themeObstacle: document.getElementById('themeObstacle'),
+        themeAccent: document.getElementById('themeAccent'),
+        themeFog: document.getElementById('themeFog'),
+        themeHoverOk: document.getElementById('themeHoverOk'),
+        themeHoverBad: document.getElementById('themeHoverBad'),
+        themeBoardTextureUrl: document.getElementById('themeBoardTextureUrl'),
+        themeGeoTileOpacity: document.getElementById('themeGeoTileOpacity'),
+        themeGeoPathOpacity: document.getElementById('themeGeoPathOpacity'),
+        themeBoardBaseOpacity: document.getElementById('themeBoardBaseOpacity'),
+        themeGridLineOpacity: document.getElementById('themeGridLineOpacity'),
+        themeRimOpacity: document.getElementById('themeRimOpacity'),
+        themePathGlowOpacity: document.getElementById('themePathGlowOpacity'),
+        themePathDetailOpacity: document.getElementById('themePathDetailOpacity'),
+        themeHoverCellOpacity: document.getElementById('themeHoverCellOpacity'),
+        btnThemeCopyToExplore: document.getElementById('btnThemeCopyToExplore'),
+        btnThemeCopyToDefense: document.getElementById('btnThemeCopyToDefense'),
         createLevelModal: document.getElementById('createLevelModal'),
         btnCancelCreateLevel: document.getElementById('btnCancelCreateLevel'),
         newLevelName: document.getElementById('newLevelName'),
@@ -676,6 +706,32 @@
                 }
             });
         }
+        function closeProjectMenu() {
+            if (refs.projectMenuDropdown) refs.projectMenuDropdown.classList.add('view-hidden');
+            if (refs.btnProjectMenu) refs.btnProjectMenu.setAttribute('aria-expanded', 'false');
+        }
+        function toggleProjectMenu(event) {
+            if (event) event.stopPropagation();
+            if (!refs.projectMenuDropdown || !refs.btnProjectMenu) return;
+            var opening = refs.projectMenuDropdown.classList.contains('view-hidden');
+            if (opening) {
+                refs.projectMenuDropdown.classList.remove('view-hidden');
+                refs.btnProjectMenu.setAttribute('aria-expanded', 'true');
+            } else {
+                closeProjectMenu();
+            }
+        }
+        if (refs.btnProjectMenu) {
+            refs.btnProjectMenu.addEventListener('click', toggleProjectMenu);
+        }
+        if (refs.projectMenuDropdown) {
+            refs.projectMenuDropdown.addEventListener('click', closeProjectMenu);
+        }
+        document.addEventListener('click', function (event) {
+            if (!refs.projectMenuDropdown || !refs.btnProjectMenu) return;
+            if (event.target.closest('.topbar-project-menu')) return;
+            closeProjectMenu();
+        });
         refs.btnReload.addEventListener('click', reloadState);
         refs.btnSave.addEventListener('click', saveState);
         refs.btnExport.addEventListener('click', exportState);
@@ -697,11 +753,57 @@
                 var button = event.target.closest('[data-workbench]');
                 if (!button) return;
                 activeWorkbench = button.getAttribute('data-workbench') || 'level';
+                if (activeWorkbench === 'theme') themeEditorCacheKey = '';
                 refs.workbenchTabs.querySelectorAll('[data-workbench]').forEach(function (item) {
                     item.classList.toggle('active', item === button);
                 });
                 if (activeWorkbench !== 'gameplay') disposeGameplayAssetPreview();
                 if (activeWorkbench !== 'model') disposeModelAssetPreview();
+                renderAll();
+            });
+        }
+
+        if (refs.themeScopeSelect) {
+            refs.themeScopeSelect.addEventListener('change', function () {
+                activeThemeScope = refs.themeScopeSelect.value === 'explore' ? 'explore' : 'defense';
+                themeEditorCacheKey = '';
+                renderThemeEditor();
+            });
+        }
+        if (refs.themeEditorForm) {
+            refs.themeEditorForm.addEventListener('change', readThemeFormToLevel);
+        }
+        if (refs.themeBoardTextureUrl) {
+            refs.themeBoardTextureUrl.addEventListener('input', function () {
+                clearTimeout(themeBoardUrlDebounce);
+                themeBoardUrlDebounce = setTimeout(readThemeFormToLevel, 350);
+            });
+        }
+        if (refs.btnThemeCopyToExplore) {
+            refs.btnThemeCopyToExplore.addEventListener('click', function () {
+                var level = getLevel();
+                if (!level || !level.map) return;
+                var lo = ensureExplorationLayout(level.map);
+                lo.theme = normalizeTheme(JSON.parse(JSON.stringify(normalizeTheme(level.map.theme))));
+                markDirty('已复制防守主题到探索');
+                activeThemeScope = 'explore';
+                themeEditorCacheKey = '';
+                if (refs.themeScopeSelect) refs.themeScopeSelect.value = 'explore';
+                fillThemeFormFromLevel();
+                renderAll();
+            });
+        }
+        if (refs.btnThemeCopyToDefense) {
+            refs.btnThemeCopyToDefense.addEventListener('click', function () {
+                var level = getLevel();
+                if (!level || !level.map) return;
+                var lo = ensureExplorationLayout(level.map);
+                level.map.theme = normalizeTheme(JSON.parse(JSON.stringify(normalizeTheme(lo.theme))));
+                markDirty('已复制探索主题到防守');
+                activeThemeScope = 'defense';
+                themeEditorCacheKey = '';
+                if (refs.themeScopeSelect) refs.themeScopeSelect.value = 'defense';
+                fillThemeFormFromLevel();
                 renderAll();
             });
         }
@@ -764,24 +866,48 @@
         }
         if (refs.gameplayEntryList) {
             refs.gameplayEntryList.addEventListener('click', function (event) {
+                var menuToggle = event.target.closest('[data-gameplay-menu-toggle]');
+                if (menuToggle) {
+                    event.stopPropagation();
+                    var wrap = menuToggle.closest('.gameplay-entry-menu-anchor');
+                    var menu = wrap && wrap.querySelector('.gameplay-entry-menu');
+                    var expanded = menuToggle.getAttribute('aria-expanded') === 'true';
+                    closeAllGameplayEntryMenus();
+                    if (!expanded && menu) {
+                        menuToggle.setAttribute('aria-expanded', 'true');
+                        menu.classList.remove('view-hidden');
+                    }
+                    return;
+                }
                 var actionButton = event.target.closest('[data-gameplay-action]');
                 if (actionButton) {
+                    event.stopPropagation();
                     var action = actionButton.getAttribute('data-gameplay-action');
                     var id = actionButton.getAttribute('data-gameplay-entry-id') || '';
                     selectedGameplayEntryId = id;
+                    closeAllGameplayEntryMenus();
                     if (action === 'duplicate') duplicateGameplayEntry();
                     if (action === 'delete') deleteGameplayEntry();
                     if (action === 'move-up') moveGameplayEntry(-1);
                     if (action === 'move-down') moveGameplayEntry(1);
                     return;
                 }
-                var button = event.target.closest('[data-gameplay-entry-id]');
-                if (!button) return;
-                selectedGameplayEntryId = button.getAttribute('data-gameplay-entry-id') || '';
+                var selectBtn = event.target.closest('[data-gameplay-select-id]');
+                if (!selectBtn) return;
+                event.stopPropagation();
+                selectedGameplayEntryId = selectBtn.getAttribute('data-gameplay-select-id') || '';
                 selectedGameplayAssetId = '';
+                closeAllGameplayEntryMenus();
                 renderGameplayEditor();
             });
         }
+
+        document.addEventListener('click', function (event) {
+            if (activeWorkbench !== 'gameplay') return;
+            if (!refs.gameplayEntryList) return;
+            if (event.target.closest('.gameplay-entry-menu-anchor')) return;
+            closeAllGameplayEntryMenus();
+        });
         if (refs.gameplayEditorForm) {
             refs.gameplayEditorForm.addEventListener('input', function (event) {
                 handleGameplayFormInput(event.target);
@@ -1847,6 +1973,7 @@
         renderOverview();
         renderGameplayEditor();
         renderModelEditor();
+        renderThemeEditor();
         syncViewportPanels();
         renderContentBrowser();
     }
@@ -2189,6 +2316,7 @@
         var gameplay = activeWorkbench === 'gameplay';
         var model = activeWorkbench === 'model';
         var level = activeWorkbench === 'level';
+        var theme = activeWorkbench === 'theme';
         if (refs.levelWorkbench) refs.levelWorkbench.classList.toggle('view-hidden', !level);
         if (refs.levelWorkbench) refs.levelWorkbench.setAttribute('aria-hidden', level ? 'false' : 'true');
         if (refs.gameplayWorkbench) {
@@ -2198,6 +2326,10 @@
         if (refs.modelWorkbench) {
             refs.modelWorkbench.classList.toggle('view-hidden', !model);
             refs.modelWorkbench.setAttribute('aria-hidden', model ? 'false' : 'true');
+        }
+        if (refs.themeWorkbench) {
+            refs.themeWorkbench.classList.toggle('view-hidden', !theme);
+            refs.themeWorkbench.setAttribute('aria-hidden', theme ? 'false' : 'true');
         }
         if (refs.btnOpenContentBrowserFloat) {
             refs.btnOpenContentBrowserFloat.classList.toggle('view-hidden', !level);
@@ -2213,6 +2345,10 @@
             refs.modelInspectorWorkspace.classList.toggle('view-hidden', !model);
             refs.modelInspectorWorkspace.setAttribute('aria-hidden', model ? 'false' : 'true');
         }
+        if (refs.themeInspectorWorkspace) {
+            refs.themeInspectorWorkspace.classList.toggle('view-hidden', !theme);
+            refs.themeInspectorWorkspace.setAttribute('aria-hidden', theme ? 'false' : 'true');
+        }
         if (refs.workbenchTabs) {
             refs.workbenchTabs.querySelectorAll('[data-workbench]').forEach(function (item) {
                 item.classList.toggle('active', item.getAttribute('data-workbench') === activeWorkbench);
@@ -2223,12 +2359,100 @@
                 refs.levelSummary.textContent = '按当前关卡/城市维护敌人、防御塔、卡片、角色、技能与项目资源目录。';
             } else if (model) {
                 refs.levelSummary.textContent = '统一管理项目模型资产，按分类浏览、预览和上传替换。';
+            } else if (theme) {
+                refs.levelSummary.textContent = '编辑当前关卡的棋盘颜色、贴图与半透明参数，与主游戏运行时地图一致。';
             } else {
                 refs.levelSummary.textContent = '自动生成关卡骨架，自由布置塔防与第三人称探索地图。';
             }
         }
         if (!gameplay) disposeGameplayAssetPreview();
         if (!model) disposeModelAssetPreview();
+    }
+
+    function themeColorInput(hex) {
+        var s = String(hex || '').trim();
+        if (/^#[0-9a-fA-F]{6}$/.test(s)) return s;
+        if (/^#[0-9a-fA-F]{3}$/.test(s)) {
+            return '#' + s[1] + s[1] + s[2] + s[2] + s[3] + s[3];
+        }
+        return '#456a78';
+    }
+
+    function fillThemeFormFromLevel() {
+        if (!refs.themeGround) return;
+        var level = getLevel();
+        if (!level || !level.map) {
+            if (refs.themeWorkbenchTitle) refs.themeWorkbenchTitle.textContent = '请选择关卡';
+            return;
+        }
+        if (refs.themeWorkbenchTitle) refs.themeWorkbenchTitle.textContent = level.name || '棋盘主题';
+        var t =
+            activeThemeScope === 'explore'
+                ? normalizeTheme(ensureExplorationLayout(level.map).theme)
+                : normalizeTheme(level.map.theme);
+        refs.themeGround.value = themeColorInput(t.ground);
+        refs.themeGroundAlt.value = themeColorInput(t.groundAlt);
+        refs.themePath.value = themeColorInput(t.path);
+        refs.themeObstacle.value = themeColorInput(t.obstacle);
+        refs.themeAccent.value = themeColorInput(t.accent);
+        refs.themeFog.value = themeColorInput(t.fog);
+        refs.themeHoverOk.value = themeColorInput(t.hoverColorOk);
+        refs.themeHoverBad.value = themeColorInput(t.hoverColorBad);
+        refs.themeBoardTextureUrl.value = t.boardTextureUrl || '';
+        refs.themeGeoTileOpacity.value = String(t.geoTileOpacity);
+        refs.themeGeoPathOpacity.value = String(t.geoPathOpacity);
+        refs.themeBoardBaseOpacity.value = String(t.boardBaseOpacity);
+        refs.themeGridLineOpacity.value = String(t.gridLineOpacity);
+        refs.themeRimOpacity.value = String(t.rimOpacity);
+        refs.themePathGlowOpacity.value = String(t.pathGlowOpacity);
+        refs.themePathDetailOpacity.value = String(t.pathDetailOpacity);
+        refs.themeHoverCellOpacity.value = String(t.hoverCellOpacity);
+    }
+
+    function readThemeFormToLevel() {
+        if (!refs.themeGround) return;
+        var level = getLevel();
+        if (!level || !level.map) return;
+        var raw = {
+            ground: refs.themeGround.value,
+            groundAlt: refs.themeGroundAlt.value,
+            road: refs.themePath.value,
+            path: refs.themePath.value,
+            obstacle: refs.themeObstacle.value,
+            accent: refs.themeAccent.value,
+            fog: refs.themeFog.value,
+            boardTextureUrl: refs.themeBoardTextureUrl.value,
+            geoTileOpacity: refs.themeGeoTileOpacity.value,
+            geoPathOpacity: refs.themeGeoPathOpacity.value,
+            boardBaseOpacity: refs.themeBoardBaseOpacity.value,
+            gridLineOpacity: refs.themeGridLineOpacity.value,
+            rimOpacity: refs.themeRimOpacity.value,
+            pathGlowOpacity: refs.themePathGlowOpacity.value,
+            pathDetailOpacity: refs.themePathDetailOpacity.value,
+            hoverCellOpacity: refs.themeHoverCellOpacity.value,
+            hoverColorOk: refs.themeHoverOk.value,
+            hoverColorBad: refs.themeHoverBad.value
+        };
+        var next = normalizeTheme(raw);
+        if (activeThemeScope === 'explore') {
+            ensureExplorationLayout(level.map).theme = next;
+        } else {
+            level.map.theme = next;
+        }
+        markDirty('已更新棋盘主题');
+        if (activeWorkbench === 'level') renderMap();
+        if (previewApi && typeof previewApi.refresh === 'function') previewApi.refresh({ preserveView: true });
+    }
+
+    function renderThemeEditor() {
+        if (activeWorkbench !== 'theme') return;
+        var key = selectedLevelId + '|' + activeThemeScope;
+        if (!refs.themeGround) return;
+        if (themeEditorCacheKey !== key) {
+            themeEditorCacheKey = key;
+            fillThemeFormFromLevel();
+        }
+        if (refs.themeScopeSelect) refs.themeScopeSelect.value = activeThemeScope;
     }
 
     function renderGameplayEditor() {
@@ -2502,6 +2726,16 @@
         }
     }
 
+    function closeAllGameplayEntryMenus() {
+        if (!refs.gameplayEntryList) return;
+        refs.gameplayEntryList.querySelectorAll('[data-gameplay-menu-toggle]').forEach(function (btn) {
+            btn.setAttribute('aria-expanded', 'false');
+        });
+        refs.gameplayEntryList.querySelectorAll('.gameplay-entry-menu').forEach(function (menu) {
+            menu.classList.add('view-hidden');
+        });
+    }
+
     function renderGameplayEntryList(entries, cityContext) {
         if (!refs.gameplayEntryList) return;
         if (!cityContext) {
@@ -2518,22 +2752,33 @@
         refs.gameplayEntryList.innerHTML = entries.map(function (entry) {
             var thumb = resolveGameplayEntryThumbnail(entry);
             return [
-                '<button type="button" class="list-item gameplay-entry-card' + (entry.id === selectedGameplayEntryId ? ' active' : '') + '" data-gameplay-entry-id="' + escapeAttr(entry.id) + '">',
-                thumb ? '  <img class="gameplay-asset-thumb" src="' + escapeAttr(thumb) + '" alt="' + escapeAttr(entry.name) + '">' : '',
-                '  <strong>' + escapeHtml(entry.name) + '</strong>',
-                '  <span>' + escapeHtml(entry.summary || '未填写简介') + '</span>',
-                '  <div class="gameplay-entry-meta">',
-                '    <span class="gameplay-chip">' + escapeHtml(entry.rarity || 'common') + '</span>',
-                '    <span class="gameplay-chip">' + escapeHtml((entry.tags || []).join(' / ') || cityContext.cityName) + '</span>',
-                entry.placement ? '    <span class="gameplay-chip">' + escapeHtml(gameplayPlacementLabel(entry.placement)) + '</span>' : '',
+                '<div class="list-item gameplay-entry-card' + (entry.id === selectedGameplayEntryId ? ' active' : '') + '">',
+                thumb
+                    ? '  <button type="button" class="gameplay-entry-thumb-btn" data-gameplay-select-id="' + escapeAttr(entry.id) + '" title="选择此条目">'
+                        + '<img class="gameplay-asset-thumb" src="' + escapeAttr(thumb) + '" alt="' + escapeAttr(entry.name) + '">'
+                        + '</button>'
+                    : '',
+                '  <div class="gameplay-entry-main">',
+                '    <div class="gameplay-entry-title-row">',
+                '      <button type="button" class="gameplay-entry-select" data-gameplay-select-id="' + escapeAttr(entry.id) + '">' + escapeHtml(entry.name) + '</button>',
+                '      <div class="gameplay-entry-menu-anchor">',
+                '        <button type="button" class="mini-button gameplay-entry-ops-btn" data-gameplay-menu-toggle aria-expanded="false">操作</button>',
+                '        <div class="gameplay-entry-menu view-hidden" role="menu">',
+                '          <button type="button" role="menuitem" class="gameplay-entry-menu-item" data-gameplay-action="move-up" data-gameplay-entry-id="' + escapeAttr(entry.id) + '">上移</button>',
+                '          <button type="button" role="menuitem" class="gameplay-entry-menu-item" data-gameplay-action="move-down" data-gameplay-entry-id="' + escapeAttr(entry.id) + '">下移</button>',
+                '          <button type="button" role="menuitem" class="gameplay-entry-menu-item" data-gameplay-action="duplicate" data-gameplay-entry-id="' + escapeAttr(entry.id) + '">复制</button>',
+                '          <button type="button" role="menuitem" class="gameplay-entry-menu-item danger" data-gameplay-action="delete" data-gameplay-entry-id="' + escapeAttr(entry.id) + '">删除</button>',
+                '        </div>',
+                '      </div>',
+                '    </div>',
+                '    <span class="gameplay-entry-summary">' + escapeHtml(entry.summary || '未填写简介') + '</span>',
+                '    <div class="gameplay-entry-meta">',
+                '      <span class="gameplay-chip">' + escapeHtml(entry.rarity || 'common') + '</span>',
+                '      <span class="gameplay-chip">' + escapeHtml((entry.tags || []).join(' / ') || cityContext.cityName) + '</span>',
+                entry.placement ? '      <span class="gameplay-chip">' + escapeHtml(gameplayPlacementLabel(entry.placement)) + '</span>' : '',
+                '    </div>',
                 '  </div>',
-                '  <div class="inline-controls">',
-                '    <button type="button" class="mini-button" data-gameplay-action="move-up" data-gameplay-entry-id="' + escapeAttr(entry.id) + '">上移</button>',
-                '    <button type="button" class="mini-button" data-gameplay-action="move-down" data-gameplay-entry-id="' + escapeAttr(entry.id) + '">下移</button>',
-                '    <button type="button" class="mini-button" data-gameplay-action="duplicate" data-gameplay-entry-id="' + escapeAttr(entry.id) + '">复制</button>',
-                '    <button type="button" class="mini-button danger" data-gameplay-action="delete" data-gameplay-entry-id="' + escapeAttr(entry.id) + '">删除</button>',
-                '  </div>',
-                '</button>'
+                '</div>'
             ].join('');
         }).join('');
     }
@@ -2593,7 +2838,11 @@
         if (refs.gameplaySelectionMeta) {
             refs.gameplaySelectionMeta.innerHTML = cityContext ? [
                 '<div class="list-item"><strong>城市代码</strong><span>' + escapeHtml(cityContext.cityCode) + '</span></div>',
-                '<div class="list-item"><strong>敌人 / 塔 / 卡片 / 角色 / 技能</strong><span>' + String(config.enemies.length) + ' / ' + String(config.towers.length) + ' / ' + String(config.cards.length) + ' / ' + String(config.characters.length) + ' / ' + String(config.skills.length) + '</span></div>',
+                '<div class="gameplay-inspector-counts" role="group" aria-label="敌人、防御塔、卡片、角色、技能数量">',
+                [['敌人', config.enemies.length], ['防御塔', config.towers.length], ['卡片', config.cards.length], ['角色', config.characters.length], ['技能', config.skills.length]].map(function (pair) {
+                    return '<span class="gic-chip"><strong>' + String(pair[1]) + '</strong><span>' + escapeHtml(pair[0]) + '</span></span>';
+                }).join(''),
+                '</div>',
                 '<div class="list-item"><strong>当前选择</strong><span>' + escapeHtml(entry ? entry.name : '未选择条目') + '</span></div>',
                 '<div class="list-item"><strong>模型 / 图片</strong><span>' + escapeHtml(entry ? String(entry.assetRefs.modelPath || '未绑定') + ' / ' + String(entry.assetRefs.imagePath || '未绑定') : '未绑定') + '</span></div>'
             ].join('') : '<div class="empty-state">没有可编辑的城市。</div>';
@@ -2645,7 +2894,7 @@
 
     function syncViewportPanels() {
         var board = viewportViewMode === 'board';
-        var levelPreviewShown = !board && activeWorkbench === 'level';
+        var levelPreviewShown = !board && (activeWorkbench === 'level' || activeWorkbench === 'theme');
         if (refs.boardViewport) refs.boardViewport.classList.toggle('view-hidden', !board);
         if (refs.previewStageWrap) {
             refs.previewStageWrap.classList.toggle('view-hidden', board);
@@ -4524,6 +4773,9 @@
             if (!normalized[key].cards.length) {
                 normalized[key].cards = buildDefaultCardEntries(normalized[key]);
             }
+            if (!normalized[key].enemies.length) {
+                normalized[key].enemies = buildDefaultEnemyEntries(normalized[key]);
+            }
         });
         return normalized;
     }
@@ -4614,6 +4866,126 @@
                 updatedAt: String(next.updatedAt || '')
             };
         }) : [];
+    }
+
+    /**
+     * 与 src/game/defense-runtime.ts 中 createEnemyForWave 的兵种分支一致（EnemyType）。
+     * 表中数值为波次 1 的近似基准；游戏中仍随波次动态增强。
+     */
+    function wave1EnemyArchetypeStats(archId) {
+        var wave = 1;
+        var hp = 78 + wave * 22;
+        var speed = 2.0 + wave * 0.06;
+        var reward = 12 + wave * 2;
+        switch (archId) {
+            case 'scout':
+                hp *= 0.4;
+                speed *= 1.8;
+                break;
+            case 'hacker':
+                hp *= 1.2;
+                reward *= 1.5;
+                break;
+            case 'tank':
+                hp *= 3.5;
+                speed *= 0.5;
+                reward *= 2;
+                break;
+            case 'swarm':
+                hp *= 1.5;
+                reward *= 1.8;
+                break;
+            default:
+                break;
+        }
+        return {
+            hp: Math.max(1, Math.round(hp)),
+            speed: Math.round(speed * 100) / 100,
+            reward: Math.round(reward),
+            attack: 0
+        };
+    }
+
+    var DEFAULT_RUNTIME_ENEMY_ARCHETYPE_META = {
+        basic: {
+            name: '标准敌人 (basic)',
+            summary: '运行时塔防默认兵种；未换模时为球体占位。血量/速度/奖励会随波次上升。'
+        },
+        scout: {
+            name: '高速侦察 (scout)',
+            summary: '低血量、移速约×1.8；与默认 GLB monsterB.glb 对应（见 enemy-default-models）。'
+        },
+        hacker: {
+            name: '干扰型 (hacker)',
+            summary: '中等血量、奖励加成；中高波次随机出现。'
+        },
+        tank: {
+            name: '重装单位 (tank)',
+            summary: '高血量、慢移速、大体型；适合作为高威胁目标。'
+        },
+        swarm: {
+            name: '集群强化 (swarm)',
+            summary: '血量与奖励都较高，高波次低概率刷新。'
+        }
+    };
+
+    function buildDefaultEnemyEntries(config) {
+        var cityName = config && config.cityName ? config.cityName : '';
+        var cityCode = config && config.cityCode ? config.cityCode : '';
+        var seen = Object.create(null);
+        var list = [];
+        ['basic', 'scout', 'hacker', 'tank', 'swarm'].forEach(function (archId) {
+            var meta = DEFAULT_RUNTIME_ENEMY_ARCHETYPE_META[archId] || { name: archId, summary: '' };
+            var st = wave1EnemyArchetypeStats(archId);
+            seen[archId] = true;
+            list.push({
+                id: archId,
+                name: meta.name,
+                summary: meta.summary,
+                tags: mergeDistinctStrings(cityName || '通用', 'enemy', 'runtime', archId),
+                rarity: 'common',
+                placement: '',
+                stats: {
+                    hp: st.hp,
+                    attack: st.attack,
+                    speed: st.speed,
+                    reward: st.reward
+                },
+                assetRefs: {},
+                cityCode: cityCode,
+                cityName: cityName,
+                updatedAt: ''
+            });
+        });
+        DEFAULT_ACTOR_TEMPLATES.filter(function (tpl) {
+            return tpl && tpl.category === 'enemy';
+        }).forEach(function (tpl) {
+            var id = String(tpl.id || uid('enemy'));
+            if (seen[id]) {
+                return;
+            }
+            seen[id] = true;
+            var st = tpl.stats || {};
+            list.push({
+                id: id,
+                name: String(tpl.name || tpl.id || '敌人'),
+                summary: '来自 Actor 模板 / 关卡 JSON 的经典 ID，可与波次 enemyTypeId 共用；与上方 runtime 兵种可并存。',
+                tags: mergeDistinctStrings(cityName || '通用', 'enemy', 'legacy'),
+                rarity: 'common',
+                placement: '',
+                stats: {
+                    hp: Number(st.hp) || 100,
+                    attack: Number(st.attack) || 0,
+                    speed: Number(st.speed) > 0 ? Number(st.speed) : 1,
+                    reward: Number(st.reward) || 20
+                },
+                assetRefs: {},
+                cityCode: cityCode,
+                cityName: cityName,
+                updatedAt: ''
+            });
+        });
+        return list;
     }
 
     function buildDefaultTowerEntries(config) {
@@ -4732,14 +5104,20 @@
         if (!Array.isArray(state.cityGameplayConfigs[resolvedKey].cards)) {
             state.cityGameplayConfigs[resolvedKey].cards = buildDefaultCardEntries(state.cityGameplayConfigs[resolvedKey]);
         }
+        if (!Array.isArray(state.cityGameplayConfigs[resolvedKey].enemies)) {
+            state.cityGameplayConfigs[resolvedKey].enemies = [];
+        }
+        if (!state.cityGameplayConfigs[resolvedKey].enemies.length) {
+            state.cityGameplayConfigs[resolvedKey].enemies = buildDefaultEnemyEntries(state.cityGameplayConfigs[resolvedKey]);
+        }
         return state.cityGameplayConfigs[resolvedKey];
     }
 
     function pickPreferredGameplayTab(config, currentTab) {
         if (!config) return currentTab;
-        if (config[currentTab] && config[currentTab].length) return currentTab;
+        if (Array.isArray(config[currentTab])) return currentTab;
         return ['cards', 'towers', 'characters', 'skills', 'enemies'].find(function (tab) {
-            return config[tab] && config[tab].length;
+            return Array.isArray(config[tab]) && config[tab].length;
         }) || currentTab;
     }
 
@@ -5371,6 +5749,11 @@
 
     function normalizeTheme(theme) {
         var source = theme && typeof theme === 'object' ? theme : {};
+        function clamp01(val, def) {
+            var n = Number(val);
+            if (!Number.isFinite(n)) return def;
+            return Math.max(0, Math.min(1, n));
+        }
         return {
             ground: String(source.ground || '#456a78'),
             groundAlt: String(source.groundAlt || source.ground || '#456a78'),
@@ -5378,7 +5761,18 @@
             path: String(source.path || source.road || '#c8a96b'),
             obstacle: String(source.obstacle || '#52616b'),
             accent: String(source.accent || '#c8ff3d'),
-            fog: String(source.fog || source.groundAlt || source.ground || '#456a78')
+            fog: String(source.fog || source.groundAlt || source.ground || '#456a78'),
+            boardTextureUrl: String(source.boardTextureUrl || '').trim(),
+            geoTileOpacity: clamp01(source.geoTileOpacity, 0.48),
+            geoPathOpacity: clamp01(source.geoPathOpacity, 0.92),
+            boardBaseOpacity: clamp01(source.boardBaseOpacity, 0.42),
+            gridLineOpacity: clamp01(source.gridLineOpacity, 0.42),
+            rimOpacity: clamp01(source.rimOpacity, 0.32),
+            pathGlowOpacity: clamp01(source.pathGlowOpacity, 0.46),
+            pathDetailOpacity: clamp01(source.pathDetailOpacity, 0.82),
+            hoverCellOpacity: clamp01(source.hoverCellOpacity, 0.42),
+            hoverColorOk: String(source.hoverColorOk || '#8be9ff'),
+            hoverColorBad: String(source.hoverColorBad || '#ff5e73')
         };
     }
 
