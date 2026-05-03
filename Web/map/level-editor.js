@@ -117,6 +117,8 @@
     var CONTENT_BROWSER_FLOAT_GEOM_KEY = 'earth-guardian.level-editor.contentBrowserFloat.geometry';
     var geoMappingEnabled = true;
     var isDirty = false;
+    /** 程序化回填探索玩法表单时跳过 input 写回，避免递归 */
+    var exploreGameplayFieldSilent = 0;
     var regionSources = { countries: [], chinaCities: [] };
     var contentBrowserMiniApi = null;
     var contentBrowserFloatGeomTimer = null;
@@ -1307,6 +1309,11 @@
     }
 
     function bindEvents() {
+        mountExploreGameplayFieldTemplates();
+        if (refs.inspectorPanelBody) {
+            refs.inspectorPanelBody.addEventListener('input', onExploreGameplayFieldInput);
+            refs.inspectorPanelBody.addEventListener('change', onExploreGameplayFieldInput);
+        }
         if (refs.toggleGeoMapping) {
             refs.toggleGeoMapping.addEventListener('change', function () {
                 geoMappingEnabled = !!refs.toggleGeoMapping.checked;
@@ -3517,6 +3524,7 @@
             ].join('');
         }).join('');
         renderGameplayAssetPreview(getSelectedGameplayAsset(entry, assets), entry);
+        renderExploreGameplayPanels();
     }
 
     function schedulePreviewRefresh() {
@@ -4117,6 +4125,7 @@
         refs.fieldGridRows.value = String(level.map.grid.rows);
         refs.fieldTileSize.value = String(level.map.grid.tileSize);
         renderGeoFields(level);
+        renderExploreGameplayPanels();
         renderSelectionInspector();
     }
 
@@ -5739,7 +5748,7 @@
     }
 
     /**
-     * 与 src/game/defense-runtime.ts 中 createEnemyForWave 的兵种分支一致（EnemyType）。
+     * 与 src/game/defense/defense-runtime.ts 中 createEnemyForWave 的兵种分支一致（EnemyType）。
      * 表中数值为波次 1 的近似基准；游戏中仍随波次动态增强。
      */
     function wave1EnemyArchetypeStats(archId) {
@@ -6978,6 +6987,151 @@
         });
     }
 
+    /** 与运行时 explore-gameplay-settings 对齐的键列表 */
+    var EXPLORE_GAMEPLAY_STORE_KEYS = [
+        'moveSpeedWalk',
+        'moveSpeedRun',
+        'attackCooldownSec',
+        'skillECooldownSec',
+        'skillRCooldownSec',
+        'moneyDropRespawnIntervalSec',
+        'exploreEnemySpawnIntervalSec',
+        'enemyMaxConcurrent',
+        'enemyBaseHp',
+        'enemyHpPerLevel',
+        'enemyBaseSpeed',
+        'enemySpeedPerLevel',
+        'enemyBaseDamage',
+        'enemyDamagePerLevel',
+        'enemyAggroRange',
+        'enemyAttackCooldown'
+    ];
+
+    function normalizeExploreGameplayNormalized(raw) {
+        var src = raw && typeof raw === 'object' ? raw : {};
+        var out = {};
+        EXPLORE_GAMEPLAY_STORE_KEYS.forEach(function (key) {
+            var v = Number(src[key]);
+            if (!Number.isFinite(v)) return;
+            out[key] = key === 'enemyMaxConcurrent' ? Math.round(v) : v;
+        });
+        return out;
+    }
+
+    /** Inspector 展示的合并值（与 resolveExploreGameplay 一致） */
+    function mergeExploreGameplayDisplay(rawGp) {
+        var r = rawGp && typeof rawGp === 'object' ? rawGp : {};
+        function finiteOr(def, val) {
+            return typeof val === 'number' && Number.isFinite(val) ? val : def;
+        }
+        function clampPos(def, key, max) {
+            var n = finiteOr(def, Number(r[key]));
+            return Math.min(max, Math.max(1e-3, n));
+        }
+        function clampNonNeg(def, key, max) {
+            var v = finiteOr(def, Number(r[key]));
+            return Math.min(max, Math.max(0, v));
+        }
+        var B = {
+            moveSpeedWalk: 5.5,
+            moveSpeedRun: 10,
+            attackCooldownSec: 0.42,
+            skillECooldownSec: 10,
+            skillRCooldownSec: 20,
+            moneyDropRespawnIntervalSec: 5,
+            exploreEnemySpawnIntervalSec: 8,
+            enemyMaxConcurrent: 10,
+            enemyBaseHp: 55,
+            enemyHpPerLevel: 18,
+            enemyBaseSpeed: 2.2,
+            enemySpeedPerLevel: 0.15,
+            enemyBaseDamage: 7,
+            enemyDamagePerLevel: 2,
+            enemyAggroRange: 8,
+            enemyAttackCooldown: 1.5
+        };
+        return {
+            moveSpeedWalk: clampPos(B.moveSpeedWalk, 'moveSpeedWalk', 80),
+            moveSpeedRun: clampPos(B.moveSpeedRun, 'moveSpeedRun', 120),
+            attackCooldownSec: clampPos(B.attackCooldownSec, 'attackCooldownSec', 30),
+            skillECooldownSec: clampPos(B.skillECooldownSec, 'skillECooldownSec', 300),
+            skillRCooldownSec: clampPos(B.skillRCooldownSec, 'skillRCooldownSec', 600),
+            moneyDropRespawnIntervalSec: clampPos(B.moneyDropRespawnIntervalSec, 'moneyDropRespawnIntervalSec', 3600),
+            exploreEnemySpawnIntervalSec: clampPos(B.exploreEnemySpawnIntervalSec, 'exploreEnemySpawnIntervalSec', 3600),
+            enemyMaxConcurrent: Math.min(120, Math.max(1, Math.round(finiteOr(B.enemyMaxConcurrent, Number(r.enemyMaxConcurrent))))),
+            enemyBaseHp: clampPos(B.enemyBaseHp, 'enemyBaseHp', 1e9),
+            enemyHpPerLevel: clampPos(B.enemyHpPerLevel, 'enemyHpPerLevel', 1e9),
+            enemyBaseSpeed: clampPos(B.enemyBaseSpeed, 'enemyBaseSpeed', 50),
+            enemySpeedPerLevel: clampNonNeg(B.enemySpeedPerLevel, 'enemySpeedPerLevel', 50),
+            enemyBaseDamage: clampPos(B.enemyBaseDamage, 'enemyBaseDamage', 1e6),
+            enemyDamagePerLevel: clampNonNeg(B.enemyDamagePerLevel, 'enemyDamagePerLevel', 1e6),
+            enemyAggroRange: clampPos(B.enemyAggroRange, 'enemyAggroRange', 200),
+            enemyAttackCooldown: clampPos(B.enemyAttackCooldown, 'enemyAttackCooldown', 60)
+        };
+    }
+
+    function readExploreGameplayRawFromDomSection(sectionEl) {
+        var flat = {};
+        if (!sectionEl || !sectionEl.querySelectorAll) return {};
+        sectionEl.querySelectorAll('[data-explore-gp]').forEach(function (inp) {
+            var key = inp.getAttribute('data-explore-gp');
+            if (!key) return;
+            var raw = inp.value;
+            var n = key === 'enemyMaxConcurrent' ? parseInt(raw, 10) : parseFloat(raw);
+            if (!Number.isFinite(n)) return;
+            flat[key] = n;
+        });
+        return normalizeExploreGameplayNormalized(flat);
+    }
+
+    function renderExploreGameplayPanels() {
+        if (!refs.inspectorPanelBody) return;
+        var level = getLevel();
+        exploreGameplayFieldSilent += 1;
+        try {
+            var merged =
+                level && level.map.explorationLayout && level.map.explorationLayout.gameplay
+                    ? mergeExploreGameplayDisplay(level.map.explorationLayout.gameplay)
+                    : mergeExploreGameplayDisplay({});
+            refs.inspectorPanelBody.querySelectorAll('[data-explore-gp]').forEach(function (el) {
+                var key = el.getAttribute('data-explore-gp');
+                if (!key || merged[key] === undefined || merged[key] === null) return;
+                var v =
+                    key === 'enemyMaxConcurrent'
+                        ? String(Math.round(merged[key]))
+                        : String(Number(merged[key]));
+                el.value = v;
+            });
+        } finally {
+            exploreGameplayFieldSilent -= 1;
+        }
+    }
+
+    function onExploreGameplayFieldInput(ev) {
+        if (exploreGameplayFieldSilent > 0) return;
+        var el = ev.target && ev.target.closest ? ev.target.closest('[data-explore-gp]') : null;
+        if (!el) return;
+        var section = el.closest('.explore-map-gameplay-section');
+        if (!section || !refs.inspectorPanelBody || !refs.inspectorPanelBody.contains(el)) return;
+        var level = getLevel();
+        if (!level) return;
+        var layout = ensureExplorationLayout(level.map);
+        layout.gameplay = readExploreGameplayRawFromDomSection(section);
+        markDirty('已更新探索地图玩法数值');
+        renderExploreGameplayPanels();
+        renderOverview();
+    }
+
+    function mountExploreGameplayFieldTemplates() {
+        var tpl = document.getElementById('tplExploreGameplayFields');
+        var mLevel = document.getElementById('exploreGameplayMountLevel');
+        var mGameplay = document.getElementById('exploreGameplayMountGameplay');
+        if (!tpl || !mLevel || !mGameplay || tpl.dataset.mounted === '1') return;
+        tpl.dataset.mounted = '1';
+        mLevel.appendChild(tpl.content.cloneNode(true));
+        mGameplay.appendChild(tpl.content.cloneNode(true));
+    }
+
     function normalizeExplorationLayout(layout, fallbackMap) {
         var source = layout && typeof layout === 'object' ? layout : {};
         var grid = source.grid && typeof source.grid === 'object' ? source.grid : fallbackMap.grid;
@@ -6992,7 +7146,8 @@
             obstacles: normalizeCells(source.obstacles || []),
             safeZones: normalizeCells(source.safeZones || []),
             startPoint: normalizePoint(source.startPoint) || { id: 'explore-start', name: '探索起点', col: 0, row: Math.floor((fallbackMap.grid.rows || DEFAULT_GRID_ROWS) / 2) },
-            exitPoint: normalizePoint(source.exitPoint) || { id: 'explore-exit', name: '探索终点', col: Math.max(0, (fallbackMap.grid.cols || DEFAULT_GRID_COLS) - 4), row: Math.floor((fallbackMap.grid.rows || DEFAULT_GRID_ROWS) / 2) }
+            exitPoint: normalizePoint(source.exitPoint) || { id: 'explore-exit', name: '探索终点', col: Math.max(0, (fallbackMap.grid.cols || DEFAULT_GRID_COLS) - 4), row: Math.floor((fallbackMap.grid.rows || DEFAULT_GRID_ROWS) / 2) },
+            gameplay: normalizeExploreGameplayNormalized(source.gameplay || {})
         };
         return normalized;
     }
@@ -7484,6 +7639,7 @@
         map.explorationLayout.path = Array.isArray(map.explorationLayout.path) ? map.explorationLayout.path : [];
         map.explorationLayout.obstacles = Array.isArray(map.explorationLayout.obstacles) ? map.explorationLayout.obstacles : [];
         if (!Array.isArray(map.explorationLayout.safeZones)) map.explorationLayout.safeZones = [];
+        if (!map.explorationLayout.gameplay || typeof map.explorationLayout.gameplay !== 'object') map.explorationLayout.gameplay = {};
         return map.explorationLayout;
     }
 

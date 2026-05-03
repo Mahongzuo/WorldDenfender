@@ -3,10 +3,11 @@
 ## Architecture
 
 - Keep `src/main.ts` as the composition root and high-coupling gameplay flow, not the home for static data tables or conversion helpers.
-- Put shared contracts in `src/game/types.ts`.
-- Put static gameplay content in `src/game/content.ts` and built-in maps in `src/game/maps.ts`.
-- Put grid math and runtime map-space helpers in `src/game/runtime-grid.ts`.
-- Put runtime-to-editor conversion logic in `src/game/editor-runtime.ts`.
+- Put shared contracts in `src/game/core/types.ts`.
+- Put static gameplay content in `src/game/data/content.ts` and built-in maps in `src/game/data/maps.ts`.
+- Put grid math and runtime map-space helpers in `src/game/core/runtime-grid.ts`.
+- Put runtime-to-editor conversion logic in `src/game/editor/editor-runtime.ts`.
+- Domain modules live under `src/game/defense`, `explore`, `ui`, `camera`, `fx`, etc.; composition lives in `src/game/host`.
 - Prefer pragmatic feature boundaries similar to Lyra: clear ownership, low coupling, but no framework-heavy abstractions.
 - Extract cohesive slices first: data, pure utilities, runtime/editor bridge code, then larger systems like combat or asset loading.
 

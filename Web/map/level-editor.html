@@ -516,6 +516,7 @@
                         <label class="anim-btn">跑步 (Run)<input type="file" data-ga-anim="run" accept=".glb,.gltf" /></label>
                     </div>
                 </div>
+                <div id="exploreGameplayMountLevel"></div>
             </section>
 
             <section class="inspector-section">
@@ -612,6 +613,7 @@
             </div>
 
             <div id="gameplayInspectorWorkspace" class="view-hidden" aria-hidden="true">
+                <div id="exploreGameplayMountGameplay"></div>
                 <section class="inspector-section">
                     <h3>城市玩法库</h3>
                     <p class="section-hint" id="gameplayInspectorMeta">先从左侧关卡树选择一个城市关卡，再在这里维护该城市专属的敌人、角色和技能。</p>
@@ -688,6 +690,36 @@
             </div>
         </aside>
     </div>
+
+    <template id="tplExploreGameplayFields">
+        <section class="inspector-section explore-map-gameplay-section" aria-label="探索地图玩法数值">
+            <h3>探索地图玩法（本关）</h3>
+            <p class="section-hint">写入 <code>explorationLayout.gameplay</code>，主游戏同步为 <code>exploreGameplay</code>。可调移动线速度（不影响 Mixamo 动画剪辑速度）、普攻与 E/R CD、钱币掉落节奏与野外敌人属性。画布上用<strong>障碍 / 可走路线 / 安全区</strong>工具编辑格子；<strong>探索点与 Actor</strong>可放置交互点与道具模型。<strong>角色与掉落道具模型及缩放</strong>见本节上方「掉落与角色」。安全区内<strong>商店商品与定价</strong>目前仍在客户端 UI 中固定，未纳入此处 JSON。</p>
+            <div class="form-grid three">
+                <label class="field-block"><span>步行速度（世界）</span><input type="number" data-explore-gp="moveSpeedWalk" min="0.5" max="80" step="0.1"></label>
+                <label class="field-block"><span>奔跑速度（世界）</span><input type="number" data-explore-gp="moveSpeedRun" min="0.5" max="120" step="0.1"></label>
+                <label class="field-block"><span>普攻冷却（秒）</span><input type="number" data-explore-gp="attackCooldownSec" min="0.05" max="30" step="0.02"></label>
+                <label class="field-block"><span>E 技能冷却（秒）</span><input type="number" data-explore-gp="skillECooldownSec" min="0.5" max="300" step="0.5"></label>
+                <label class="field-block"><span>R 技能冷却（秒）</span><input type="number" data-explore-gp="skillRCooldownSec" min="1" max="600" step="0.5"></label>
+                <label class="field-block"><span>钱币掉落批量周期（秒）</span><input type="number" data-explore-gp="moneyDropRespawnIntervalSec" min="1" max="3600" step="0.5"></label>
+            </div>
+            <details class="explore-gameplay-details">
+                <summary>野外敌人 / 生成节奏（高级）</summary>
+                <div class="form-grid three">
+                    <label class="field-block"><span>敌人生成间隔（秒）</span><input type="number" data-explore-gp="exploreEnemySpawnIntervalSec" min="1" max="3600" step="0.5"></label>
+                    <label class="field-block"><span>场上敌人上限</span><input type="number" data-explore-gp="enemyMaxConcurrent" min="1" max="120" step="1"></label>
+                    <label class="field-block"><span>敌人基础生命值</span><input type="number" data-explore-gp="enemyBaseHp" min="1" max="1000000000" step="1"></label>
+                    <label class="field-block"><span>敌人每级生命加成</span><input type="number" data-explore-gp="enemyHpPerLevel" min="0" max="1000000000" step="1"></label>
+                    <label class="field-block"><span>敌人基础移速</span><input type="number" data-explore-gp="enemyBaseSpeed" min="0.1" max="50" step="0.1"></label>
+                    <label class="field-block"><span>敌人每级移速加成</span><input type="number" data-explore-gp="enemySpeedPerLevel" min="0" max="50" step="0.05"></label>
+                    <label class="field-block"><span>敌人基础伤害</span><input type="number" data-explore-gp="enemyBaseDamage" min="0.1" max="1000000" step="0.5"></label>
+                    <label class="field-block"><span>敌人每级伤害加成</span><input type="number" data-explore-gp="enemyDamagePerLevel" min="0" max="1000000" step="0.5"></label>
+                    <label class="field-block"><span>敌人索敌范围</span><input type="number" data-explore-gp="enemyAggroRange" min="1" max="200" step="0.5"></label>
+                    <label class="field-block"><span>敌人攻击间隔（秒）</span><input type="number" data-explore-gp="enemyAttackCooldown" min="0.2" max="60" step="0.1"></label>
+                </div>
+            </details>
+        </section>
+    </template>
 
     <!-- 新建关卡弹窗 -->
     <div id="createLevelModal" class="modal-overlay view-hidden" aria-hidden="true">

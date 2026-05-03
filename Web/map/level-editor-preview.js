@@ -605,7 +605,7 @@ export function createPreview(options) {
   }
 
   /**
-   * 与 src/game/editor-sync.ts `geoMapConfigIsUsable` + `resolveEditorLevelGeo` 一致：
+   * 与 src/game/editor/editor-sync.ts `geoMapConfigIsUsable` + `resolveEditorLevelGeo` 一致：
    * 若关卡内 map.geo.enabled 为 false 或占位 0,0，应回退到城市预设，否则运行时已有 Cesium 而预览永远没有。
    */
   function geoMapConfigIsUsable(src) {
@@ -618,7 +618,7 @@ export function createPreview(options) {
     return true;
   }
 
-  /** 与 src/game/editor-sync.ts `resolvePresetGeoForLevel` 同步（正则顺序敏感：济南奥体先于泉城） */
+  /** 与 src/game/editor/editor-sync.ts `resolvePresetGeoForLevel` 同步（正则顺序敏感：济南奥体先于泉城） */
   function resolvePresetGeoForPreview(level) {
     if (!level) return null;
     var text = [

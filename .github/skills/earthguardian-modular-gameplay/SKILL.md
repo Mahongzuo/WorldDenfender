@@ -19,13 +19,14 @@ Follow a pragmatic Lyra-like direction:
 
 ## Default Boundaries
 
-- `src/game/types.ts`: shared runtime/editor/gameplay contracts
-- `src/game/content.ts`: static gameplay content such as builds, cities, pools
-- `src/game/maps.ts`: built-in map definitions only
-- `src/game/runtime-grid.ts`: grid math, coordinate transforms, runtime map-space helpers
-- `src/game/editor-runtime.ts`: runtime-to-editor conversion and editor layout helpers
-- `src/game/browser-utils.ts`: browser- or Three.js-specific utility helpers reused across systems
-- `src/main.ts`: composition root and high-coupling gameplay flow only
+- `src/game/core/types.ts`: shared runtime/editor/gameplay contracts
+- `src/game/data/content.ts`: static gameplay content such as builds, cities, pools
+- `src/game/data/maps.ts`: built-in map definitions only
+- `src/game/core/runtime-grid.ts`: grid math, coordinate transforms, runtime map-space helpers
+- `src/game/editor/editor-runtime.ts`: runtime-to-editor conversion and editor layout helpers
+- `src/game/core/browser-utils.ts`: browser- or Three.js-specific utility helpers reused across systems
+- `src/game/host/tower-defense-game.ts`: gameplay orchestrator; `src/game/index.ts` re-exports the host for `main`
+- `src/main.ts`: bootstrap only (instantiate game from `./game`)
 
 See the recommended split strategy in [module-boundaries](./references/module-boundaries.md).
 
@@ -33,7 +34,7 @@ See the recommended split strategy in [module-boundaries](./references/module-bo
 
 1. Identify whether the target code is data, pure utility, feature logic, or orchestration.
 2. Extract pure data and pure functions first. These are the cheapest, safest cuts.
-3. Keep shared contracts in `src/game/types.ts` instead of redefining local shapes.
+3. Keep shared contracts in `src/game/core/types.ts` instead of redefining local shapes.
 4. When code serves both runtime and editor, prefer a dedicated bridge/helper module over duplicating logic.
 5. When a subsystem grows past a few hundred lines, split by responsibility, not by arbitrary file size.
 6. Validate immediately with `npm run build` after each meaningful extraction.
