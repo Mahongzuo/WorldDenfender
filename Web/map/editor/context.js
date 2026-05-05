@@ -1,14 +1,13 @@
 /**
- * editor/context.js — Shared mutable editor runtime state.
+ * editor/context.js — 共享可变编辑器运行时状态。
  *
- * 注意：level-editor.js 尚未改为读写本模块的 `ctx`，目前仍使用文件内顶层 var，
- * 形成重复镜像；后续迁移时应删除 level-editor 内重复字段并统一走 ctx。
- *
- * Import `ctx` from this module instead of using bare global variables.
+ * `level-editor.js` 仍为 composition root：顶级 `var`/闭包沿用已有写法；
+ * `syncEditorCtx()` 在关键路径上将同一时刻镜像写入 `ctx`，供按需 `import { ctx }` 的模块读取，
+ * DOM `refs` 亦逐键回填 `ctx.refs`。
  * All modules that need to read or mutate editor state should do:
  *   import { ctx } from './context.js';
  *
- * The `refs` property is populated during init() after the DOM is ready.
+ * The `refs` property is filled by `syncEditorCtx()`（通常在 `init`/全量 `renderAll`/脏标记等路径之后调用）。
  */
 
 export var ctx = {

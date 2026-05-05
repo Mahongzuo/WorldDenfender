@@ -115,7 +115,7 @@ function populateGlobalCutsceneLevelSelect(refs, env) {
     }
 }
 
-function renderGlobalCutsceneOverview(refs, env) {
+export function renderGlobalCutsceneOverview(refs, env) {
     var mount = refs.globalCutsceneOverview;
     var state = getState(env);
     if (!mount || !state) return;

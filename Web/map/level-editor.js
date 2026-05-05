@@ -1,9 +1,16 @@
 ﻿import { CITY_GEO_CONFIGS, DEFAULT_CESIUM_ION_3D_TILES_ASSET_ID, JINAN_MAP_TEXTURE_URL } from './editor/city-geo-configs.js';
 import { BUILT_IN_CITY_LAYOUTS, matchBuiltInCity } from './editor/built-in-layouts.js';
-import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, slugify, updatePath, cellsRect, toggleCell, removeCell, hasCell, cloneCells, atCell, notAtCell, inBounds, byId, editorVol01, editorPctFromVol01, clampInspectorWidthPx, isNarrowWorkbenchLayout, readDragPayload, fileToBase64 } from './editor/utils.js';
-import { splitRegion, buildRegionLabel, inferCountryCode, normalizeCell, normalizeCells, normalizePoint, defaultObjectivePoint, normalizeStatus, normalizeLocation, normalizeEnvironment, normalizeBoardImageLayers, normalizeStats, normalizeActorTemplate, normalizeActors, normalizeEnemyTypes, normalizeWaveRules, normalizeModeProfiles, normalizeSpawnPoints, normalizeExplorePoints, EXPLORE_GAMEPLAY_STORE_KEYS, normalizeExploreGameplayNormalized, normalizeGeoConfig, makeGeoConfig, visitCoordinatePairs, geometryCenter, fetchCountryCapitalCoords, countryGeoFromFeature, geoFromLonLatArray, normalizeEditorThemeColorHex, normalizeTheme, normalizeEnemyPaths, normalizeExplorationLayout, normalizeCatalog, normalizeCatalogItem, normalizeEditorAssetsCatalog, defaultGlobalAudio, normalizeGlobalAudio, normalizeLevelAudioSource, defaultGlobalScreenUi, normalizeGlobalScreenUi, defaultGameAssetConfig, normalizeGameAssetConfig, mergeDistinctStrings, normalizeGameplayPlacement, normalizeGameplayEntries, normalizeCityGameplayConfigs, createDefaultMap, trimMapToBounds, normalizeMap, normalizeLevel, sortLevels, normalizeState } from './editor/normalizers.js';
-import { API_URL, LOCAL_BACKUP_KEY, LEGACY_BACKUP_KEY, ENGINE_VERSION, DEFAULT_GRID_COLS, DEFAULT_GRID_ROWS, DEFAULT_TILE_SIZE, GEO_MAPPING_STORAGE_KEY, SHELL_LEFT_COLLAPSE_KEY, SHELL_RIGHT_COLLAPSE_KEY, SHELL_INSPECTOR_WIDTH_KEY, CONTENT_BROWSER_FLOAT_GEOM_KEY, TOOL_LABELS, LEVEL_CONTENT_BROWSER_FILTER_ORDER, LCB_CELL_KIND_LABEL, MODEL_CATEGORY_CONFIG, DEFAULT_ACTOR_TEMPLATES, TOWER_MODEL_SPECS, DEFAULT_TOWER_GAMEPLAY_STATS, GAMEPLAY_RESOURCE_CONFIG } from './editor/content.js';
-import { sanitizeStateForSave as _sanitizeStateForSave, persistLocalBackup as _persistLocalBackup, readLocalBackup as _readLocalBackup, exportState as _exportState, readShellCollapsedPrefs as _readShellCollapsedPrefs, persistShellCollapsedPrefs as _persistShellCollapsedPrefs } from './editor/storage.js';
+import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, slugify, updatePath, cellsRect, toggleCell, removeCell, hasCell, cloneCells, atCell, notAtCell, inBounds, byId, editorVol01, editorPctFromVol01, readDragPayload, fileToBase64 } from './editor/utils.js';
+import { splitRegion, buildRegionLabel, inferCountryCode, normalizeCell, normalizeCells, normalizePoint, defaultObjectivePoint, normalizeStatus, normalizeLocation, normalizeEnvironment, normalizeBoardImageLayers, normalizeStats, normalizeActorTemplate, normalizeActors, normalizeEnemyTypes, normalizeWaveRules, normalizeModeProfiles, normalizeSpawnPoints, normalizeExplorePoints, EXPLORE_GAMEPLAY_STORE_KEYS, normalizeExploreGameplayNormalized, normalizeGeoConfig, makeGeoConfig, visitCoordinatePairs, geometryCenter, fetchCountryCapitalCoords, countryGeoFromFeature, geoFromLonLatArray, normalizeEditorThemeColorHex, normalizeTheme, normalizeEnemyPaths, normalizeExplorationLayout, normalizeCatalog, normalizeCatalogItem, normalizeEditorAssetsCatalog, defaultGlobalAudio, normalizeGlobalAudio, normalizeLevelAudioSource, defaultGlobalScreenUi, normalizeGlobalScreenUi, normalizeGameAssetConfig, mergeDistinctStrings, normalizeGameplayPlacement, normalizeGameplayEntries, normalizeCityGameplayConfigs, createDefaultMap, trimMapToBounds, normalizeMap, normalizeLevel, sortLevels, normalizeState } from './editor/normalizers.js';
+import { API_URL, LOCAL_BACKUP_KEY, LEGACY_BACKUP_KEY, ENGINE_VERSION, DEFAULT_GRID_COLS, DEFAULT_GRID_ROWS, DEFAULT_TILE_SIZE, GEO_MAPPING_STORAGE_KEY, SHELL_LEFT_COLLAPSE_KEY, SHELL_RIGHT_COLLAPSE_KEY, TOOL_LABELS, MODEL_CATEGORY_CONFIG, DEFAULT_ACTOR_TEMPLATES, DEFAULT_TOWER_GAMEPLAY_STATS, GAMEPLAY_RESOURCE_CONFIG } from './editor/content.js';
+import { sanitizeStateForSave as _sanitizeStateForSave, persistLocalBackup as _persistLocalBackup, readLocalBackup as _readLocalBackup, exportState as _exportState, persistShellCollapsedPrefs as _persistShellCollapsedPrefs } from './editor/storage.js';
+import {
+    readShellCollapsedPrefsFromStorage as _readShellCollapsedPrefsFromStorage,
+    bumpShellLayoutDependentUi as _bumpShellLayoutDependentUi,
+    applyPersistedInspectorWidth as _applyPersistedInspectorWidth,
+    bindViewportInspectorSplitter as _bindViewportInspectorSplitter,
+    applyShellPanelCollapseUi as _applyShellPanelCollapseUi
+} from './editor/shell-layout.js';
 import { expandPathWaypointPolyline, uniqueDefenseCells, manhattanDefense, sameDefenseCell, orderEditorPathCellsDefense, projectGridCellDefense, defensePathSourceCells, buildDefenseFallbackVertexList, getDefenseEditorPathKeys } from './editor/path-utils.js';
 import {
     bindEraserToolControls,
@@ -16,18 +23,67 @@ import {
     applyEraserBrush,
     resetEraserPreviewAfterMapRebuild
 } from './editor/eraser-tool.js';
-import { statusLabel, actorCategoryLabel, summaryStats, gameplayPlacementLabel, modelBindShortLabel, isImageAssetPath, isModelAssetPath, groupLevels, compareRegionKeys, hasDefenseLayout, hasExploreLayout, isJinanLevel, normalizePlaceSearchResult, uniqueCatalogId, levelVideoCityContext, normalizeCityIdentity, pickPreferredGameplayTab } from './editor/display-utils.js';
+import { statusLabel, actorCategoryLabel, summaryStats, gameplayPlacementLabel, modelBindShortLabel, isImageAssetPath, isModelAssetPath, groupLevels, compareRegionKeys, hasDefenseLayout, hasExploreLayout, isJinanLevel, normalizePlaceSearchResult, levelVideoCityContext, normalizeCityIdentity, pickPreferredGameplayTab } from './editor/display-utils.js';
 import { pickLevelId, uniqueLevelId, uniqueTemplateId, findLevelById, uniqueGameplayEntryId } from './editor/id-utils.js';
 import { resolveSpecialGeoForLevel, cloneGeoConfig, applyDefenseLayout, applyExploreLayout, createDraftLevel, ensureExplorationLayout } from './editor/layout-presets.js';
 import { mergeExploreGameplayDisplay, readExploreGameplayRawFromDomSection } from './editor/explore-gameplay-defaults.js';
-import { fieldHtml, selectHtml, boardLayerFieldHtml, markerHtml, lcbSection, themeColorInput, sortCells, findBoardImageLayerById, clampContentBrowserGeom } from './editor/html-builders.js';
-import { projectPathFromVideoPublicUrl, effectiveCutsceneVideoProjectPath, formatIntroVideoStatusLines } from './editor/cutscene-utils.js';
+import { markerHtml, themeColorInput, findBoardImageLayerById } from './editor/html-builders.js';
 import { parseFetchErrorBody } from './editor/fetch-utils.js';
 import { ensureWorldOffset, mergeGameplayEntryList } from './editor/level-mutators.js';
 import { renderBoardImagesPanel, ensureBoardImagesPanelDelegated, tryConsumeBoardImageFileDrop, bindBoardImageGlobalHandlers, clearBoardImageInteractionState } from './editor/board-images.js';
 import { renderLevelAudioFields, renderGlobalAudioPanel, bindLevelAudioUi, bindGlobalAudioUi } from './editor/audio.js';
-import { refreshGlobalSettingsWorkbench as _refreshGlobalSettingsWorkbench, bindGlobalCutscenePanel as _bindGlobalCutscenePanel, bindGlobalSettingsChrome as _bindGlobalSettingsChrome } from './editor/global-settings.js';
+import {
+    refreshGlobalSettingsWorkbench as _refreshGlobalSettingsWorkbench,
+    bindGlobalCutscenePanel as _bindGlobalCutscenePanel,
+    bindGlobalSettingsChrome as _bindGlobalSettingsChrome,
+    renderGlobalCutsceneOverview as _renderGlobalCutsceneOverview
+} from './editor/global-settings.js';
 import { renderMap as _renderMap } from './editor/map-render.js';
+import { handleCellAction as _handleCellAction, moveActor as _moveActor, moveMarker as _moveMarker, eraseCellAt as _eraseCellAt, selectGridCellObject as _selectGridCellObject, mapGridPickCellFromClientPoint as _mapGridPickCellFromClientPoint } from './editor/map-edit.js';
+import { bindGameplayUi as _bindGameplayUi, renderGameplayEditor as _renderGameplayEditor, ensureCityGameplayConfig as _ensureCityGameplayConfig, getCurrentCityGameplayConfig as _getCurrentCityGameplayConfig, getAvailableEnemyTypes as _getAvailableEnemyTypes, buildGameplayActorTemplates as _buildGameplayActorTemplates, getAvailableActorTemplates as _getAvailableActorTemplates, findActorTemplate as _findActorTemplate } from './editor/gameplay-editor.js';
+import {
+    renderModelEditor as _renderModelEditor,
+    replaceSelectedModel as _replaceSelectedModel,
+    uploadNewModelFromInspector as _uploadNewModelFromInspector,
+    renderModelAssets as _renderModelAssets,
+    uploadModelAsset as _uploadModelAsset,
+    bindActorTemplateModelControls as _bindActorTemplateModelControls,
+    applyActorTemplateUploadedModel as _applyActorTemplateUploadedModel
+} from './editor/model-editor.js';
+import { renderSelectionInspector as _renderSelectionInspector } from './editor/selection-inspector.js';
+import { bindWaveEditorUi as _bindWaveEditorUi, renderWaveList as _renderWaveList } from './editor/wave-editor.js';
+import {
+    normalizeGameModelsForCatalog as _normalizeGameModelsForCatalog,
+    rememberEditorAsset as _rememberEditorAsset,
+    renderGameAssetPanel as _renderGameAssetPanel,
+    bindGameAssetPanel as _bindGameAssetPanel
+} from './editor/game-asset-panel.js';
+import {
+    isContentBrowserFloatOpen as _isContentBrowserFloatOpen,
+    clampContentBrowserFloatPanelIntoViewport as _clampContentBrowserFloatPanelIntoViewport,
+    toggleContentBrowserFloat as _toggleContentBrowserFloat,
+    wireContentBrowserFloating as _wireContentBrowserFloating,
+    renderContentBrowser as _renderContentBrowser
+} from './editor/content-browser-ui.js';
+import {
+    prefetchCesiumIonTokenForEditor as _prefetchCesiumIonTokenForEditor,
+    schedulePreviewRefresh as _schedulePreviewRefresh,
+    refreshPreviewNow as _refreshPreviewNow,
+    syncViewportPanels as _syncViewportPanels,
+    updateStageHintText as _updateStageHintText,
+    initPreviewLayer as _initPreviewLayer,
+    disposePreviewLayer as _disposePreviewLayer,
+    setPreviewToolbarMode as _setPreviewToolbarMode
+} from './editor/preview-layer.js';
+import { renderLevelContentBrowser as _renderLevelContentBrowser } from './editor/level-content-browser.js';
+import { bindEditorEvents as _bindEditorEvents } from './editor/editor-events.js';
+import { ctx } from './editor/context.js';
+import {
+    ensureLevelCutscenesForLevel,
+    revealProjectPathInExplorer as _revealProjectPathInExplorer,
+    renderCutsceneEditor as _renderCutsceneEditor,
+    bindCutsceneEditorEvents as _bindCutsceneEditorEvents
+} from './editor/theme-cutscene-workbench.js';
 
     var state = null;
     var selectedLevelId = new URLSearchParams(window.location.search).get('levelId') || '';
@@ -247,7 +303,6 @@ import { renderMap as _renderMap } from './editor/map-render.js';
         themeHoverCellOpacity: document.getElementById('themeHoverCellOpacity'),
         btnThemeCopyToExplore: document.getElementById('btnThemeCopyToExplore'),
         btnThemeCopyToDefense: document.getElementById('btnThemeCopyToDefense'),
-        // 过场视频
         cutsceneEditorPanel: document.getElementById('cutsceneEditorPanel'),
         introVideoFile: document.getElementById('introVideoFile'),
         introVideoInfo: document.getElementById('introVideoInfo'),
@@ -287,157 +342,116 @@ import { renderMap as _renderMap } from './editor/map-render.js';
         viewportInspectorSplitter: document.getElementById('viewportInspectorSplitter')
     };
 
+    function syncEditorCtx() {
+        ctx.state = state;
+        ctx.selectedLevelId = selectedLevelId;
+        ctx.selectedObject = selectedObject;
+        ctx.selectedTemplateId = selectedTemplateId;
+        ctx.activeTool = activeTool;
+        ctx.activeStatusFilter = activeStatusFilter;
+        ctx.activeWorkbench = activeWorkbench;
+        ctx.activeGlobalSettingsTab = activeGlobalSettingsTab;
+        ctx.globalCutsceneEditLevelId = globalCutsceneEditLevelId;
+        ctx.activeThemeScope = activeThemeScope;
+        ctx.activeThemeWorkbenchTab = activeThemeWorkbenchTab;
+        ctx.themeEditorCacheKey = themeEditorCacheKey;
+        ctx.themeBoardUrlDebounce = themeBoardUrlDebounce;
+        ctx.activeEditorMode = activeEditorMode;
+        ctx.activeGameplayTab = activeGameplayTab;
+        ctx.selectedGameplayEntryId = selectedGameplayEntryId;
+        ctx.selectedGameplayAssetId = selectedGameplayAssetId;
+        ctx.activeModelCategory = activeModelCategory;
+        ctx.selectedModelId = selectedModelId;
+        ctx.modelAssetPreviewApi = modelAssetPreviewApi;
+        ctx.modelPreviewInitGeneration = modelPreviewInitGeneration;
+        ctx.viewportViewMode = viewportViewMode;
+        ctx.previewApi = previewApi;
+        ctx.gameplayAssetPreviewApi = gameplayAssetPreviewApi;
+        ctx.previewInitGeneration = previewInitGeneration;
+        ctx.gameplayPreviewInitGeneration = gameplayPreviewInitGeneration;
+        ctx.previewRefreshTimer = previewRefreshTimer;
+        ctx.shellLeftCollapsedPref = shellLeftCollapsedPref;
+        ctx.shellRightCollapsedPref = shellRightCollapsedPref;
+        ctx.inspectorSplitPointerStartX = inspectorSplitPointerStartX;
+        ctx.inspectorSplitStartWidthPx = inspectorSplitStartWidthPx;
+        ctx.geoMappingEnabled = geoMappingEnabled;
+        ctx.isDirty = isDirty;
+        ctx.exploreGameplayFieldSilent = exploreGameplayFieldSilent;
+        ctx.regionSources = regionSources;
+        ctx.contentBrowserMiniApi = contentBrowserMiniApi;
+        ctx.contentBrowserFloatGeomTimer = contentBrowserFloatGeomTimer;
+        ctx.contentBrowserFloatRo = contentBrowserFloatRo;
+        ctx.selectedContentBrowserAssetId = selectedContentBrowserAssetId;
+        ctx.levelContentBrowserFilter = levelContentBrowserFilter;
+        var k;
+        for (k in refs) {
+            if (Object.prototype.hasOwnProperty.call(refs, k)) {
+                ctx.refs[k] = refs[k];
+            }
+        }
+    }
+
+    function shellLayoutEnv() {
+        return {
+            setShellLeftCollapsedPref: function (value) {
+                shellLeftCollapsedPref = !!value;
+            },
+            setShellRightCollapsedPref: function (value) {
+                shellRightCollapsedPref = !!value;
+            },
+            getShellLeftCollapsedPref: function () {
+                return shellLeftCollapsedPref;
+            },
+            getShellRightCollapsedPref: function () {
+                return shellRightCollapsedPref;
+            },
+            setInspectorSplitPointerStartX: function (value) {
+                inspectorSplitPointerStartX = value;
+            },
+            getInspectorSplitPointerStartX: function () {
+                return inspectorSplitPointerStartX;
+            },
+            setInspectorSplitStartWidthPx: function (value) {
+                inspectorSplitStartWidthPx = value;
+            },
+            getInspectorSplitStartWidthPx: function () {
+                return inspectorSplitStartWidthPx;
+            },
+            getViewportViewMode: function () {
+                return viewportViewMode;
+            },
+            getPreviewApi: function () {
+                return previewApi;
+            }
+        };
+    }
+
     function readShellCollapsedPrefsFromStorage() {
-        var prefs = _readShellCollapsedPrefs({ leftKey: SHELL_LEFT_COLLAPSE_KEY, rightKey: SHELL_RIGHT_COLLAPSE_KEY });
-        shellLeftCollapsedPref = prefs.left;
-        shellRightCollapsedPref = prefs.right;
+        _readShellCollapsedPrefsFromStorage(shellLayoutEnv());
     }
 
     function bumpShellLayoutDependentUi() {
-        window.requestAnimationFrame(function () {
-            if (viewportViewMode === 'preview' && previewApi && typeof previewApi.resize === 'function') previewApi.resize();
+        var env = shellLayoutEnv();
+        _bumpShellLayoutDependentUi({
+            getViewportViewMode: env.getViewportViewMode,
+            getPreviewApi: env.getPreviewApi
         });
     }
 
     function applyPersistedInspectorWidth() {
-        if (!refs.engineShell || isNarrowWorkbenchLayout() || shellRightCollapsedPref) return;
-        var w = 380;
-        try {
-            var s = window.localStorage.getItem(SHELL_INSPECTOR_WIDTH_KEY);
-            if (s) {
-                var n = parseInt(s, 10);
-                if (Number.isFinite(n)) w = n;
-            }
-        } catch (_e) {}
-        w = clampInspectorWidthPx(w);
-        refs.engineShell.style.setProperty('--shell-inspector-w', w + 'px');
-    }
-
-    function persistInspectorWidthPx(w) {
-        try {
-            window.localStorage.setItem(SHELL_INSPECTOR_WIDTH_KEY, String(w));
-        } catch (_e) {}
+        _applyPersistedInspectorWidth(refs, shellLayoutEnv());
     }
 
     function bindViewportInspectorSplitter() {
-        var grip = refs.viewportInspectorSplitter;
-        if (!grip || grip.dataset.bound === '1') return;
-        grip.dataset.bound = '1';
-        function onMove(ev) {
-            var dx = ev.clientX - inspectorSplitPointerStartX;
-            var next = clampInspectorWidthPx(inspectorSplitStartWidthPx - dx);
-            if (refs.engineShell) refs.engineShell.style.setProperty('--shell-inspector-w', next + 'px');
-        }
-        function onUp() {
-            grip.classList.remove('is-dragging');
-            document.body.classList.remove('editor-shell--resizing');
-            window.removeEventListener('pointermove', onMove);
-            window.removeEventListener('pointerup', onUp);
-            window.removeEventListener('pointercancel', onUp);
-            if (refs.engineShell) {
-                var cur = refs.engineShell.style.getPropertyValue('--shell-inspector-w').trim();
-                var m = /^(\d+)px$/.exec(cur);
-                if (m) persistInspectorWidthPx(Number(m[1]));
-            }
-            bumpShellLayoutDependentUi();
-        }
-        grip.addEventListener('pointerdown', function (ev) {
-            if (!refs.engineShell || shellRightCollapsedPref || isNarrowWorkbenchLayout()) return;
-            ev.preventDefault();
-            try {
-                grip.setPointerCapture(ev.pointerId);
-            } catch (_e) {}
-            inspectorSplitPointerStartX = ev.clientX;
-            var cur = refs.engineShell.style.getPropertyValue('--shell-inspector-w').trim();
-            var m = /^(\d+)px$/.exec(cur);
-            inspectorSplitStartWidthPx = m ? Number(m[1]) : clampInspectorWidthPx(380);
-            grip.classList.add('is-dragging');
-            document.body.classList.add('editor-shell--resizing');
-            window.addEventListener('pointermove', onMove);
-            window.addEventListener('pointerup', onUp);
-            window.addEventListener('pointercancel', onUp);
-        });
+        _bindViewportInspectorSplitter(refs, shellLayoutEnv());
     }
 
     function applyShellPanelCollapseUi() {
-        if (!refs.engineShell || !refs.regionPanel || !refs.inspectorPanel) return;
-        var narrow = isNarrowWorkbenchLayout();
-        if (narrow) {
-            refs.engineShell.classList.remove('shell-left-collapsed', 'shell-right-collapsed');
-            refs.regionPanel.classList.remove('shell-panel-collapsed');
-            refs.inspectorPanel.classList.remove('shell-panel-collapsed');
-            if (refs.railExpandRegionPanel) refs.railExpandRegionPanel.hidden = true;
-            if (refs.railExpandInspectorPanel) refs.railExpandInspectorPanel.hidden = true;
-            if (refs.regionPanelBody) refs.regionPanelBody.removeAttribute('aria-hidden');
-            if (refs.inspectorPanelBody) refs.inspectorPanelBody.removeAttribute('aria-hidden');
-            if (refs.viewportInspectorSplitter) {
-                refs.viewportInspectorSplitter.hidden = true;
-            }
-            bumpShellLayoutDependentUi();
-            return;
-        }
-        refs.engineShell.classList.toggle('shell-left-collapsed', shellLeftCollapsedPref);
-        refs.engineShell.classList.toggle('shell-right-collapsed', shellRightCollapsedPref);
-        refs.regionPanel.classList.toggle('shell-panel-collapsed', shellLeftCollapsedPref);
-        refs.inspectorPanel.classList.toggle('shell-panel-collapsed', shellRightCollapsedPref);
-        if (refs.railExpandRegionPanel) {
-            refs.railExpandRegionPanel.hidden = !shellLeftCollapsedPref;
-            refs.railExpandRegionPanel.setAttribute('aria-expanded', shellLeftCollapsedPref ? 'false' : 'true');
-        }
-        if (refs.railExpandInspectorPanel) {
-            refs.railExpandInspectorPanel.hidden = !shellRightCollapsedPref;
-            refs.railExpandInspectorPanel.setAttribute('aria-expanded', shellRightCollapsedPref ? 'false' : 'true');
-        }
-        if (refs.regionPanelBody) refs.regionPanelBody.setAttribute('aria-hidden', shellLeftCollapsedPref ? 'true' : 'false');
-        if (refs.inspectorPanelBody) refs.inspectorPanelBody.setAttribute('aria-hidden', shellRightCollapsedPref ? 'true' : 'false');
-        if (refs.collapseRegionPanel)
-            refs.collapseRegionPanel.setAttribute('aria-expanded', shellLeftCollapsedPref ? 'false' : 'true');
-        if (refs.collapseInspectorPanel)
-            refs.collapseInspectorPanel.setAttribute('aria-expanded', shellRightCollapsedPref ? 'false' : 'true');
-        if (refs.viewportInspectorSplitter) {
-            refs.viewportInspectorSplitter.hidden = shellRightCollapsedPref;
-        }
-        if (!shellRightCollapsedPref) {
-            applyPersistedInspectorWidth();
-        }
-        bumpShellLayoutDependentUi();
-    }
-
-    function prefetchCesiumIonTokenForEditor() {
-        try {
-            if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_CESIUM_ION_TOKEN) {
-                var injected = String(import.meta.env.VITE_CESIUM_ION_TOKEN).trim();
-                if (injected) {
-                    window.CESIUM_ION_TOKEN = injected;
-                    return;
-                }
-            }
-        } catch (_err) {}
-        var cached = String(
-            window.CESIUM_ION_TOKEN || window.localStorage.getItem('earth-guardian.cesiumIonToken') || ''
-        ).trim();
-        if (cached) {
-            window.CESIUM_ION_TOKEN = cached;
-            return;
-        }
-        fetch('/api/app-config', { cache: 'no-store' })
-            .then(function (res) {
-                return res && res.ok ? res.json() : null;
-            })
-            .then(function (cfg) {
-                var token = cfg && cfg.cesiumIonToken ? String(cfg.cesiumIonToken).trim() : '';
-                if (token) {
-                    window.CESIUM_ION_TOKEN = token;
-                    try {
-                        window.localStorage.setItem('earth-guardian.cesiumIonToken', token);
-                    } catch (_ignore) {}
-                }
-            })
-            .catch(function () {});
+        _applyShellPanelCollapseUi(refs, shellLayoutEnv());
     }
 
     function init() {
-        prefetchCesiumIonTokenForEditor();
+        _prefetchCesiumIonTokenForEditor();
         initGeoMappingToggle();
         readShellCollapsedPrefsFromStorage();
         bindEvents();
@@ -445,6 +459,7 @@ import { renderMap as _renderMap } from './editor/map-render.js';
         loadState();
         applyShellPanelCollapseUi();
         bindViewportInspectorSplitter();
+        syncEditorCtx();
     }
 
     function readGeoMappingEnabledFromStorage() {
@@ -461,556 +476,23 @@ import { renderMap as _renderMap } from './editor/map-render.js';
     }
 
     function bindEvents() {
-        mountExploreGameplayFieldTemplates();
-        if (refs.inspectorPanelBody) {
-            refs.inspectorPanelBody.addEventListener('input', onExploreGameplayFieldInput);
-            refs.inspectorPanelBody.addEventListener('change', onExploreGameplayFieldInput);
-        }
-        if (refs.toggleGeoMapping) {
-            refs.toggleGeoMapping.addEventListener('change', function () {
-                geoMappingEnabled = !!refs.toggleGeoMapping.checked;
-                window.localStorage.setItem(GEO_MAPPING_STORAGE_KEY, geoMappingEnabled ? '1' : '0');
-                if (viewportViewMode === 'preview' && previewApi && typeof previewApi.refresh === 'function') {
-                    var sid = selectedObject && selectedObject.kind === 'actor' ? selectedObject.id : null;
-                    previewApi.refresh({ preserveView: true, selectActorId: sid });
-                }
-            });
-        }
-        function closeProjectMenu() {
-            if (refs.projectMenuDropdown) refs.projectMenuDropdown.classList.add('view-hidden');
-            if (refs.btnProjectMenu) refs.btnProjectMenu.setAttribute('aria-expanded', 'false');
-        }
-        function toggleProjectMenu(event) {
-            if (event) event.stopPropagation();
-            if (!refs.projectMenuDropdown || !refs.btnProjectMenu) return;
-            var opening = refs.projectMenuDropdown.classList.contains('view-hidden');
-            if (opening) {
-                refs.projectMenuDropdown.classList.remove('view-hidden');
-                refs.btnProjectMenu.setAttribute('aria-expanded', 'true');
-            } else {
-                closeProjectMenu();
-            }
-        }
-        if (refs.btnProjectMenu) {
-            refs.btnProjectMenu.addEventListener('click', toggleProjectMenu);
-        }
-        if (refs.projectMenuDropdown) {
-            refs.projectMenuDropdown.addEventListener('click', closeProjectMenu);
-        }
-        document.addEventListener('click', function (event) {
-            if (!refs.projectMenuDropdown || !refs.btnProjectMenu) return;
-            if (event.target.closest('.topbar-project-menu')) return;
-            closeProjectMenu();
-        });
-        refs.btnReload.addEventListener('click', reloadState);
-        if (refs.btnSave) refs.btnSave.addEventListener('click', saveState);
-        refs.btnExport.addEventListener('click', function() { _exportState(state, setStatus); });
-        refs.btnCreateLevel.addEventListener('click', createManualLevel);
-        refs.btnGenerateRegions.addEventListener('click', function () { generateRegionLevelSkeletons(true); });
-        refs.levelSearch.addEventListener('input', renderLevelTree);
-        refs.btnResizeMap.addEventListener('click', applyMapSize);
-        refs.btnDeleteSelection.addEventListener('click', deleteSelection);
-        refs.btnCreateActorTemplate.addEventListener('click', createActorTemplateFromSelection);
-        refs.btnAddWave.addEventListener('click', addWaveRule);
-        refs.modelUpload.addEventListener('change', function () {
-            if (refs.modelUpload.files && refs.modelUpload.files[0]) {
-                uploadModelAsset(refs.modelUpload.files[0]);
-            }
-        });
+        _bindEditorEvents(refs, editorEventsEnv());
+    }
 
-        if (refs.workbenchTabs) {
-            refs.workbenchTabs.addEventListener('click', function (event) {
-                var button = event.target.closest('[data-workbench]');
-                if (!button) return;
-                activeWorkbench = button.getAttribute('data-workbench') || 'level';
-                if (activeWorkbench === 'theme') {
-                    themeEditorCacheKey = '';
-                }
-                refs.workbenchTabs.querySelectorAll('[data-workbench]').forEach(function (item) {
-                    item.classList.toggle('active', item === button);
-                });
-                if (activeWorkbench !== 'gameplay') disposeGameplayAssetPreview();
-                if (activeWorkbench !== 'model') disposeModelAssetPreview();
-                renderAll();
-            });
-        }
-
-        if (refs.themeScopeSelect) {
-            refs.themeScopeSelect.addEventListener('change', function () {
-                activeThemeScope = refs.themeScopeSelect.value === 'explore' ? 'explore' : 'defense';
-                themeEditorCacheKey = '';
-                renderThemeEditor();
-            });
-        }
-        if (refs.themeWorkbench && refs.themeWorkbench.dataset.themeChromeBound !== '1') {
-            refs.themeWorkbench.dataset.themeChromeBound = '1';
-            refs.themeWorkbench.addEventListener('click', function (e) {
-                var tabBtn = e.target.closest('[data-theme-workbench-tab]');
-                if (tabBtn) {
-                    setThemeWorkbenchTab(tabBtn.getAttribute('data-theme-workbench-tab') || 'colors');
-                    return;
-                }
-                var sw = e.target.closest('[data-theme-swatch-for]');
-                if (!sw) return;
-                var cid = sw.getAttribute('data-theme-swatch-for') || '';
-                if (!cid) return;
-                var inp = document.getElementById(cid);
-                if (inp && inp.type === 'color') inp.click();
-            });
-        }
-        if (refs.themeEditorForm) {
-            refs.themeEditorForm.addEventListener('change', readThemeFormToLevel);
-            refs.themeEditorForm.addEventListener('input', function (ev) {
-                var t = ev.target;
-                if (t && t.type === 'color') syncThemeColorSwatches();
-            });
-        }
-        if (refs.themeBoardTextureUrl) {
-            refs.themeBoardTextureUrl.addEventListener('input', function () {
-                clearTimeout(themeBoardUrlDebounce);
-                themeBoardUrlDebounce = setTimeout(readThemeFormToLevel, 350);
-            });
-        }
-        if (refs.btnThemeCopyToExplore) {
-            refs.btnThemeCopyToExplore.addEventListener('click', function () {
-                var level = getLevel();
-                if (!level || !level.map) return;
-                var lo = ensureExplorationLayout(level.map);
-                lo.theme = normalizeTheme(JSON.parse(JSON.stringify(normalizeTheme(level.map.theme))));
-                markDirty('已复制防守主题到探索');
-                activeThemeScope = 'explore';
-                themeEditorCacheKey = '';
-                if (refs.themeScopeSelect) refs.themeScopeSelect.value = 'explore';
-                fillThemeFormFromLevel();
-                renderAll();
-            });
-        }
-        if (refs.btnThemeCopyToDefense) {
-            refs.btnThemeCopyToDefense.addEventListener('click', function () {
-                var level = getLevel();
-                if (!level || !level.map) return;
-                var lo = ensureExplorationLayout(level.map);
-                level.map.theme = normalizeTheme(JSON.parse(JSON.stringify(normalizeTheme(lo.theme))));
-                markDirty('已复制探索主题到防守');
-                activeThemeScope = 'defense';
-                themeEditorCacheKey = '';
-                if (refs.themeScopeSelect) refs.themeScopeSelect.value = 'defense';
-                fillThemeFormFromLevel();
-                renderAll();
-            });
-        }
-
-        // 过场视频面板事件
-        bindCutsceneEditorEvents();
-
-        if (refs.gameplayResourceTabs) {
-            refs.gameplayResourceTabs.addEventListener('click', function (event) {
-                var button = event.target.closest('[data-gameplay-tab]');
-                if (!button) return;
-                activeGameplayTab = button.getAttribute('data-gameplay-tab') || 'enemies';
-                selectedGameplayEntryId = '';
-                selectedGameplayAssetId = '';
-                refs.gameplayResourceTabs.querySelectorAll('[data-gameplay-tab]').forEach(function (item) {
-                    item.classList.toggle('active', item === button);
-                });
-                renderGameplayEditor();
-            });
-        }
-
-        if (refs.gameplaySearch) refs.gameplaySearch.addEventListener('input', renderGameplayEditor);
-        if (refs.btnCreateGameplayEntry) refs.btnCreateGameplayEntry.addEventListener('click', createGameplayEntry);
-        if (refs.btnDuplicateGameplayEntry) refs.btnDuplicateGameplayEntry.addEventListener('click', duplicateGameplayEntry);
-        if (refs.btnDeleteGameplayEntry) refs.btnDeleteGameplayEntry.addEventListener('click', deleteGameplayEntry);
-        if (refs.btnMoveGameplayUp) refs.btnMoveGameplayUp.addEventListener('click', function () { moveGameplayEntry(-1); });
-        if (refs.btnMoveGameplayDown) refs.btnMoveGameplayDown.addEventListener('click', function () { moveGameplayEntry(1); });
-
-        if (refs.modelCategoryTabs) {
-            refs.modelCategoryTabs.addEventListener('click', function (event) {
-                var button = event.target.closest('[data-model-category]');
-                if (!button) return;
-                activeModelCategory = button.getAttribute('data-model-category') || 'all';
-                selectedModelId = '';
-                refs.modelCategoryTabs.querySelectorAll('[data-model-category]').forEach(function (item) {
-                    item.classList.toggle('active', item.getAttribute('data-model-category') === activeModelCategory);
-                });
-                renderModelEditor();
-            });
-        }
-        if (refs.modelSearch) refs.modelSearch.addEventListener('input', renderModelEditor);
-        if (refs.modelEntryList) {
-            refs.modelEntryList.addEventListener('click', function (event) {
-                var item = event.target.closest('[data-model-id]');
-                if (!item) return;
-                selectedModelId = item.getAttribute('data-model-id') || '';
-                renderModelEditor();
-            });
-        }
-        if (refs.modelUploadReplace) {
-            refs.modelUploadReplace.addEventListener('change', function () {
-                if (refs.modelUploadReplace.files && refs.modelUploadReplace.files[0]) {
-                    replaceSelectedModel(refs.modelUploadReplace.files[0]);
-                }
-            });
-        }
-        if (refs.modelInspectorUpload) {
-            refs.modelInspectorUpload.addEventListener('change', function () {
-                if (refs.modelInspectorUpload.files && refs.modelInspectorUpload.files[0]) {
-                    uploadNewModelFromInspector(refs.modelInspectorUpload.files[0]);
-                }
-            });
-        }
-        if (refs.gameplayEntryList) {
-            refs.gameplayEntryList.addEventListener('click', function (event) {
-                var menuToggle = event.target.closest('[data-gameplay-menu-toggle]');
-                if (menuToggle) {
-                    event.stopPropagation();
-                    var wrap = menuToggle.closest('.gameplay-entry-menu-anchor');
-                    var menu = wrap && wrap.querySelector('.gameplay-entry-menu');
-                    var expanded = menuToggle.getAttribute('aria-expanded') === 'true';
-                    closeAllGameplayEntryMenus();
-                    if (!expanded && menu) {
-                        menuToggle.setAttribute('aria-expanded', 'true');
-                        menu.classList.remove('view-hidden');
-                    }
-                    return;
-                }
-                var actionButton = event.target.closest('[data-gameplay-action]');
-                if (actionButton) {
-                    event.stopPropagation();
-                    var action = actionButton.getAttribute('data-gameplay-action');
-                    var id = actionButton.getAttribute('data-gameplay-entry-id') || '';
-                    selectedGameplayEntryId = id;
-                    closeAllGameplayEntryMenus();
-                    if (action === 'duplicate') duplicateGameplayEntry();
-                    if (action === 'delete') deleteGameplayEntry();
-                    if (action === 'move-up') moveGameplayEntry(-1);
-                    if (action === 'move-down') moveGameplayEntry(1);
-                    return;
-                }
-                var selectBtn = event.target.closest('[data-gameplay-select-id]');
-                if (!selectBtn) return;
-                event.stopPropagation();
-                selectedGameplayEntryId = selectBtn.getAttribute('data-gameplay-select-id') || '';
-                selectedGameplayAssetId = '';
-                closeAllGameplayEntryMenus();
-                renderGameplayEditor();
-            });
-        }
-
-        document.addEventListener('click', function (event) {
-            if (activeWorkbench !== 'gameplay') return;
-            if (!refs.gameplayEntryList) return;
-            if (event.target.closest('.gameplay-entry-menu-anchor')) return;
-            closeAllGameplayEntryMenus();
-        });
-        if (refs.gameplayEditorForm) {
-            refs.gameplayEditorForm.addEventListener('input', function (event) {
-                handleGameplayFormInput(event.target);
-            });
-            refs.gameplayEditorForm.addEventListener('change', function (event) {
-                handleGameplayFormInput(event.target);
-            });
-        }
-        if (refs.gameplayAssetType) refs.gameplayAssetType.addEventListener('change', renderGameplayEditor);
-        if (refs.gameplayAssetUpload) {
-            refs.gameplayAssetUpload.addEventListener('change', function () {
-                if (refs.gameplayAssetUpload.files && refs.gameplayAssetUpload.files[0]) {
-                    uploadGameplayAsset(refs.gameplayAssetUpload.files[0]);
-                }
-            });
-        }
-        if (refs.gameplayAssetList) {
-            refs.gameplayAssetList.addEventListener('click', function (event) {
-                var previewCard = event.target.closest('[data-asset-preview-id]');
-                if (previewCard && !event.target.closest('[data-asset-bind]')) {
-                    selectedGameplayAssetId = previewCard.getAttribute('data-asset-preview-id') || '';
-                    renderGameplayEditor();
-                    return;
-                }
-                var button = event.target.closest('[data-asset-bind]');
-                if (!button) return;
-                bindGameplayAsset(button.getAttribute('data-asset-id') || '', button.getAttribute('data-asset-bind') || 'imagePath');
-            });
-        }
-
-        refs.statusFilters.addEventListener('click', function (event) {
-            var button = event.target.closest('[data-status-filter]');
-            if (!button) return;
-            activeStatusFilter = button.getAttribute('data-status-filter') || 'all';
-            refs.statusFilters.querySelectorAll('[data-status-filter]').forEach(function (item) {
-                item.classList.toggle('active', item === button);
-            });
-            renderLevelTree();
-        });
-
-        refs.editorModeTabs.addEventListener('click', function (event) {
-            var button = event.target.closest('[data-editor-mode]');
-            if (!button) return;
-            activeEditorMode = button.getAttribute('data-editor-mode') || 'defense';
-            refs.editorModeTabs.querySelectorAll('[data-editor-mode]').forEach(function (item) {
-                item.classList.toggle('active', item === button);
-            });
-            selectedObject = null;
-            renderAll();
-            refreshPreviewNow();
-        });
-
-        document.querySelectorAll('[data-tool]').forEach(function (button) {
-            button.addEventListener('click', function () {
-                activeTool = button.getAttribute('data-tool') || 'select';
-                document.querySelectorAll('[data-tool]').forEach(function (item) {
-                    item.classList.toggle('active', item === button);
-                });
-                refs.activeToolLabel.textContent = '当前工具：' + TOOL_LABELS[activeTool];
-                updateEraserToolPanelVisibility(refs, activeWorkbench, activeTool);
-                updateStageHintText();
-            });
-        });
-
-        refs.levelTree.addEventListener('click', function (event) {
-            var button = event.target.closest('[data-level-id]');
-            if (!button) return;
-            selectLevel(button.getAttribute('data-level-id'));
-        });
-
-        refs.mapGrid.addEventListener('click', function (event) {
-            var marker = event.target.closest('[data-object-kind]');
-            if (marker) {
-                selectObject(marker.getAttribute('data-object-kind'), marker.getAttribute('data-object-id'));
-                return;
-            }
-            var cell = event.target.closest('[data-col][data-row]');
-            if (!cell) return;
-            handleCellAction(Number(cell.dataset.col), Number(cell.dataset.row));
-        });
-
-        refs.mapGrid.addEventListener('mousemove', function (event) {
-            if (activeWorkbench !== 'level' || activeTool !== 'erase') return;
-            recordEraserPreviewPointer(event.clientX, event.clientY);
-            updateEraserBrushPreview(refs, event.clientX, event.clientY, eraserPreviewEnv());
-        });
-        refs.mapGrid.addEventListener('mouseleave', function () {
-            if (activeWorkbench !== 'level' || activeTool !== 'erase') return;
-            clearEraserPreviewPointer();
-            clearEraserBrushPreview(refs);
-        });
-
-        refs.mapGrid.addEventListener('dragover', function (event) {
-            /* gap:1px 与 padding 会导致 target 落到 #mapGrid 自身，不写 preventDefault 则浏览器禁止 drop */
-            event.preventDefault();
-            event.dataTransfer.dropEffect = 'copy';
-        });
-
-        refs.mapGrid.addEventListener('drop', function (event) {
-            event.preventDefault();
-            var level = getLevel();
-            if (!level || !level.map || !level.map.grid) return;
-            if (tryConsumeBoardImageFileDrop(event, refs, boardImagesEnv())) return;
-            var cellEl = event.target.closest('.map-grid-cells--floor .map-cell[data-col][data-row]');
-            var resolved =
-                cellEl ||
-                (function () {
-                    var nodes = document.elementsFromPoint(event.clientX, event.clientY);
-                    for (var li = 0; li < nodes.length; li += 1) {
-                        var n = nodes[li];
-                        if (
-                            n.classList &&
-                            n.classList.contains('map-cell') &&
-                            n.closest('.map-grid-cells--floor') &&
-                            n.getAttribute('data-col') != null &&
-                            n.getAttribute('data-row') != null
-                        ) {
-                            return n;
-                        }
-                    }
-                    return mapGridPickCellFromClientPoint(event.clientX, event.clientY, level.map.grid);
-                })();
-            if (!resolved || resolved.getAttribute('data-col') == null) return;
-            var col = Number(resolved.getAttribute('data-col'));
-            var row = Number(resolved.getAttribute('data-row'));
-            if (!Number.isFinite(col) || !Number.isFinite(row)) return;
-            var payload = readDragPayload(event);
-            if (!payload) return;
-            if (payload.kind === 'template') placeActorFromTemplate(payload.id, col, row);
-            if (payload.kind === 'actor') moveActor(payload.id, col, row);
-            if (payload.kind === 'marker') moveMarker(payload.markerKind, payload.id, col, row);
-        });
-
-        bindLevelFields();
-        bindGameAssetPanel();
-        bindLevelAudioUi(refs, audioEnv());
-        bindGlobalAudioUi(audioEnv());
-        bindGlobalSettingsChrome();
-        bindGlobalCutscenePanel();
-        bindGlobalScreenUiPanel();
-
-        if (refs.previewSceneOutlineList) {
-            refs.previewSceneOutlineList.addEventListener('click', function (event) {
-                var btn = event.target.closest('[data-outline-actor]');
-                if (!btn) return;
-                var id = btn.getAttribute('data-outline-actor') || '';
-                if (!id) return;
-                selectObject('actor', id);
-            });
-        }
-
-        if (refs.viewportViewTabs) {
-            refs.viewportViewTabs.addEventListener('click', function (event) {
-                var button = event.target.closest('[data-view-mode]');
-                if (!button) return;
-                wireViewportViewMode(button.getAttribute('data-view-mode') || 'board');
-            });
-        }
-
-        if (refs.previewGizmoTranslate && refs.previewGizmoRotate && refs.previewGizmoScale) {
-            refs.previewGizmoTranslate.addEventListener('click', function () {
-                setPreviewToolbarMode('translate');
-            });
-            refs.previewGizmoRotate.addEventListener('click', function () {
-                setPreviewToolbarMode('rotate');
-            });
-            refs.previewGizmoScale.addEventListener('click', function () {
-                setPreviewToolbarMode('scale');
-            });
-        }
-
-        if (refs.previewFocusSelection) {
-            refs.previewFocusSelection.addEventListener('click', function () {
-                if (previewApi && typeof previewApi.focusSelection === 'function') previewApi.focusSelection();
-            });
-        }
-
-        if (refs.contentBrowserReload) {
-            refs.contentBrowserReload.addEventListener('click', function () {
-                void refreshGameModelsCatalog().then(function () {
-                    renderContentBrowser();
-                    setStatus('已刷新内容浏览器', 'idle');
-                });
-            });
-        }
-
-        wireContentBrowserFloating();
-
-        if (refs.collapseRegionPanel) {
-            refs.collapseRegionPanel.addEventListener('click', function () {
-                shellLeftCollapsedPref = true;
-                _persistShellCollapsedPrefs(
-            { leftKey: SHELL_LEFT_COLLAPSE_KEY, rightKey: SHELL_RIGHT_COLLAPSE_KEY },
-            shellLeftCollapsedPref,
-            shellRightCollapsedPref
-        );
-                applyShellPanelCollapseUi();
-            });
-        }
-        if (refs.railExpandRegionPanel) {
-            refs.railExpandRegionPanel.addEventListener('click', function () {
-                shellLeftCollapsedPref = false;
-                _persistShellCollapsedPrefs(
-            { leftKey: SHELL_LEFT_COLLAPSE_KEY, rightKey: SHELL_RIGHT_COLLAPSE_KEY },
-            shellLeftCollapsedPref,
-            shellRightCollapsedPref
-        );
-                applyShellPanelCollapseUi();
-            });
-        }
-        if (refs.collapseInspectorPanel) {
-            refs.collapseInspectorPanel.addEventListener('click', function () {
-                shellRightCollapsedPref = true;
-                _persistShellCollapsedPrefs(
-            { leftKey: SHELL_LEFT_COLLAPSE_KEY, rightKey: SHELL_RIGHT_COLLAPSE_KEY },
-            shellLeftCollapsedPref,
-            shellRightCollapsedPref
-        );
-                applyShellPanelCollapseUi();
-            });
-        }
-        if (refs.railExpandInspectorPanel) {
-            refs.railExpandInspectorPanel.addEventListener('click', function () {
-                shellRightCollapsedPref = false;
-                _persistShellCollapsedPrefs(
-            { leftKey: SHELL_LEFT_COLLAPSE_KEY, rightKey: SHELL_RIGHT_COLLAPSE_KEY },
-            shellLeftCollapsedPref,
-            shellRightCollapsedPref
-        );
-                applyShellPanelCollapseUi();
-            });
-        }
-
-        var shellReflowTimer = null;
-        window.addEventListener('resize', function () {
-            if (viewportViewMode === 'preview' && previewApi && typeof previewApi.resize === 'function') {
-                previewApi.resize();
-            }
-            clearTimeout(shellReflowTimer);
-            shellReflowTimer = window.setTimeout(function () {
-                applyShellPanelCollapseUi();
-                clampContentBrowserFloatPanelIntoViewport();
-            }, 100);
-        });
-
-        document.addEventListener('keydown', function (e) {
-            var ae = document.activeElement;
-            var tag = ae && ae.tagName;
-            if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-            if (ae && ae.isContentEditable) return;
-
-            if ((e.ctrlKey || e.metaKey) && e.code === 'Space') {
-                if (activeWorkbench !== 'level') return;
-                e.preventDefault();
-                toggleContentBrowserFloat();
-                return;
-            }
-
-            if (e.key === 'f' || e.key === 'F') {
-                if (activeWorkbench !== 'level') return;
-                if (viewportViewMode !== 'preview' || !previewApi || typeof previewApi.focusSelection !== 'function') return;
-                if (!selectedObject || selectedObject.kind !== 'actor') return;
-                e.preventDefault();
-                e.stopPropagation();
-                previewApi.focusSelection();
-                return;
-            }
-
-            if (
-                e.key === 'Escape' &&
-                activeWorkbench === 'level' &&
-                selectedObject &&
-                selectedObject.kind === 'boardImage'
-            ) {
-                e.preventDefault();
-                selectedObject = null;
-                clearBoardImageInteractionState();
-                renderSelectionInspector();
-                renderMap();
-                renderBoardImagesPanel(refs, boardImagesEnv());
-                return;
-            }
-
-            if (e.key !== 'Delete') return;
-            if (activeWorkbench !== 'level' || !selectedObject) return;
-            e.preventDefault();
-            deleteSelection();
-        });
-        bindEraserToolControls(refs, function () {
-            refreshEraserPreviewIfActive(refs, eraserPreviewEnv());
-        });
-        bindBoardImageGlobalHandlers(refs, boardImagesEnv());
-        ensureBoardImagesPanelDelegated(refs, boardImagesEnv());
+    function gameAssetEnv() {
+        return {
+            getState: function () {
+                return state;
+            },
+            markDirty: markDirty,
+            setStatus: setStatus,
+            uploadFileToProjectUrl: uploadFileToProjectUrl,
+            getBrowsableModelAssets: getBrowsableModelAssets
+        };
     }
 
     function normalizeGameModelsForCatalog() {
-        return (state && Array.isArray(state.gameModelsCatalog) ? state.gameModelsCatalog : []).map(function (entry) {
-            var pub = String(entry.publicUrl || '');
-            return {
-                id: String(entry.id || ''),
-                name: String(entry.name || entry.relativePath || '模型'),
-                path: pub,
-                publicUrl: pub,
-                relativePath: String(entry.relativePath || ''),
-                summary: entry.relativePath ? 'GameModels/' + String(entry.relativePath) : 'GameModels',
-                source: 'gameModels'
-            };
-        });
+        return _normalizeGameModelsForCatalog(gameAssetEnv());
     }
 
     async function refreshGameModelsCatalog() {
@@ -1076,7 +558,7 @@ import { renderMap as _renderMap } from './editor/map-render.js';
             } catch (eJson) {
                 throw new Error('服务器返回非 JSON');
             }
-            rememberEditorAsset(payload, requestBody.resourceKind);
+            _rememberEditorAsset(gameAssetEnv(), payload, requestBody.resourceKind);
             return String(payload.publicUrl || '');
         }
         var response = await fetch('/api/upload-model', {
@@ -1094,251 +576,12 @@ import { renderMap as _renderMap } from './editor/map-render.js';
         return String(payload.url || '');
     }
 
-    function rememberEditorAsset(payload, resourceKind) {
-        if (!payload || !payload.projectPath) return;
-        state.editorAssetsCatalog = state.editorAssetsCatalog || [];
-        var nextAsset = {
-            id: String(payload.id || uid('editor-asset')),
-            name: String(payload.name || '未命名资源'),
-            assetType: String(payload.assetType || 'LevelAssets'),
-            resourceKind: String(resourceKind || payload.resourceKind || 'level-asset'),
-            cityCode: String(payload.cityCode || ''),
-            cityName: String(payload.cityName || ''),
-            path: String(payload.projectPath || ''),
-            projectPath: String(payload.projectPath || ''),
-            publicUrl: String(payload.publicUrl || ''),
-            summary: String(payload.cityName || '') + ' · ' + String(payload.name || ''),
-            updatedAt: new Date().toISOString()
-        };
-        state.editorAssetsCatalog = state.editorAssetsCatalog.filter(function (item) { return item.id !== nextAsset.id; });
-        state.editorAssetsCatalog.push(nextAsset);
-    }
-
     function renderGameAssetPanel() {
-        if (!state || !state.gameAssetConfig || !refs.towerModelList) return;
-        var g = state.gameAssetConfig;
-        refs.towerModelList.innerHTML = TOWER_MODEL_SPECS.map(function (spec) {
-            var url = g.customModelUrls[spec.id] || '';
-            var sc = g.modelScales[spec.id] != null ? g.modelScales[spec.id] : 1;
-            return [
-                '<div class="game-asset-tower-row">',
-                '  <div class="game-asset-tower-title">' + escapeHtml(spec.key + ' · ' + spec.name) + '</div>',
-                '  <div class="game-asset-tower-upload-col" data-tower-drop="' +
-                    escapeAttr(spec.id) +
-                    '" title="从底部「项目模型」拖入到此列（整块区域均可接住）">',
-                '    <label class="game-asset-upload tight">替换模型',
-                '      <input type="file" data-tower-file="' + escapeAttr(spec.id) + '" accept=".glb,.gltf,.obj,model/gltf-binary,model/gltf+json" />',
-                '    </label>',
-                '    <div class="game-asset-tower-drop">拖入项目模型</div>',
-                '  </div>',
-                '  <label class="field-block game-asset-scale-tower"><span>缩放</span>',
-                '    <input type="number" data-tower-scale="' + escapeAttr(spec.id) + '" min="0.1" max="8" step="0.1" value="' + String(sc) + '" />',
-                '  </label>',
-                '  <div class="asset-url-hint" title="' + escapeAttr(url || '未绑定塔防模型文件') + '">' + escapeHtml(url ? modelBindShortLabel(url) : '未配置') + '</div>',
-                '</div>'
-            ].join('');
-        }).join('');
-
-        var ps = document.getElementById('gaPropScale');
-        var ys = document.getElementById('gaPlayerScale');
-        if (ps) ps.value = String(g.modelScales.moneyDrop != null ? g.modelScales.moneyDrop : 1);
-        if (ys) ys.value = String(g.modelScales.player != null ? g.modelScales.player : 1);
-
-        var pt = g.playerExploreTransform || defaultGameAssetConfig().playerExploreTransform;
-        var om = pt.offsetMeters || { x: 0, y: 0, z: 0 };
-        var rd = pt.rotationDeg || { x: 0, y: 0, z: 0 };
-        var elOx = document.getElementById('gaOffX');
-        var elOy = document.getElementById('gaOffY');
-        var elOz = document.getElementById('gaOffZ');
-        var elRx = document.getElementById('gaRotX');
-        var elRy = document.getElementById('gaRotY');
-        var elRz = document.getElementById('gaRotZ');
-        if (elOx) elOx.value = String(om.x != null ? om.x : 0);
-        if (elOy) elOy.value = String(om.y != null ? om.y : 0);
-        if (elOz) elOz.value = String(om.z != null ? om.z : 0);
-        if (elRx) elRx.value = String(rd.x != null ? rd.x : 0);
-        if (elRy) elRy.value = String(rd.y != null ? rd.y : 0);
-        if (elRz) elRz.value = String(rd.z != null ? rd.z : 0);
+        _renderGameAssetPanel(refs, gameAssetEnv());
     }
 
     function bindGameAssetPanel() {
-        if (!refs.gameAssetSection) return;
-        refs.gameAssetSection.addEventListener('change', function (e) {
-            var t = e.target;
-            if (!t || !state) return;
-            (async function () {
-                if (t.classList && t.classList.contains('ga-pt')) {
-                    if (!state.gameAssetConfig.playerExploreTransform) {
-                        state.gameAssetConfig.playerExploreTransform = defaultGameAssetConfig().playerExploreTransform;
-                    }
-                    var pt2 = state.gameAssetConfig.playerExploreTransform;
-                    var n = Number(t.value);
-                    if (!Number.isFinite(n)) n = 0;
-                    var k = t.getAttribute('data-ga-pt');
-                    if (k === 'ox') pt2.offsetMeters.x = n;
-                    if (k === 'oy') pt2.offsetMeters.y = n;
-                    if (k === 'oz') pt2.offsetMeters.z = n;
-                    if (k === 'rx') pt2.rotationDeg.x = n;
-                    if (k === 'ry') pt2.rotationDeg.y = n;
-                    if (k === 'rz') pt2.rotationDeg.z = n;
-                    markDirty('已更新探索出生点变换');
-                    return;
-                }
-                if (t.getAttribute('data-tower-file')) {
-                    var tid = t.getAttribute('data-tower-file');
-                    var file = t.files && t.files[0];
-                    t.value = '';
-                    if (!file) return;
-                    try {
-                        setStatus('正在上传「' + file.name + '」…', 'idle');
-                        var url = await uploadFileToProjectUrl(file, { gameModelsUpload: true, gameModelsSubdir: 'Tower' });
-                        if (url) {
-                            state.gameAssetConfig.customModelUrls[tid] = url;
-                            markDirty('已更新塔防单位模型');
-                            setStatus(
-                                '已成功绑定塔防模型「' + file.name + '」 · ' + modelBindShortLabel(url) + '（悬停「当前文件」格可见完整路径）',
-                                'success'
-                            );
-                        } else {
-                            setStatus('模型上传后未返回公开 URL（需 dev /api/game-models/upload）', 'error');
-                        }
-                    } catch (err) {
-                        setStatus((err && err.message) || '上传失败', 'error');
-                    }
-                    renderGameAssetPanel();
-                    return;
-                }
-                if (t.getAttribute('data-tower-scale')) {
-                    var sid = t.getAttribute('data-tower-scale');
-                    state.gameAssetConfig.modelScales[sid] = clamp(Number(t.value) || 1, 0.1, 8);
-                    markDirty('已更新塔防单位缩放');
-                    return;
-                }
-                if (t.classList && t.classList.contains('ga-scale-input') && t.getAttribute('data-ga-scale')) {
-                    var gk = t.getAttribute('data-ga-scale');
-                    state.gameAssetConfig.modelScales[gk] = clamp(Number(t.value) || 1, 0.1, 8);
-                    markDirty('已更新探索缩放');
-                    return;
-                }
-                if (t.getAttribute('data-ga') === 'propModel') {
-                    var pf = t.files && t.files[0];
-                    t.value = '';
-                    if (!pf) return;
-                    try {
-                        setStatus('正在上传探索掉落模型…', 'idle');
-                        var purl = await uploadFileToProjectUrl(pf, { assetType: 'LevelProps', resourceKind: 'drop-model', assetName: 'money-drop' });
-                        if (purl) {
-                            state.gameAssetConfig.customDropModelUrl = purl;
-                            markDirty('已更新探索掉落模型');
-                        }
-                    } catch (err2) {
-                        setStatus((err2 && err2.message) || '上传失败', 'error');
-                    }
-                    renderGameAssetPanel();
-                    return;
-                }
-                if (t.getAttribute('data-ga') === 'playerModel') {
-                    var pfile = t.files && t.files[0];
-                    t.value = '';
-                    if (!pfile) return;
-                    try {
-                        setStatus('正在上传角色模型…', 'idle');
-                        var plurl = await uploadFileToProjectUrl(pfile, { assetType: 'Characters', resourceKind: 'player-model', assetName: 'explore-player' });
-                        if (plurl) {
-                            state.gameAssetConfig.customPlayerModelUrl = plurl;
-                            markDirty('已更新探索角色模型');
-                        }
-                    } catch (err3) {
-                        setStatus((err3 && err3.message) || '上传失败', 'error');
-                    }
-                    renderGameAssetPanel();
-                    return;
-                }
-                if (t.getAttribute('data-ga-anim')) {
-                    var anim = t.getAttribute('data-ga-anim');
-                    var af = t.files && t.files[0];
-                    t.value = '';
-                    if (!af) return;
-                    try {
-                        setStatus('正在上传 ' + anim + ' 动画…', 'idle');
-                        var aurl = await uploadFileToProjectUrl(af, { assetType: 'Animations', resourceKind: 'mixamo-' + anim, assetName: anim + '-animation' });
-                        if (aurl) {
-                            state.gameAssetConfig.customAnimationUrls[anim] = aurl;
-                            markDirty('已更新 ' + anim + ' 动画');
-                        }
-                    } catch (err4) {
-                        setStatus((err4 && err4.message) || '上传失败', 'error');
-                    }
-                    renderGameAssetPanel();
-                }
-            })();
-        });
-
-        if (refs.gameAssetSection && !refs.gameAssetSection.__towerCatalogDropBound) {
-            refs.gameAssetSection.__towerCatalogDropBound = true;
-            function towerDropZoneFromTarget(t) {
-                if (!t) return null;
-                var el = t.nodeType === 3 && t.parentElement ? t.parentElement : t;
-                return el.closest ? el.closest('[data-tower-drop]') : null;
-            }
-            function readCatalogPayloadFromDrag(dataTransfer) {
-                if (!dataTransfer) return null;
-                var rawJson = '';
-                try {
-                    rawJson = String(dataTransfer.getData('application/json') || '').trim();
-                } catch (e1) {
-                    rawJson = '';
-                }
-                if (!rawJson) {
-                    try {
-                        rawJson = String(dataTransfer.getData('text/plain') || '').trim();
-                    } catch (e2) {
-                        rawJson = '';
-                    }
-                }
-                if (!rawJson || rawJson.charAt(0) !== '{') return null;
-                try {
-                    var o = JSON.parse(rawJson);
-                    return o && typeof o === 'object' ? o : null;
-                } catch (e3) {
-                    return null;
-                }
-            }
-            refs.gameAssetSection.addEventListener('dragover', function (e) {
-                var zone = towerDropZoneFromTarget(e.target);
-                if (!zone) return;
-                e.preventDefault();
-                e.dataTransfer.dropEffect = 'copy';
-            });
-            refs.gameAssetSection.addEventListener('dragenter', function (e) {
-                var zone = towerDropZoneFromTarget(e.target);
-                if (!zone) return;
-                e.preventDefault();
-                if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
-            });
-            refs.gameAssetSection.addEventListener('drop', function (e) {
-                var zone = towerDropZoneFromTarget(e.target);
-                if (!zone || !state || !state.gameAssetConfig) return;
-                e.preventDefault();
-                var tid = zone.getAttribute('data-tower-drop');
-                if (!tid) return;
-                var payload = readCatalogPayloadFromDrag(e.dataTransfer);
-                if (!payload || payload.kind !== 'catalogModel') return;
-                var aid = payload.assetId || payload.id || '';
-                var asset = getBrowsableModelAssets().find(function (item) {
-                    return item.id === aid;
-                });
-                var url = asset ? asset.path || asset.publicUrl || '' : '';
-                if (!url) {
-                    setStatus('无法解析该模型路径，请先在「项目模型」中刷新列表。', 'error');
-                    return;
-                }
-                state.gameAssetConfig.customModelUrls[tid] = url;
-                markDirty('已从项目模型绑定塔防替换模型');
-                setStatus('已绑定塔防模型：' + modelBindShortLabel(url) + '（路径见格内 / 悬停）', 'success');
-                renderGameAssetPanel();
-            });
-        }
+        _bindGameAssetPanel(refs, gameAssetEnv());
     }
 
     function bindLevelFields() {
@@ -1679,314 +922,11 @@ import { renderMap as _renderMap } from './editor/map-render.js';
         renderContentBrowser();
         renderBoardImagesPanel(refs, boardImagesEnv());
         updateEraserToolPanelVisibility(refs, activeWorkbench, activeTool);
-    }
-
-    function ensureLevelContentBrowserUiWired() {
-        var filters = refs.levelContentBrowserFilters;
-        var list = refs.levelContentBrowserList;
-        if (filters && filters.dataset.lcbWired !== '1') {
-            filters.dataset.lcbWired = '1';
-            filters.innerHTML = LEVEL_CONTENT_BROWSER_FILTER_ORDER.map(function (fid) {
-                var label = fid === 'all' ? '全部' : TOOL_LABELS[fid] || fid;
-                var active = fid === levelContentBrowserFilter ? ' active' : '';
-                return (
-                    '<button type="button" role="tab" class="lcb-filter-chip' +
-                    active +
-                    '" data-lcb-filter="' +
-                    escapeAttr(fid) +
-                    '" aria-selected="' +
-                    (active ? 'true' : 'false') +
-                    '">' +
-                    escapeHtml(label) +
-                    '</button>'
-                );
-            }).join('');
-            filters.addEventListener('click', function (e) {
-                var chip = e.target.closest('[data-lcb-filter]');
-                if (!chip) return;
-                levelContentBrowserFilter = chip.getAttribute('data-lcb-filter') || 'all';
-                filters.querySelectorAll('[data-lcb-filter]').forEach(function (c) {
-                    var on = c.getAttribute('data-lcb-filter') === levelContentBrowserFilter;
-                    c.classList.toggle('active', on);
-                    c.setAttribute('aria-selected', on ? 'true' : 'false');
-                });
-                renderLevelContentBrowser();
-            });
-        }
-        if (list && list.dataset.lcbWired !== '1') {
-            list.dataset.lcbWired = '1';
-            list.addEventListener('click', function (e) {
-                var btn = e.target.closest('[data-lcb-sel-kind]');
-                if (!btn) return;
-                var kind = btn.getAttribute('data-lcb-sel-kind') || '';
-                if (
-                    kind === 'obstacleCell' ||
-                    kind === 'pathCell' ||
-                    kind === 'buildSlotCell' ||
-                    kind === 'safeZoneCell'
-                ) {
-                    selectGridCellObject(kind, Number(btn.getAttribute('data-lcb-col')), Number(btn.getAttribute('data-lcb-row')));
-                    return;
-                }
-                var oid = btn.getAttribute('data-lcb-id');
-                if (kind && oid != null && oid !== '') selectObject(kind, oid);
-            });
-        }
-    }
-
-    function lcbBtnActive(selKind, probe) {
-        if (!selectedObject || selectedObject.kind !== selKind) return false;
-        if (probe.id != null && selectedObject.id !== probe.id) return false;
-        if (probe.col != null && (selectedObject.col !== probe.col || selectedObject.row !== probe.row)) return false;
-        return true;
-    }
-
-    function lcbItemButton(meta) {
-        var sk = meta.selKind;
-        var active = lcbBtnActive(sk, meta.probe || {}) ? ' lcb-item--active' : '';
-        var attrs = ['type="button"', 'class="lcb-item' + active + '"', 'data-lcb-sel-kind="' + escapeAttr(sk) + '"'];
-        if (meta.id != null) attrs.push('data-lcb-id="' + escapeAttr(meta.id) + '"');
-        if (meta.col != null) attrs.push('data-lcb-col="' + escapeAttr(String(meta.col)) + '"');
-        if (meta.row != null) attrs.push('data-lcb-row="' + escapeAttr(String(meta.row)) + '"');
-        var icon = escapeHtml(meta.icon || '·');
-        var t1 = escapeHtml(meta.title || '');
-        var t2 = escapeHtml(meta.sub || '');
-        return (
-            '<button ' +
-            attrs.join(' ') +
-            '>' +
-            '<span class="lcb-item-icon">' +
-            icon +
-            '</span>' +
-            '<span class="lcb-item-meta">' +
-            '<strong>' +
-            t1 +
-            '</strong>' +
-            '<span>' +
-            t2 +
-            '</span>' +
-            '</span>' +
-            '</button>'
-        );
+        syncEditorCtx();
     }
 
     function renderLevelContentBrowser() {
-        ensureLevelContentBrowserUiWired();
-        if (!refs.levelContentBrowserList || !refs.levelContentBrowser) return;
-
-        var show = activeWorkbench === 'level' && viewportViewMode === 'preview';
-        refs.levelContentBrowser.classList.toggle('view-hidden', !show);
-        refs.levelContentBrowser.setAttribute('aria-hidden', show ? 'false' : 'true');
-
-        if (!show || !state) {
-            refs.levelContentBrowserList.innerHTML = '';
-            return;
-        }
-
-        if (refs.previewSceneOutlineSection) {
-            refs.previewSceneOutlineSection.classList.add('view-hidden');
-            refs.previewSceneOutlineSection.setAttribute('aria-hidden', 'true');
-        }
-
-        var level = getLevel();
-        if (!level || !level.map) {
-            refs.levelContentBrowserList.innerHTML = '<div class="empty-state">请选择关卡</div>';
-            return;
-        }
-
-        var f = levelContentBrowserFilter;
-        var want = function (key) {
-            return f === 'all' || f === key;
-        };
-        var map = level.map;
-        var layout = ensureExplorationLayout(map);
-        var sections = [];
-
-        /* 障碍 */
-        if (want('obstacle')) {
-            var obs =
-                activeEditorMode === 'explore'
-                    ? sortCells(layout.obstacles || [])
-                    : sortCells(map.obstacles || []);
-            var obsHtml = obs
-                .map(function (c) {
-                    return lcbItemButton({
-                        selKind: 'obstacleCell',
-                        col: c.col,
-                        row: c.row,
-                        probe: { col: c.col, row: c.row },
-                        icon: '障',
-                        title: '障碍 — (' + c.col + ',' + c.row + ')',
-                        sub: activeEditorMode === 'explore' ? '探索布局' : '塔防布局'
-                    });
-                })
-                .join('');
-            if (obsHtml) sections.push(lcbSection('障碍', obsHtml));
-        }
-
-        /* 敌人出口 */
-        if (want('spawn')) {
-            var spHtml = '';
-            if (activeEditorMode === 'explore' && layout.startPoint) {
-                var sp = layout.startPoint;
-                spHtml += lcbItemButton({
-                    selKind: 'spawn',
-                    id: sp.id,
-                    probe: { id: sp.id },
-                    icon: '出',
-                    title: sp.name || '探索起点',
-                    sub: '(' + sp.col + ',' + sp.row + ')'
-                });
-            } else if (activeEditorMode === 'defense') {
-                spHtml = (map.spawnPoints || [])
-                    .map(function (sp) {
-                        return lcbItemButton({
-                            selKind: 'spawn',
-                            id: sp.id,
-                            probe: { id: sp.id },
-                            icon: '出',
-                            title: sp.name || '敌人出口',
-                            sub: '(' + sp.col + ',' + sp.row + ')'
-                        });
-                    })
-                    .join('');
-            }
-            if (spHtml) sections.push(lcbSection('敌人出口', spHtml));
-        }
-
-        /* 敌人路径 */
-        if (want('path')) {
-            var pathCells = [];
-            if (activeEditorMode === 'explore') pathCells = sortCells(layout.path || []);
-            else {
-                var seen = {};
-                (map.enemyPaths || []).forEach(function (p) {
-                    (p.cells || []).forEach(function (c) {
-                        var k = c.col + ',' + c.row;
-                        if (seen[k]) return;
-                        seen[k] = true;
-                        pathCells.push(c);
-                    });
-                });
-                pathCells = sortCells(pathCells);
-            }
-            var pathHtml = pathCells
-                .map(function (c) {
-                    return lcbItemButton({
-                        selKind: 'pathCell',
-                        col: c.col,
-                        row: c.row,
-                        probe: { col: c.col, row: c.row },
-                        icon: '径',
-                        title: '路径格 — (' + c.col + ',' + c.row + ')',
-                        sub: '敌人路径'
-                    });
-                })
-                .join('');
-            if (pathHtml) sections.push(lcbSection('敌人路径', pathHtml));
-        }
-
-        /* 塔位 */
-        if (want('buildSlot') && activeEditorMode === 'defense') {
-            var bsHtml = sortCells(map.buildSlots || [])
-                .map(function (c) {
-                    return lcbItemButton({
-                        selKind: 'buildSlotCell',
-                        col: c.col,
-                        row: c.row,
-                        probe: { col: c.col, row: c.row },
-                        icon: '塔',
-                        title: '塔位 — (' + c.col + ',' + c.row + ')',
-                        sub: '仅塔防布局'
-                    });
-                })
-                .join('');
-            if (bsHtml) sections.push(lcbSection('塔位', bsHtml));
-        }
-
-        /* 防守目标 */
-        if (want('objective')) {
-            var obHtml = '';
-            if (activeEditorMode === 'explore' && layout.exitPoint) {
-                var op = layout.exitPoint;
-                obHtml = lcbItemButton({
-                    selKind: 'objective',
-                    id: op.id,
-                    probe: { id: op.id },
-                    icon: '标',
-                    title: op.name || '探索终点',
-                    sub: '(' + op.col + ',' + op.row + ')'
-                });
-            } else if (activeEditorMode === 'defense' && map.objectivePoint) {
-                var opz = map.objectivePoint;
-                obHtml = lcbItemButton({
-                    selKind: 'objective',
-                    id: opz.id,
-                    probe: { id: opz.id },
-                    icon: '标',
-                    title: opz.name || '防守目标',
-                    sub: '(' + opz.col + ',' + opz.row + ')'
-                });
-            }
-            if (obHtml) sections.push(lcbSection('防守目标', obHtml));
-        }
-
-        /* 探索点 */
-        if (want('explorePoint') && Array.isArray(map.explorationPoints) && map.explorationPoints.length) {
-            var epHtml = map.explorationPoints
-                .map(function (p) {
-                    return lcbItemButton({
-                        selKind: 'explorePoint',
-                        id: p.id,
-                        probe: { id: p.id },
-                        icon: '探',
-                        title: p.name || p.id,
-                        sub: '(' + p.col + ',' + p.row + ')'
-                    });
-                })
-                .join('');
-            sections.push(lcbSection('探索点', epHtml));
-        }
-
-        /* 安全区 */
-        if (want('safeZone') && activeEditorMode === 'explore') {
-            var szHtml = sortCells(layout.safeZones || [])
-                .map(function (c) {
-                    return lcbItemButton({
-                        selKind: 'safeZoneCell',
-                        col: c.col,
-                        row: c.row,
-                        probe: { col: c.col, row: c.row },
-                        icon: '安',
-                        title: '安全区 — (' + c.col + ',' + c.row + ')',
-                        sub: '探索布局'
-                    });
-                })
-                .join('');
-            if (szHtml) sections.push(lcbSection('安全区', szHtml));
-        }
-
-        /* 模型 Actor */
-        if (want('actor') && Array.isArray(map.actors) && map.actors.length) {
-            var actHtml = map.actors
-                .map(function (actor) {
-                    var cat = actor.category ? String(actor.category) : '';
-                    return lcbItemButton({
-                        selKind: 'actor',
-                        id: actor.id,
-                        probe: { id: actor.id },
-                        icon: actor.icon ? String(actor.icon).slice(0, 2) : 'Ac',
-                        title: actor.name || actor.id,
-                        sub: cat || '模型 Actor'
-                    });
-                })
-                .join('');
-            sections.push(lcbSection('模型 Actor', actHtml));
-        }
-
-        refs.levelContentBrowserList.innerHTML = sections.length
-            ? sections.join('')
-            : '<div class="empty-state">当前筛选下暂无条目；可在棋盘布局中添加障碍、路径等内容。</div>';
+        _renderLevelContentBrowser(refs, levelContentBrowserEnv());
     }
 
     function renderPreviewSceneOutline() {
@@ -1995,8 +935,20 @@ import { renderMap as _renderMap } from './editor/map-render.js';
         if (refs.previewSceneOutlineList) refs.previewSceneOutlineList.innerHTML = '';
     }
 
+    function bindGameplayUi() {
+        _bindGameplayUi(refs, gameplayEnv());
+    }
+
+    function bindWaveEditorUi() {
+        _bindWaveEditorUi(refs, waveEditorEnv());
+    }
+
     function refreshGlobalSettingsWorkbench() {
         _refreshGlobalSettingsWorkbench(refs, globalSettingsEnv());
+    }
+
+    function renderGlobalCutsceneOverview() {
+        _renderGlobalCutsceneOverview(refs, globalSettingsEnv());
     }
 
     function deleteLevelById(levelId) {
@@ -2345,227 +1297,34 @@ import { renderMap as _renderMap } from './editor/map-render.js';
     }
 
     async function revealProjectPathInExplorer(projectPath) {
-        var res = await fetch('/api/reveal-project-path', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ projectPath: projectPath })
-        });
-        var text = await res.text();
-        var data = {};
-        try {
-            data = JSON.parse(text);
-        } catch (e) {
-            throw new Error(text.slice(0, 200) || '服务器返回异常');
-        }
-        if (!res.ok) throw new Error(data.error || text || '打开失败');
+        await _revealProjectPathInExplorer(projectPath);
         setStatus('已在资源管理器中定位视频文件', 'success');
     }
 
     /** 获取或初始化当前关卡的 cutscenes 对象 */
     function ensureLevelCutscenes() {
-        var level = getLevel();
-        if (!level || !level.map) return null;
-        if (!level.map.cutscenes) level.map.cutscenes = {};
-        return level.map.cutscenes;
+        return ensureLevelCutscenesForLevel(getLevel());
     }
 
-    /** 渲染过场视频面板（在 theme 工作台下） */
+    function cutsceneWorkbenchEnv() {
+        return {
+            getLevel: getLevel,
+            ensureLevelCutscenes: ensureLevelCutscenes,
+            uploadVideoFile: uploadVideoFile,
+            markDirty: markDirty,
+            setStatus: setStatus,
+            renderGlobalCutsceneOverview: renderGlobalCutsceneOverview,
+            revealProjectPathInExplorer: revealProjectPathInExplorer,
+            refreshCutscenePanel: renderCutsceneEditor
+        };
+    }
+
     function renderCutsceneEditor() {
-        if (!refs.introVideoInfo) return;
-        var level = getLevel();
-        var cutscenes = (level && level.map && level.map.cutscenes) || {};
-        var intro = cutscenes.introVideo || {};
-        var st = formatIntroVideoStatusLines(intro);
-        refs.introVideoInfo.textContent = st.text;
-        if (refs.btnOpenIntroVideoLocation) {
-            refs.btnOpenIntroVideoLocation.disabled = !st.openPath;
-            refs.btnOpenIntroVideoLocation.title = st.openPath
-                ? '在文件管理器中打开该文件，便于手动替换'
-                : '上传并保存到项目 public 目录后可在此打开';
-        }
-
-        // 开场视频标题
-        if (refs.introVideoTitle) refs.introVideoTitle.value = intro.title || '';
-
-        // 波次视频列表
-        if (!refs.waveVideoList) return;
-        var waveVideos = Array.isArray(cutscenes.waveVideos) ? cutscenes.waveVideos : [];
-        if (!waveVideos.length) {
-            refs.waveVideoList.innerHTML = '<p class="section-hint" style="margin:8px 0;">暂无波次视频，点击"＋ 添加"新增。</p>';
-            return;
-        }
-        refs.waveVideoList.innerHTML = waveVideos.map(function (wv, idx) {
-            var hasUrl = !!wv.url;
-            return [
-                '<div class="wave-video-item" data-wv-idx="' + idx + '" style="border:1px solid var(--border,#354);border-radius:6px;padding:10px 12px;margin-bottom:8px;">',
-                '  <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">',
-                '    <label style="flex:0 0 auto;font-size:12px;opacity:.7;">第',
-                '      <input type="number" class="wv-wave-input" min="1" max="999" value="' + (wv.afterWave || 1) + '"',
-                '        style="width:52px;margin:0 3px;" data-wv-idx="' + idx + '">',
-                '    波后</label>',
-                '    <button type="button" class="mini-button wv-upload-btn" data-wv-idx="' + idx + '" style="flex:1;">',
-                '      ' + (hasUrl ? '替换视频' : '上传视频'),
-                '      <input type="file" class="wv-file-input" accept="video/mp4,video/webm,video/ogg,video/*"',
-                '        data-wv-idx="' + idx + '" style="position:absolute;inset:0;opacity:0;cursor:pointer;">',
-                '    </button>',
-                '    <button type="button" class="mini-button wv-remove-btn" data-wv-idx="' + idx + '" style="color:var(--error-color,#d87880);">✕</button>',
-                '  </div>',
-                '  <div class="section-hint wv-url-info" style="word-break:break-all;min-height:1.2em;font-size:11px;">',
-                '    ' + escapeHtml(hasUrl ? wv.url : '未上传视频'),
-                '  </div>',
-                '  <label class="field-block" style="margin-top:6px;">',
-                '    <span style="font-size:12px;">字幕标题（可选）</span>',
-                '    <input type="text" class="wv-title-input" placeholder="留空则不显示字幕"',
-                '      value="' + escapeAttr(wv.title || '') + '" data-wv-idx="' + idx + '">',
-                '  </label>',
-                '</div>'
-            ].join('');
-        }).join('');
+        _renderCutsceneEditor(refs, { getLevel: getLevel });
     }
 
-    /** 绑定过场视频面板的事件（只绑一次，通过委托处理动态行） */
     function bindCutsceneEditorEvents() {
-        // 开场视频上传
-        if (refs.introVideoFile) {
-            refs.introVideoFile.addEventListener('change', async function () {
-                var file = refs.introVideoFile.files && refs.introVideoFile.files[0];
-                if (!file) return;
-                try {
-                    setStatus('正在上传开场视频 ' + file.name + '…', 'idle');
-                    var up = await uploadVideoFile(file, getLevel());
-                    var cutscenes = ensureLevelCutscenes();
-                    if (!cutscenes) return;
-                    cutscenes.introVideo = { url: up.url };
-                    if (up.projectPath) cutscenes.introVideo.projectPath = up.projectPath;
-                    var titleTrim = (refs.introVideoTitle && refs.introVideoTitle.value.trim()) || '';
-                    if (titleTrim) cutscenes.introVideo.title = titleTrim;
-                    else delete cutscenes.introVideo.title;
-                    refs.introVideoFile.value = '';
-                    markDirty('已上传开场视频');
-                    renderCutsceneEditor();
-                    renderGlobalCutsceneOverview();
-                    setStatus('开场视频已上传', 'idle');
-                } catch (err) {
-                    refs.introVideoFile.value = '';
-                    setStatus('视频上传失败: ' + err.message, 'error');
-                }
-            });
-        }
-
-        // 开场视频标题实时保存
-        if (refs.introVideoTitle) {
-            refs.introVideoTitle.addEventListener('change', function () {
-                var cutscenes = ensureLevelCutscenes();
-                if (!cutscenes || !cutscenes.introVideo) return;
-                var t = refs.introVideoTitle.value.trim();
-                if (t) {
-                    cutscenes.introVideo.title = t;
-                } else {
-                    delete cutscenes.introVideo.title;
-                }
-                markDirty('已更新开场视频标题');
-            });
-        }
-
-        // 清除开场视频
-        if (refs.btnClearIntroVideo) {
-            refs.btnClearIntroVideo.addEventListener('click', function () {
-                var cutscenes = ensureLevelCutscenes();
-                if (!cutscenes) return;
-                delete cutscenes.introVideo;
-                markDirty('已清除开场视频');
-                renderCutsceneEditor();
-                renderGlobalCutsceneOverview();
-            });
-        }
-        if (refs.btnOpenIntroVideoLocation && refs.btnOpenIntroVideoLocation.dataset.bound !== '1') {
-            refs.btnOpenIntroVideoLocation.dataset.bound = '1';
-            refs.btnOpenIntroVideoLocation.addEventListener('click', function () {
-                var level = getLevel();
-                var intro = level && level.map && level.map.cutscenes && level.map.cutscenes.introVideo;
-                var p = effectiveCutsceneVideoProjectPath(intro);
-                if (!p) {
-                    setStatus('无法定位项目内文件：请使用「上传开场视频」写入 public 目录', 'error');
-                    return;
-                }
-                void revealProjectPathInExplorer(p).catch(function (err) {
-                    setStatus((err && err.message) || '打开资源管理器失败', 'error');
-                });
-            });
-        }
-
-        // 添加波次视频条目
-        if (refs.btnAddWaveVideo) {
-            refs.btnAddWaveVideo.addEventListener('click', function () {
-                var cutscenes = ensureLevelCutscenes();
-                if (!cutscenes) return;
-                if (!Array.isArray(cutscenes.waveVideos)) cutscenes.waveVideos = [];
-                // 找下一个未使用的波次序号
-                var usedWaves = cutscenes.waveVideos.map(function (w) { return w.afterWave; });
-                var nextWave = 1;
-                while (usedWaves.indexOf(nextWave) !== -1) nextWave++;
-                cutscenes.waveVideos.push({ afterWave: nextWave, url: '' });
-                markDirty('已新增波次视频槽');
-                renderCutsceneEditor();
-            });
-        }
-
-        // 波次视频列表：委托处理所有子元素事件
-        if (refs.waveVideoList) {
-            // 波次输入变更
-            refs.waveVideoList.addEventListener('change', function (e) {
-                var target = e.target;
-                var idx = parseInt(target.getAttribute('data-wv-idx') || '', 10);
-                if (isNaN(idx)) return;
-                var cutscenes = ensureLevelCutscenes();
-                if (!cutscenes || !Array.isArray(cutscenes.waveVideos) || !cutscenes.waveVideos[idx]) return;
-                if (target.classList.contains('wv-wave-input')) {
-                    cutscenes.waveVideos[idx].afterWave = Math.max(1, parseInt(target.value, 10) || 1);
-                    markDirty('已更新波次');
-                } else if (target.classList.contains('wv-title-input')) {
-                    var t = target.value.trim();
-                    if (t) { cutscenes.waveVideos[idx].title = t; } else { delete cutscenes.waveVideos[idx].title; }
-                    markDirty('已更新波次视频标题');
-                } else if (target.classList.contains('wv-file-input') && target.files && target.files[0]) {
-                    var fileInner = target.files[0];
-                    var idxInner = parseInt(target.getAttribute('data-wv-idx') || '', 10);
-                    void (async function () {
-                        try {
-                            setStatus('正在上传波次视频 ' + fileInner.name + '…', 'idle');
-                            var up = await uploadVideoFile(fileInner, getLevel());
-                            var cs = ensureLevelCutscenes();
-                            if (cs && Array.isArray(cs.waveVideos) && cs.waveVideos[idxInner]) {
-                                cs.waveVideos[idxInner].url = up.url;
-                                if (up.projectPath) cs.waveVideos[idxInner].projectPath = up.projectPath;
-                                else delete cs.waveVideos[idxInner].projectPath;
-                                markDirty('已上传波次视频');
-                                renderCutsceneEditor();
-                                renderGlobalCutsceneOverview();
-                                setStatus('波次视频已上传', 'idle');
-                            }
-                            target.value = '';
-                        } catch (err) {
-                            target.value = '';
-                            setStatus('波次视频上传失败: ' + err.message, 'error');
-                        }
-                    })();
-                }
-            });
-
-            // 删除波次视频条目
-            refs.waveVideoList.addEventListener('click', function (e) {
-                var btn = e.target.closest('.wv-remove-btn');
-                if (!btn) return;
-                var idx = parseInt(btn.getAttribute('data-wv-idx') || '', 10);
-                if (isNaN(idx)) return;
-                var cutscenes = ensureLevelCutscenes();
-                if (!cutscenes || !Array.isArray(cutscenes.waveVideos)) return;
-                cutscenes.waveVideos.splice(idx, 1);
-                if (cutscenes.waveVideos.length === 0) delete cutscenes.waveVideos;
-                markDirty('已删除波次视频');
-                renderCutsceneEditor();
-            });
-        }
+        _bindCutsceneEditorEvents(refs, cutsceneWorkbenchEnv());
     }
 
     /**
@@ -2599,7 +1358,7 @@ import { renderMap as _renderMap } from './editor/map-render.js';
             } catch (e) {
                 throw new Error('服务器返回非 JSON');
             }
-            rememberEditorAsset(payload, requestBody.resourceKind);
+            _rememberEditorAsset(gameAssetEnv(), payload, requestBody.resourceKind);
             var outA = {
                 url: String(payload.publicUrl || '').trim(),
                 projectPath: String(payload.projectPath || '').trim()
@@ -2641,157 +1400,11 @@ import { renderMap as _renderMap } from './editor/map-render.js';
     }
 
     function renderGameplayEditor() {
-        var cityContext = getGameplayCityContext();
-        var config = cityContext ? ensureCityGameplayConfig(cityContext) : null;
-        if (config) {
-            var preferredTab = pickPreferredGameplayTab(config, activeGameplayTab);
-            if (preferredTab !== activeGameplayTab) {
-                activeGameplayTab = preferredTab;
-                if (refs.gameplayResourceTabs) {
-                    refs.gameplayResourceTabs.querySelectorAll('[data-gameplay-tab]').forEach(function (item) {
-                        item.classList.toggle('active', item.getAttribute('data-gameplay-tab') === activeGameplayTab);
-                    });
-                }
-            }
-        }
-        var collection = config ? config[activeGameplayTab] : [];
-        var keyword = refs.gameplaySearch ? String(refs.gameplaySearch.value || '').trim().toLowerCase() : '';
-        var filtered = collection.filter(function (entry) {
-            if (!keyword) return true;
-            var haystack = [entry.name, entry.id, entry.summary].concat(entry.tags || []).join(' ').toLowerCase();
-            return haystack.indexOf(keyword) !== -1;
-        });
-        if (refs.gameplayCityTitle) refs.gameplayCityTitle.textContent = cityContext ? cityContext.cityName + ' · 卡片/玩法编辑器' : '请选择带城市信息的关卡';
-        if (refs.gameplayCityMeta) refs.gameplayCityMeta.textContent = cityContext ? '当前城市代码：' + cityContext.cityCode + '，保存后会写入该关卡可用卡片、防御塔与城市资源。' : '先在左侧选择一个城市关卡，然后维护该关卡的敌人、防御塔、卡片、角色和技能。';
-        if (refs.gameplayOverviewStats) {
-            refs.gameplayOverviewStats.innerHTML = cityContext
-                ? [
-                    { label: '敌人', value: config.enemies.length },
-                    { label: '防御塔', value: config.towers.length },
-                    { label: '卡片', value: config.cards.length },
-                    { label: '角色', value: config.characters.length },
-                    { label: '技能', value: config.skills.length }
-                ].map(function (card) {
-                    return '<div class="stat-card"><strong>' + escapeHtml(String(card.value)) + '</strong><span>' + escapeHtml(card.label) + '</span></div>';
-                }).join('')
-                : '';
-        }
-        renderGameplayEntryList(filtered, cityContext);
-        renderGameplayForm(filtered, cityContext, config);
-        renderGameplayInspector(cityContext, config, filtered);
-    }
-
-    function getModelsByCategory(category) {
-        var assets = getBrowsableModelAssets();
-        if (category === 'all') return assets;
-        var folder = MODEL_CATEGORY_CONFIG[category] ? MODEL_CATEGORY_CONFIG[category].folder : '';
-        if (!folder) return [];
-        return assets.filter(function (asset) {
-            return getModelAssetCategoryFolder(asset).toLowerCase() === folder.toLowerCase();
-        });
-    }
-
-    function getModelAssetCategoryFolder(asset) {
-        var rel = String(asset && (asset.relativePath || asset.summary || asset.path || asset.publicUrl) || '').replace(/\\/g, '/');
-        rel = rel.replace(/^\/?GameModels\//i, '');
-        rel = rel.replace(/^\/?public\/GameModels\//i, '');
-        var first = rel.split('/').filter(Boolean)[0] || '';
-        if (/^characters?$/i.test(first) || /^charactor$/i.test(first)) return 'Charactor';
-        if (/^buildings?$/i.test(first)) return 'Buildings';
-        if (/^props?$|^terrain$/i.test(first)) return 'Props';
-        if (/^towers?$/i.test(first)) return 'Tower';
-        if (/^enem(y|ies)$/i.test(first)) return 'Enemy';
-        return first;
+        _renderGameplayEditor(refs, gameplayEnv());
     }
 
     function renderModelEditor() {
-        if (activeWorkbench !== 'model') return;
-        var allAssets = getBrowsableModelAssets();
-        var categoryAssets = getModelsByCategory(activeModelCategory);
-        var keyword = refs.modelSearch ? String(refs.modelSearch.value || '').trim().toLowerCase() : '';
-        var filtered = categoryAssets.filter(function (asset) {
-            if (!keyword) return true;
-            var haystack = [asset.name, asset.id, asset.summary, asset.path].join(' ').toLowerCase();
-            return haystack.indexOf(keyword) !== -1;
-        });
-
-        var counts = {};
-        Object.keys(MODEL_CATEGORY_CONFIG).forEach(function (key) {
-            if (key === 'all') {
-                counts[key] = allAssets.length;
-            } else {
-                counts[key] = getModelsByCategory(key).length;
-            }
-        });
-
-        if (refs.modelOverviewStats) {
-            refs.modelOverviewStats.innerHTML = Object.keys(MODEL_CATEGORY_CONFIG).map(function (key) {
-                var cfg = MODEL_CATEGORY_CONFIG[key];
-                return '<div class="stat-card"><strong>' + escapeHtml(String(counts[key] || 0)) + '</strong><span>' + escapeHtml(cfg.label) + '</span></div>';
-            }).join('');
-        }
-
-        if (refs.modelListCount) {
-            refs.modelListCount.textContent = '共 ' + filtered.length + ' 项';
-        }
-
-        if (refs.modelEntryList) {
-            if (!filtered.length) {
-                refs.modelEntryList.innerHTML = '<div class="empty-state">当前分类暂无模型。点击右侧「上传新模型」或扫描 public/GameModels。</div>';
-            } else {
-                if (!selectedModelId || !filtered.some(function (a) { return a.id === selectedModelId; })) {
-                    selectedModelId = filtered[0].id;
-                }
-                refs.modelEntryList.innerHTML = filtered.map(function (asset) {
-                    var active = asset.id === selectedModelId ? ' active' : '';
-                    var cat = String(asset.summary || asset.relativePath || '');
-                    var folder = getModelAssetCategoryFolder(asset);
-                    var matchedKey = Object.keys(MODEL_CATEGORY_CONFIG).find(function (k) {
-                        return k !== 'all' && MODEL_CATEGORY_CONFIG[k].folder.toLowerCase() === folder.toLowerCase();
-                    });
-                    var catLabel = matchedKey ? MODEL_CATEGORY_CONFIG[matchedKey].label : (folder || '未分类');
-                    return [
-                        '<button type="button" class="list-item gameplay-entry-card' + active + '" data-model-id="' + escapeAttr(asset.id) + '">',
-                        '  <strong>' + escapeHtml(asset.name) + '</strong>',
-                        '  <span>' + escapeHtml(cat) + '</span>',
-                        '  <div class="gameplay-entry-meta">',
-                        '    <span class="gameplay-chip">' + escapeHtml(catLabel) + '</span>',
-                        '  </div>',
-                        '</button>'
-                    ].join('');
-                }).join('');
-            }
-        }
-
-        var selected = filtered.find(function (a) { return a.id === selectedModelId; }) || null;
-        renderModelDetail(selected);
-        renderModelInspector(counts);
-    }
-
-    function renderModelDetail(asset) {
-        if (refs.modelDetailTitle) refs.modelDetailTitle.textContent = asset ? asset.name : '模型详情';
-        if (refs.modelDetailMeta) refs.modelDetailMeta.textContent = asset ? '已选择' : '未选择';
-        if (refs.modelDetailName) refs.modelDetailName.value = asset ? asset.name : '';
-        var catLabel = '';
-        if (asset) {
-            var firstDir = getModelAssetCategoryFolder(asset);
-            var matchedKey = Object.keys(MODEL_CATEGORY_CONFIG).find(function (k) {
-                return k !== 'all' && MODEL_CATEGORY_CONFIG[k].folder.toLowerCase() === firstDir.toLowerCase();
-            });
-            catLabel = matchedKey ? MODEL_CATEGORY_CONFIG[matchedKey].label : (firstDir || '未分类');
-        }
-        if (refs.modelDetailCategory) refs.modelDetailCategory.value = catLabel;
-        if (refs.modelDetailPath) refs.modelDetailPath.value = asset ? (asset.path || asset.publicUrl || '') : '';
-
-        if (refs.modelPreviewEmpty) refs.modelPreviewEmpty.classList.toggle('view-hidden', !!asset);
-        if (refs.modelPreviewHost) refs.modelPreviewHost.classList.toggle('view-hidden', !asset);
-        if (refs.modelPreviewMeta) refs.modelPreviewMeta.textContent = asset ? (asset.name + ' · 模型预览') : '未绑定模型';
-
-        if (!asset) {
-            disposeModelAssetPreview();
-            return;
-        }
-        ensureModelAssetPreview(asset.publicUrl || asset.path || '');
+        _renderModelEditor(refs, modelEditorEnv());
     }
 
     function ensureModelAssetPreview(modelUrl) {
@@ -2811,727 +1424,168 @@ import { renderMap as _renderMap } from './editor/map-render.js';
         modelAssetPreviewApi.setAsset(modelUrl);
     }
 
-    function renderModelInspector(counts) {
-        if (!refs.modelInspectorStats) return;
-        refs.modelInspectorStats.innerHTML = Object.keys(MODEL_CATEGORY_CONFIG).map(function (key) {
-            var cfg = MODEL_CATEGORY_CONFIG[key];
-            return [
-                '<button type="button" class="list-item" data-inspector-category="' + escapeAttr(key) + '" style="cursor:pointer">',
-                '  <strong>' + escapeHtml(cfg.label) + '</strong>',
-                '  <span>' + escapeHtml(String(counts[key] || 0)) + ' 个模型</span>',
-                '</button>'
-            ].join('');
-        }).join('');
-
-        refs.modelInspectorStats.querySelectorAll('[data-inspector-category]').forEach(function (btn) {
-            btn.addEventListener('click', function () {
-                activeModelCategory = btn.getAttribute('data-inspector-category') || 'all';
-                selectedModelId = '';
-                if (refs.modelCategoryTabs) {
-                    refs.modelCategoryTabs.querySelectorAll('[data-model-category]').forEach(function (item) {
-                        item.classList.toggle('active', item.getAttribute('data-model-category') === activeModelCategory);
-                    });
-                }
-                renderModelEditor();
-            });
-        });
-    }
-
     async function replaceSelectedModel(file) {
-        var selected = getModelsByCategory(activeModelCategory).find(function (a) { return a.id === selectedModelId; });
-        if (!selected) {
-            setStatus('请先选择一个要替换的模型。', 'error');
-            refs.modelUploadReplace.value = '';
-            return;
-        }
-        var subdir = getModelAssetCategoryFolder(selected);
-        try {
-            setStatus('正在替换模型 ' + file.name + '…', 'idle');
-            var content = await fileToBase64(file);
-            var res = await fetch('/api/game-models/upload', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    name: file.name,
-                    content: content,
-                    subdirectory: subdir
-                })
-            });
-            var resText = await res.text();
-            if (!res.ok) throw new Error(parseFetchErrorBody(res.status, resText));
-            var payload = JSON.parse(resText);
-            await refreshGameModelsCatalog();
-            selectedModelId = '';
-            refs.modelUploadReplace.value = '';
-            markDirty('已替换模型');
-            renderModelEditor();
-            setStatus('模型已替换: ' + String(payload.projectPath || ''), 'success');
-        } catch (error) {
-            refs.modelUploadReplace.value = '';
-            setStatus('模型替换失败: ' + error.message, 'error');
-        }
+        return _replaceSelectedModel(refs, modelEditorEnv(), file);
     }
 
     async function uploadNewModelFromInspector(file) {
-        var category = refs.modelInspectorUploadCategory ? refs.modelInspectorUploadCategory.value : 'Enemy';
-        var nameHint = refs.modelInspectorUploadName ? String(refs.modelInspectorUploadName.value || '').trim() : '';
-        var subdir = String(category || '');
-        var uploadName = nameHint || file.name;
-        try {
-            setStatus('正在上传新模型 ' + uploadName + '…', 'idle');
-            var content = await fileToBase64(file);
-            var res = await fetch('/api/game-models/upload', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    name: uploadName + (file.name.match(/\.[^.]+$/) ? '' : '.glb'),
-                    content: content,
-                    subdirectory: subdir
-                })
-            });
-            var resText = await res.text();
-            if (!res.ok) throw new Error(parseFetchErrorBody(res.status, resText));
-            var payload = JSON.parse(resText);
-            await refreshGameModelsCatalog();
-            if (refs.modelInspectorUploadName) refs.modelInspectorUploadName.value = '';
-            if (refs.modelInspectorUpload) refs.modelInspectorUpload.value = '';
-            activeModelCategory = category;
-            selectedModelId = '';
-            if (refs.modelCategoryTabs) {
-                refs.modelCategoryTabs.querySelectorAll('[data-model-category]').forEach(function (item) {
-                    item.classList.toggle('active', item.getAttribute('data-model-category') === activeModelCategory);
-                });
-            }
-            markDirty('已上传新模型');
-            renderModelEditor();
-            setStatus('新模型已保存: ' + String(payload.projectPath || ''), 'success');
-        } catch (error) {
-            if (refs.modelInspectorUpload) refs.modelInspectorUpload.value = '';
-            setStatus('模型上传失败: ' + error.message, 'error');
-        }
+        return _uploadNewModelFromInspector(refs, modelEditorEnv(), file);
     }
 
-    function closeAllGameplayEntryMenus() {
-        if (!refs.gameplayEntryList) return;
-        refs.gameplayEntryList.querySelectorAll('[data-gameplay-menu-toggle]').forEach(function (btn) {
-            btn.setAttribute('aria-expanded', 'false');
-        });
-        refs.gameplayEntryList.querySelectorAll('.gameplay-entry-menu').forEach(function (menu) {
-            menu.classList.add('view-hidden');
-        });
-    }
-
-    function renderGameplayEntryList(entries, cityContext) {
-        if (!refs.gameplayEntryList) return;
-        if (!cityContext) {
-            refs.gameplayEntryList.innerHTML = '<div class="empty-state">先从左侧选中一个城市关卡，玩法编辑器会自动切到该城市的资源库。</div>';
-            return;
-        }
-        if (!entries.length) {
-            refs.gameplayEntryList.innerHTML = '<div class="empty-state">' + GAMEPLAY_RESOURCE_CONFIG[activeGameplayTab].empty + '</div>';
-            return;
-        }
-        if (!selectedGameplayEntryId || !entries.some(function (entry) { return entry.id === selectedGameplayEntryId; })) {
-            selectedGameplayEntryId = entries[0].id;
-        }
-        refs.gameplayEntryList.innerHTML = entries.map(function (entry) {
-            var thumb = resolveGameplayEntryThumbnail(entry);
-            return [
-                '<div class="list-item gameplay-entry-card' + (entry.id === selectedGameplayEntryId ? ' active' : '') + '">',
-                thumb
-                    ? '  <button type="button" class="gameplay-entry-thumb-btn" data-gameplay-select-id="' + escapeAttr(entry.id) + '" title="选择此条目">'
-                        + '<img class="gameplay-asset-thumb" src="' + escapeAttr(thumb) + '" alt="' + escapeAttr(entry.name) + '">'
-                        + '</button>'
-                    : '',
-                '  <div class="gameplay-entry-main">',
-                '    <div class="gameplay-entry-title-row">',
-                '      <button type="button" class="gameplay-entry-select" data-gameplay-select-id="' + escapeAttr(entry.id) + '">' + escapeHtml(entry.name) + '</button>',
-                '      <div class="gameplay-entry-menu-anchor">',
-                '        <button type="button" class="mini-button gameplay-entry-ops-btn" data-gameplay-menu-toggle aria-expanded="false">操作</button>',
-                '        <div class="gameplay-entry-menu view-hidden" role="menu">',
-                '          <button type="button" role="menuitem" class="gameplay-entry-menu-item" data-gameplay-action="move-up" data-gameplay-entry-id="' + escapeAttr(entry.id) + '">上移</button>',
-                '          <button type="button" role="menuitem" class="gameplay-entry-menu-item" data-gameplay-action="move-down" data-gameplay-entry-id="' + escapeAttr(entry.id) + '">下移</button>',
-                '          <button type="button" role="menuitem" class="gameplay-entry-menu-item" data-gameplay-action="duplicate" data-gameplay-entry-id="' + escapeAttr(entry.id) + '">复制</button>',
-                '          <button type="button" role="menuitem" class="gameplay-entry-menu-item danger" data-gameplay-action="delete" data-gameplay-entry-id="' + escapeAttr(entry.id) + '">删除</button>',
-                '        </div>',
-                '      </div>',
-                '    </div>',
-                '    <span class="gameplay-entry-summary">' + escapeHtml(entry.summary || '未填写简介') + '</span>',
-                '    <div class="gameplay-entry-meta">',
-                '      <span class="gameplay-chip">' + escapeHtml(entry.rarity || 'common') + '</span>',
-                '      <span class="gameplay-chip">' + escapeHtml((entry.tags || []).join(' / ') || cityContext.cityName) + '</span>',
-                entry.placement ? '      <span class="gameplay-chip">' + escapeHtml(gameplayPlacementLabel(entry.placement)) + '</span>' : '',
-                '    </div>',
-                '  </div>',
-                '</div>'
-            ].join('');
-        }).join('');
-    }
-
-    function renderGameplayForm(entries, cityContext) {
-        var entry = getSelectedGameplayEntry(entries);
-        var disabled = !entry;
-        if (refs.gameplayEditorTitle) refs.gameplayEditorTitle.textContent = entry ? entry.name : (GAMEPLAY_RESOURCE_CONFIG[activeGameplayTab].label + '详情');
-        if (refs.gameplayEditorHint) refs.gameplayEditorHint.textContent = cityContext ? cityContext.cityName + ' · ' + GAMEPLAY_RESOURCE_CONFIG[activeGameplayTab].label : '城市玩法配置';
-        if (refs.gameplayName) refs.gameplayName.value = entry ? entry.name : '';
-        if (refs.gameplayId) refs.gameplayId.value = entry ? entry.id : '';
-        if (refs.gameplayTags) refs.gameplayTags.value = entry ? (entry.tags || []).join(', ') : '';
-        if (refs.gameplayRarity) refs.gameplayRarity.value = entry ? entry.rarity : '';
-        if (refs.gameplaySummary) refs.gameplaySummary.value = entry ? entry.summary : '';
-        [refs.gameplayName, refs.gameplayId, refs.gameplayTags, refs.gameplayRarity, refs.gameplaySummary].forEach(function (field) {
-            if (field) field.disabled = disabled;
-        });
-        setGameplayEntryActionButtons(disabled, entries, entry);
-        if (refs.gameplayStatGrid) {
-            var statsHtml = GAMEPLAY_RESOURCE_CONFIG[activeGameplayTab].stats.map(function (field) {
-                var value = entry && entry.stats ? entry.stats[field.key] : '';
-                return [
-                    '<label class="field-block">',
-                    '  <span>' + escapeHtml(field.label) + '</span>',
-                    '  <input type="number" data-gameplay-stat="' + escapeAttr(field.key) + '" step="' + escapeAttr(field.step) + '" value="' + escapeAttr(value === '' || value == null ? '' : String(value)) + '"' + (disabled ? ' disabled' : '') + '>',
-                    '</label>'
-                ].join('');
-            }).join('');
-            var placementHtml = activeGameplayTab === 'characters' || activeGameplayTab === 'towers'
-                ? [
-                    '<label class="field-block">',
-                    '  <span>部署位置</span>',
-                    '  <select data-gameplay-placement' + (disabled ? ' disabled' : '') + '>',
-                    '    <option value="roadside"' + (!entry || entry.placement !== 'road' ? ' selected' : '') + '>道路两侧</option>',
-                    '    <option value="road"' + (entry && entry.placement === 'road' ? ' selected' : '') + '>道路上</option>',
-                    '  </select>',
-                    '</label>'
-                ].join('')
-                : '';
-            refs.gameplayStatGrid.innerHTML = statsHtml + placementHtml;
-        }
-    }
-
-    function renderGameplayInspector(cityContext, config, entries) {
-        var entry = getSelectedGameplayEntry(entries);
-        var assetType = refs.gameplayAssetType ? refs.gameplayAssetType.value : GAMEPLAY_RESOURCE_CONFIG[activeGameplayTab].assetType;
-        var assets = cityContext ? getGameplayAssets(cityContext, assetType) : [];
-        if (refs.gameplayAssetType && (!refs.gameplayAssetType.value || refs.gameplayAssetType.value === '')) {
-            refs.gameplayAssetType.value = GAMEPLAY_RESOURCE_CONFIG[activeGameplayTab].assetType;
-        }
-        if (refs.gameplayAssetName && !refs.gameplayAssetName.value && entry) refs.gameplayAssetName.value = entry.name;
-        if (refs.gameplayInspectorMeta) refs.gameplayInspectorMeta.textContent = cityContext ? '当前城市：' + cityContext.cityName + '（' + cityContext.cityCode + '）' : '先从左侧关卡树选择一个城市关卡，再在这里维护该关卡的敌人、防御塔、卡片、角色和技能。';
-        if (refs.gameplaySelectionMeta) {
-            refs.gameplaySelectionMeta.innerHTML = cityContext ? [
-                '<div class="list-item"><strong>城市代码</strong><span>' + escapeHtml(cityContext.cityCode) + '</span></div>',
-                '<div class="gameplay-inspector-counts" role="group" aria-label="敌人、防御塔、卡片、角色、技能数量">',
-                [['敌人', config.enemies.length], ['防御塔', config.towers.length], ['卡片', config.cards.length], ['角色', config.characters.length], ['技能', config.skills.length]].map(function (pair) {
-                    return '<span class="gic-chip"><strong>' + String(pair[1]) + '</strong><span>' + escapeHtml(pair[0]) + '</span></span>';
-                }).join(''),
-                '</div>',
-                '<div class="list-item"><strong>当前选择</strong><span>' + escapeHtml(entry ? entry.name : '未选择条目') + '</span></div>',
-                '<div class="list-item"><strong>模型 / 图片</strong><span>' + escapeHtml(entry ? String(entry.assetRefs.modelPath || '未绑定') + ' / ' + String(entry.assetRefs.imagePath || '未绑定') : '未绑定') + '</span></div>'
-            ].join('') : '<div class="empty-state">没有可编辑的城市。</div>';
-        }
-        if (!refs.gameplayAssetList) return;
-        if (!cityContext) {
-            refs.gameplayAssetList.innerHTML = '<div class="empty-state">请选择城市后再上传资源。</div>';
-            renderGameplayAssetPreview(null, entry);
-            return;
-        }
-        if (!assets.length) {
-            refs.gameplayAssetList.innerHTML = '<div class="empty-state">当前分类下还没有项目资源。上传后会写入 public/Arts/' + escapeHtml(assetType) + '/' + escapeHtml(cityContext.cityName) + '/</div>';
-            renderGameplayAssetPreview(null, entry);
-            return;
-        }
-        refs.gameplayAssetList.innerHTML = assets.map(function (asset) {
-            var isImage = isImageAssetPath(asset.publicUrl || asset.path);
-            return [
-                '<div class="list-item gameplay-asset-card' + (asset.id === selectedGameplayAssetId ? ' active' : '') + '" data-asset-preview-id="' + escapeAttr(asset.id) + '">',
-                isImage ? '  <img class="gameplay-asset-thumb" src="' + escapeAttr(asset.publicUrl || asset.path) + '" alt="' + escapeAttr(asset.name) + '">' : '',
-                '  <div class="gameplay-asset-kind">' + escapeHtml(asset.resourceKind || asset.assetType) + '</div>',
-                '  <strong>' + escapeHtml(asset.name) + '</strong>',
-                '  <span>' + escapeHtml(asset.summary || asset.publicUrl || asset.path) + '</span>',
-                '  <code>' + escapeHtml(asset.path || asset.projectPath || '') + '</code>',
-                '  <div class="inline-controls">',
-                '    <button type="button" class="mini-button" data-asset-id="' + escapeAttr(asset.id) + '" data-asset-bind="modelPath">绑定模型</button>',
-                '    <button type="button" class="mini-button" data-asset-id="' + escapeAttr(asset.id) + '" data-asset-bind="imagePath">绑定图片</button>',
-                '  </div>',
-                '</div>'
-            ].join('');
-        }).join('');
-        renderGameplayAssetPreview(getSelectedGameplayAsset(entry, assets), entry);
-        renderExploreGameplayPanels();
+    function previewLayerEnv() {
+        return {
+            getViewportViewMode: function () {
+                return viewportViewMode;
+            },
+            getPreviewApi: function () {
+                return previewApi;
+            },
+            setPreviewApi: function (api) {
+                previewApi = api;
+            },
+            getPreviewInitGeneration: function () {
+                return previewInitGeneration;
+            },
+            bumpPreviewInitGenerationForInit: function () {
+                previewInitGeneration += 1;
+                return previewInitGeneration;
+            },
+            bumpPreviewInitGenerationForDispose: function () {
+                previewInitGeneration += 1;
+            },
+            clearPreviewRefreshTimer: function () {
+                clearTimeout(previewRefreshTimer);
+            },
+            setPreviewRefreshTimer: function (id) {
+                previewRefreshTimer = id;
+            },
+            getSelectedObject: function () {
+                return selectedObject;
+            },
+            setSelectedObject: function (value) {
+                selectedObject = value;
+            },
+            getActiveWorkbench: function () {
+                return activeWorkbench;
+            },
+            getActiveTool: function () {
+                return activeTool;
+            },
+            getActiveEditorMode: function () {
+                return activeEditorMode;
+            },
+            getGeoMappingEnabled: function () {
+                return geoMappingEnabled;
+            },
+            getLevel: getLevel,
+            getPreviewCatalog: function () {
+                return state
+                    ? {
+                          modelAssets: (state.catalog && state.catalog.modelAssets) || [],
+                          editorAssetsCatalog: state.editorAssetsCatalog || [],
+                          gameModels: normalizeGameModelsForCatalog()
+                      }
+                    : { modelAssets: [], editorAssetsCatalog: [], gameModels: [] };
+            },
+            findActorTemplate: findActorTemplate,
+            getBrowsableModelAssets: getBrowsableModelAssets,
+            placeActorFromTemplate: placeActorFromTemplate,
+            applyWorldHitToActor: applyWorldHitToActor,
+            markDirty: markDirty,
+            setStatus: setStatus,
+            renderSelectionInspector: renderSelectionInspector,
+            renderMap: renderMap,
+            renderPreviewSceneOutline: renderPreviewSceneOutline,
+            renderOverview: renderOverview,
+            renderAll: renderAll,
+            renderContentBrowser: renderContentBrowser
+        };
     }
 
     function schedulePreviewRefresh() {
-        if (viewportViewMode !== 'preview') return;
-        clearTimeout(previewRefreshTimer);
-        previewRefreshTimer = setTimeout(function () {
-            refreshPreviewNow();
-        }, 80);
+        _schedulePreviewRefresh(previewLayerEnv());
     }
 
     function refreshPreviewNow() {
-        if (viewportViewMode !== 'preview' || !previewApi || typeof previewApi.refresh !== 'function') return;
-        if (typeof previewApi.resize === 'function') previewApi.resize();
-        var sid = selectedObject && selectedObject.kind === 'actor' ? selectedObject.id : null;
-        previewApi.refresh({ preserveView: true, selectActorId: sid });
+        _refreshPreviewNow(previewLayerEnv());
     }
 
     function syncViewportPanels() {
-        var board = viewportViewMode === 'board';
-        var levelPreviewShown = !board && (activeWorkbench === 'level' || activeWorkbench === 'theme');
-        if (refs.boardViewport) refs.boardViewport.classList.toggle('view-hidden', !board);
-        if (refs.previewStageWrap) {
-            refs.previewStageWrap.classList.toggle('view-hidden', board);
-            refs.previewStageWrap.setAttribute('aria-hidden', board ? 'true' : 'false');
-        }
-        if (refs.editorToolRibbon) refs.editorToolRibbon.classList.toggle('view-hidden', !board);
-        if (refs.mapStageWrap) refs.mapStageWrap.classList.toggle('map-stage-wrap--level-preview', levelPreviewShown);
-        updateStageHintText();
-        if (!board && previewApi && typeof previewApi.resize === 'function') {
-            previewApi.resize();
-        }
-        renderPreviewSceneOutline();
+        _syncViewportPanels(refs, previewLayerEnv());
     }
 
     function updateStageHintText() {
-        if (!refs.stageHintExtra) return;
-        if (viewportViewMode === 'preview') {
-            refs.stageHintExtra.textContent =
-                '鼠标左键拖拽旋转场景，滚轮缩放，右键平移；左键点中 Actor（或拖拽 Gizmo：移动·旋转·缩放）会优先编辑对象。Esc 取消选择；F 聚焦所选 Actor；顶部「内容浏览器」或 Ctrl+空格 弹出项目模型（可拖拽缩放窗口），卡片拖入三维场景；右侧「关卡内容浏览器」可点选并按 Delete；Inspector 可精确数值。';
-            return;
-        }
-        if (activeTool === 'boardImage') {
-            refs.stageHintExtra.textContent =
-                '拖入配图到棋盘；图层叠在格子上方、路径与标记手柄之下。棋盘配图工具下拖拽移动，四角/四边手柄或滚轮调宽度；右侧「棋盘配图」可排序与删除；Esc 取消选中。亦可切到「选择/拖拽」后点选配图编辑。';
-            return;
-        }
-        refs.stageHintExtra.textContent =
-            '点击格子放置道路/障碍等；拖拽移动 Actor。「选择/拖拽」下仍可点选棋盘配图并用边角手柄调整大小；配图列表在画布右侧；Esc 取消配图选中后再点格子以避免误拖图层。';
+        _updateStageHintText(refs, previewLayerEnv());
     }
 
     function initPreviewLayer() {
-        if (previewApi || !refs.previewHost) return;
-        var gen = (previewInitGeneration += 1);
-        import('./level-editor-preview.js')
-            .then(function (mod) {
-                if (gen !== previewInitGeneration || viewportViewMode !== 'preview') return;
-                previewApi = mod.createPreview({
-                    host: refs.previewHost,
-                    getLevel: getLevel,
-                    getGeoMappingEnabled: function () {
-                        return geoMappingEnabled;
-                    },
-                    getActiveEditorMode: function () {
-                        return activeEditorMode;
-                    },
-                    getCatalog: function () {
-                        return state
-                            ? {
-                                  modelAssets: (state.catalog && state.catalog.modelAssets) || [],
-                                  editorAssetsCatalog: state.editorAssetsCatalog || [],
-                                  gameModels: normalizeGameModelsForCatalog()
-                              }
-                            : { modelAssets: [], editorAssetsCatalog: [], gameModels: [] };
-                    },
-                    onSelectActor: onPreviewSelectActor,
-                    onActorModified: onPreviewActorCommitted,
-                    onDropCatalogModel: onDropCatalogModelInPreview,
-                    onDropActorTemplate: onDropActorTemplateInPreview,
-                    onTransformModeChange: setPreviewToolbarMode
-                });
-                setPreviewToolbarMode('translate');
-                var initSel = selectedObject && selectedObject.kind === 'actor' ? selectedObject.id : null;
-                previewApi.refresh({ preserveView: false, selectActorId: initSel });
-                renderContentBrowser();
-                renderPreviewSceneOutline();
-            })
-            .catch(function (err) {
-                console.error(err);
-                setStatus('预览模块加载失败：请确认通过 http(s) 打开本页并能访问 CDN。', 'error');
-            });
+        _initPreviewLayer(refs, previewLayerEnv());
     }
 
     function disposePreviewLayer() {
-        previewInitGeneration += 1;
-        clearTimeout(previewRefreshTimer);
-        if (!previewApi) return;
-        try {
-            previewApi.dispose();
-        } catch (e) {
-            console.warn('[Preview]', e);
-        }
-        previewApi = null;
-    }
-
-    function onPreviewSelectActor(actorId) {
-        if (actorId) selectedObject = { kind: 'actor', id: actorId };
-        else selectedObject = null;
-        renderSelectionInspector();
-        renderMap();
-        renderPreviewSceneOutline();
-    }
-
-    function onPreviewActorCommitted() {
-        markDirty('已更新 Actor 变换');
-        renderSelectionInspector();
-        renderMap();
-        renderPreviewSceneOutline();
-        renderOverview();
-    }
-
-    function onDropCatalogModelInPreview(payload) {
-        var level = getLevel();
-        if (!level || !payload || !payload.assetId) return;
-        var template = findActorTemplate('explore-item');
-        if (!template || !template.id) {
-            setStatus('无法放置模型：缺少可用 Actor 模板（explore-item）。', 'error');
-            return;
-        }
-        var asset = getBrowsableModelAssets().find(function (item) { return item.id === payload.assetId; });
-        var col = Math.floor(level.map.grid.cols / 2);
-        var row = Math.floor(level.map.grid.rows / 2);
-        placeActorFromTemplate(template.id, col, row);
-        var actor = level.map.actors[level.map.actors.length - 1];
-        actor.modelId = payload.assetId;
-        actor.modelPath = asset ? asset.path || asset.publicUrl || '' : '';
-        applyWorldHitToActor(actor, payload.worldX, payload.worldY, payload.worldZ);
-        selectedObject = { kind: 'actor', id: actor.id };
-        markDirty('已在预览中放置模型');
-        renderAll();
-        refreshPreviewNow();
-    }
-
-    function onDropActorTemplateInPreview(payload) {
-        var level = getLevel();
-        if (!level || !payload || !payload.templateId) return;
-        var col = Math.floor(level.map.grid.cols / 2);
-        var row = Math.floor(level.map.grid.rows / 2);
-        placeActorFromTemplate(payload.templateId, col, row);
-        var actor = level.map.actors[level.map.actors.length - 1];
-        var wx =
-            payload.worldX != null && Number.isFinite(Number(payload.worldX))
-                ? Number(payload.worldX)
-                : (level.map.grid.cols / 2 - 0.5) * (level.map.grid.tileSize || 2);
-        var wy = payload.worldY != null && Number.isFinite(Number(payload.worldY)) ? Number(payload.worldY) : 0;
-        var wz =
-            payload.worldZ != null && Number.isFinite(Number(payload.worldZ))
-                ? Number(payload.worldZ)
-                : (level.map.grid.rows / 2 - 0.5) * (level.map.grid.tileSize || 2);
-        applyWorldHitToActor(actor, wx, wy, wz);
-        selectedObject = { kind: 'actor', id: actor.id };
-        markDirty('已在预览中放置 Actor');
-        renderAll();
-        refreshPreviewNow();
+        _disposePreviewLayer(previewLayerEnv());
     }
 
     function setPreviewToolbarMode(mode) {
-        if (!refs.previewGizmoTranslate) return;
-        var map = [
-            ['translate', refs.previewGizmoTranslate],
-            ['rotate', refs.previewGizmoRotate],
-            ['scale', refs.previewGizmoScale]
-        ];
-        map.forEach(function (entry) {
-            if (!entry[1]) return;
-            entry[1].classList.toggle('active', entry[0] === mode);
-        });
-        if (previewApi && typeof previewApi.setTransformMode === 'function') previewApi.setTransformMode(mode);
+        _setPreviewToolbarMode(refs, previewLayerEnv(), mode);
+    }
+
+    function contentBrowserEnv() {
+        return {
+            getState: function () {
+                return state;
+            },
+            getActiveWorkbench: function () {
+                return activeWorkbench;
+            },
+            getBrowsableModelAssets: getBrowsableModelAssets,
+            getSelectedContentBrowserAssetId: function () {
+                return selectedContentBrowserAssetId;
+            },
+            setSelectedContentBrowserAssetId: function (value) {
+                selectedContentBrowserAssetId = value || '';
+            },
+            getContentBrowserMiniApi: function () {
+                return contentBrowserMiniApi;
+            },
+            setContentBrowserMiniApi: function (api) {
+                contentBrowserMiniApi = api;
+            },
+            clearContentBrowserFloatGeomTimer: function () {
+                clearTimeout(contentBrowserFloatGeomTimer);
+                contentBrowserFloatGeomTimer = null;
+            },
+            setContentBrowserFloatGeomTimer: function (id) {
+                contentBrowserFloatGeomTimer = id;
+            },
+            disconnectContentBrowserFloatRo: function () {
+                if (contentBrowserFloatRo) contentBrowserFloatRo.disconnect();
+                contentBrowserFloatRo = null;
+            },
+            setContentBrowserFloatRo: function (ro) {
+                contentBrowserFloatRo = ro;
+            }
+        };
     }
 
     function isContentBrowserFloatOpen() {
-        return refs.contentBrowserFloatPanel && !refs.contentBrowserFloatPanel.classList.contains('view-hidden');
-    }
-
-    function persistContentBrowserFloatGeometry() {
-        if (!refs.contentBrowserFloatPanel || !isContentBrowserFloatOpen()) return;
-        var el = refs.contentBrowserFloatPanel;
-        var r = el.getBoundingClientRect();
-        try {
-            window.localStorage.setItem(
-                CONTENT_BROWSER_FLOAT_GEOM_KEY,
-                JSON.stringify({
-                    left: Math.round(r.left),
-                    top: Math.round(r.top),
-                    width: Math.round(el.offsetWidth),
-                    height: Math.round(el.offsetHeight)
-                })
-            );
-        } catch (_e) {}
-    }
-
-    function schedulePersistContentBrowserFloatGeometry() {
-        clearTimeout(contentBrowserFloatGeomTimer);
-        contentBrowserFloatGeomTimer = setTimeout(persistContentBrowserFloatGeometry, 220);
+        return _isContentBrowserFloatOpen(refs);
     }
 
     function clampContentBrowserFloatPanelIntoViewport() {
-        var p = refs.contentBrowserFloatPanel;
-        if (!p || !isContentBrowserFloatOpen()) return;
-        var w = clampContentBrowserGeom(p.offsetWidth, 380, Math.max(400, window.innerWidth - 16));
-        var h = clampContentBrowserGeom(p.offsetHeight, 280, Math.max(300, window.innerHeight - 80));
-        p.style.width = w + 'px';
-        p.style.height = h + 'px';
-        var r = p.getBoundingClientRect();
-        var maxL = Math.max(8, window.innerWidth - w - 8);
-        var maxT = Math.max(8, window.innerHeight - h - 72);
-        p.style.left = clampContentBrowserGeom(r.left, 8, maxL) + 'px';
-        p.style.top = clampContentBrowserGeom(r.top, 8, maxT) + 'px';
-        schedulePersistContentBrowserFloatGeometry();
-    }
-
-    function applyContentBrowserFloatGeometryFromStorage() {
-        var raw = '';
-        try {
-            raw = window.localStorage.getItem(CONTENT_BROWSER_FLOAT_GEOM_KEY) || '';
-        } catch (_e) {
-            raw = '';
-        }
-        var p = refs.contentBrowserFloatPanel;
-        if (!p || !raw) return false;
-        var o;
-        try {
-            o = JSON.parse(raw);
-        } catch (_e) {
-            return false;
-        }
-        if (
-            typeof o.left !== 'number' ||
-            typeof o.top !== 'number' ||
-            typeof o.width !== 'number' ||
-            typeof o.height !== 'number' ||
-            !Number.isFinite(o.width) ||
-            !Number.isFinite(o.height)
-        )
-            return false;
-        var w = clampContentBrowserGeom(o.width, 380, Math.max(400, window.innerWidth - 16));
-        var h = clampContentBrowserGeom(o.height, 280, Math.max(300, window.innerHeight - 80));
-        var maxL = Math.max(8, window.innerWidth - w - 8);
-        var maxT = Math.max(8, window.innerHeight - h - 72);
-        p.style.right = 'auto';
-        p.style.bottom = 'auto';
-        p.style.left = clampContentBrowserGeom(o.left, 8, maxL) + 'px';
-        p.style.top = clampContentBrowserGeom(o.top, 8, maxT) + 'px';
-        p.style.width = w + 'px';
-        p.style.height = h + 'px';
-        return true;
-    }
-
-    function observeContentBrowserFloatResize() {
-        if (!refs.contentBrowserFloatPanel || typeof ResizeObserver === 'undefined') return;
-        if (contentBrowserFloatRo) contentBrowserFloatRo.disconnect();
-        contentBrowserFloatRo = new ResizeObserver(function () {
-            schedulePersistContentBrowserFloatGeometry();
-            if (contentBrowserMiniApi && typeof contentBrowserMiniApi.resize === 'function') {
-                window.requestAnimationFrame(function () {
-                    contentBrowserMiniApi.resize();
-                });
-            }
-        });
-        contentBrowserFloatRo.observe(refs.contentBrowserFloatPanel);
+        _clampContentBrowserFloatPanelIntoViewport(refs, contentBrowserEnv());
     }
 
     function toggleContentBrowserFloat(optOpen) {
-        var p = refs.contentBrowserFloatPanel;
-        if (!p || activeWorkbench !== 'level') return;
-        var open = typeof optOpen === 'boolean' ? optOpen : !isContentBrowserFloatOpen();
-        p.classList.toggle('view-hidden', !open);
-        p.setAttribute('aria-hidden', open ? 'false' : 'true');
-        if (refs.btnOpenContentBrowserFloat)
-            refs.btnOpenContentBrowserFloat.setAttribute('aria-pressed', open ? 'true' : 'false');
-        if (!open) {
-            schedulePersistContentBrowserFloatGeometry();
-            return;
-        }
-        applyContentBrowserFloatGeometryFromStorage();
-        observeContentBrowserFloatResize();
-        window.requestAnimationFrame(function () {
-            renderContentBrowser();
-            if (contentBrowserMiniApi && typeof contentBrowserMiniApi.resize === 'function') contentBrowserMiniApi.resize();
-        });
+        _toggleContentBrowserFloat(refs, contentBrowserEnv(), optOpen);
     }
 
     function wireContentBrowserFloating() {
-        if (refs.btnOpenContentBrowserFloat) {
-            refs.btnOpenContentBrowserFloat.addEventListener('click', function () {
-                toggleContentBrowserFloat();
-            });
-        }
-        if (refs.contentBrowserFloatClose) {
-            refs.contentBrowserFloatClose.addEventListener('click', function () {
-                toggleContentBrowserFloat(false);
-            });
-        }
-        var panel = refs.contentBrowserFloatPanel;
-        var handle = refs.contentBrowserFloatDragHandle;
-        if (!panel || !handle) return;
-        var drag = false;
-        var sx = 0;
-        var sy = 0;
-        var sl = 0;
-        var st = 0;
-        handle.addEventListener(
-            'pointerdown',
-            function (ev) {
-                if (ev.button !== 0) return;
-                if (ev.target.closest && ev.target.closest('button')) return;
-                drag = true;
-                handle.setPointerCapture(ev.pointerId);
-                var r = panel.getBoundingClientRect();
-                sx = ev.clientX;
-                sy = ev.clientY;
-                sl = r.left;
-                st = r.top;
-                panel.style.left = sl + 'px';
-                panel.style.top = st + 'px';
-                panel.style.right = 'auto';
-            },
-            { passive: true }
-        );
-        handle.addEventListener(
-            'pointermove',
-            function (ev) {
-                if (!drag) return;
-                var nx = sl + (ev.clientX - sx);
-                var ny = st + (ev.clientY - sy);
-                var maxL = Math.max(8, window.innerWidth - panel.offsetWidth - 8);
-                var maxT = Math.max(8, window.innerHeight - panel.offsetHeight - 72);
-                panel.style.left = Math.min(Math.max(8, nx), maxL) + 'px';
-                panel.style.top = Math.min(Math.max(8, ny), maxT) + 'px';
-            },
-            { passive: true }
-        );
-        function endDrag(ev) {
-            if (!drag) return;
-            drag = false;
-            try {
-                handle.releasePointerCapture(ev.pointerId);
-            } catch (_e) {}
-            schedulePersistContentBrowserFloatGeometry();
-        }
-        handle.addEventListener('pointerup', endDrag);
-        handle.addEventListener('pointercancel', endDrag);
+        _wireContentBrowserFloating(refs, contentBrowserEnv());
     }
 
     function renderContentBrowser() {
-        var list = refs.contentBrowserList;
-        if (!list || !state) return;
-        var assets = getBrowsableModelAssets();
-        if (!assets.length) {
-            selectedContentBrowserAssetId = '';
-            list.innerHTML =
-                '<div class="empty-state">暂无模型。将 .glb/.gltf 放进项目 <code>public/GameModels/</code> 或使用右侧「上传模型」，在「内容浏览器」窗口中点「刷新」。</div>';
-            showContentBrowserMiniPreview('');
-            return;
-        }
-
-        if (selectedContentBrowserAssetId && !assets.some(function (a) { return a.id === selectedContentBrowserAssetId; })) {
-            selectedContentBrowserAssetId = '';
-        }
-
-        list.innerHTML = assets
-            .map(function (asset) {
-                var active = asset.id === selectedContentBrowserAssetId ? ' content-browser-chip--active' : '';
-                return [
-                    '<div class="content-browser-chip' +
-                        active +
-                        '" draggable="true" data-asset-chip="' +
-                        escapeAttr(asset.id) +
-                        '" data-preview-url="' +
-                        escapeAttr(asset.path || asset.publicUrl || '') +
-                        '">',
-                    '  <div class="content-browser-chip-icon">' + escapeHtml(asset.name.slice(0, 2).toUpperCase()) + '</div>',
-                    '  <div class="content-browser-chip-meta">',
-                    '    <strong>' + escapeHtml(asset.name || asset.id) + '</strong>',
-                    '    <span>' + escapeHtml(asset.summary || asset.path || asset.publicUrl || 'GameModels') + '</span>',
-                    '  </div>',
-                    '</div>'
-                ].join('');
-            })
-            .join('');
-
-        list.querySelectorAll('[data-asset-chip]').forEach(function (chip) {
-            chip.addEventListener('dragstart', function (event) {
-                var id = chip.getAttribute('data-asset-chip');
-                var asset = assets.find(function (a) {
-                    return a.id === id;
-                });
-                var name = asset ? asset.name || id : id || '';
-                var modelPath = asset ? asset.path || asset.publicUrl || '' : '';
-                var payloadJson = JSON.stringify({
-                    kind: 'catalogModel',
-                    assetId: id,
-                    id: id,
-                    name: name,
-                    modelPath: modelPath
-                });
-                if (typeof window !== 'undefined') {
-                    window.__egCatalogDragMeta = { assetId: id, name: name, modelPath: modelPath };
-                }
-                if (event.dataTransfer) {
-                    event.dataTransfer.setData('application/json', payloadJson);
-                    /* 部分环境与浏览器对自定义 MIME 的 getData 不稳定，mirror 一份到 text/plain 供 Inspector 接住 */
-                    event.dataTransfer.setData('text/plain', payloadJson);
-                    event.dataTransfer.effectAllowed = 'copy';
-                }
-            });
-            chip.addEventListener('dragend', function () {
-                if (typeof window !== 'undefined') window.__egCatalogDragMeta = null;
-            });
-            chip.addEventListener('click', function (event) {
-                if (event.target && event.target.closest && event.target.closest('a')) return;
-                selectedContentBrowserAssetId = chip.getAttribute('data-asset-chip') || '';
-                list.querySelectorAll('[data-asset-chip]').forEach(function (c) {
-                    c.classList.toggle('content-browser-chip--active', c.getAttribute('data-asset-chip') === selectedContentBrowserAssetId);
-                });
-                showContentBrowserMiniPreview(chip.getAttribute('data-preview-url') || '');
-            });
-        });
-
-        if (!selectedContentBrowserAssetId && assets[0]) {
-            selectedContentBrowserAssetId = assets[0].id;
-            list.querySelectorAll('[data-asset-chip]').forEach(function (c) {
-                c.classList.toggle('content-browser-chip--active', c.getAttribute('data-asset-chip') === selectedContentBrowserAssetId);
-            });
-            showContentBrowserMiniPreview(assets[0].path || assets[0].publicUrl || '');
-        } else if (selectedContentBrowserAssetId) {
-            var cur = assets.find(function (a) {
-                return a.id === selectedContentBrowserAssetId;
-            });
-            showContentBrowserMiniPreview(cur ? cur.path || cur.publicUrl || '' : '');
-        }
-    }
-
-    function showContentBrowserMiniPreview(url) {
-        var host = refs.contentBrowserPreviewHost;
-        if (!host) return;
-        if (!url) {
-            if (contentBrowserMiniApi && typeof contentBrowserMiniApi.dispose === 'function') {
-                contentBrowserMiniApi.dispose();
-            }
-            contentBrowserMiniApi = null;
-            host.innerHTML =
-                '<div class="empty-state content-browser-mini-empty">在「内容浏览器」窗口中选择模型卡片，或拖拽到关卡预览场景。</div>';
-            return;
-        }
-        if (!isContentBrowserFloatOpen()) {
-            if (contentBrowserMiniApi && typeof contentBrowserMiniApi.dispose === 'function') {
-                contentBrowserMiniApi.dispose();
-            }
-            contentBrowserMiniApi = null;
-            host.innerHTML =
-                '<div class="empty-state content-browser-mini-empty">按工具条「内容浏览器」或 Ctrl+空格 打开窗口后查看三维预览。</div>';
-            return;
-        }
-        import('./content-browser-model-preview.js')
-            .then(function (mod) {
-                if (!refs.contentBrowserPreviewHost) return;
-                if (contentBrowserMiniApi && typeof contentBrowserMiniApi.dispose === 'function') {
-                    contentBrowserMiniApi.dispose();
-                }
-                contentBrowserMiniApi = mod.createContentBrowserMiniPreview({ host: refs.contentBrowserPreviewHost });
-                return contentBrowserMiniApi.setUrl(url);
-            })
-            .catch(function (e) {
-                console.warn('[ContentBrowser preview]', e);
-            });
+        _renderContentBrowser(refs, contentBrowserEnv());
     }
 
     function wireViewportViewMode(next) {
@@ -3546,6 +1600,7 @@ import { renderMap as _renderMap } from './editor/map-render.js';
         disposePreviewLayer();
         if (next === 'preview') initPreviewLayer();
         syncViewportPanels();
+        syncEditorCtx();
     }
 
     function getBrowsableModelAssets() {
@@ -3707,89 +1762,7 @@ import { renderMap as _renderMap } from './editor/map-render.js';
     }
 
     function handleCellAction(col, row) {
-        var level = getLevel();
-        if (!level) return;
-        if (activeTool === 'boardImage') {
-            return;
-        }
-        if (activeTool === 'select') {
-            selectedObject = null;
-            renderSelectionInspector();
-            renderMap();
-            return;
-        }
-        if (activeEditorMode === 'explore') {
-            var exploreLayout = ensureExplorationLayout(level.map);
-            if (activeTool === 'road' || activeTool === 'path') toggleCell(exploreLayout.path, col, row);
-            if (activeTool === 'obstacle') toggleCell(exploreLayout.obstacles, col, row);
-            if (activeTool === 'spawn') setExploreStartPoint(col, row);
-            if (activeTool === 'objective') setExploreExitPoint(col, row);
-            if (activeTool === 'buildSlot') addExplorePoint(col, row);
-            if (activeTool === 'safeZone') {
-                if (!Array.isArray(exploreLayout.safeZones)) exploreLayout.safeZones = [];
-                toggleCell(exploreLayout.safeZones, col, row);
-            }
-        } else {
-            if (activeTool === 'road') toggleCell(level.map.roads, col, row);
-            if (activeTool === 'obstacle') toggleCell(level.map.obstacles, col, row);
-            if (activeTool === 'path') togglePathCell(level, col, row);
-            if (activeTool === 'buildSlot') toggleCell(level.map.buildSlots, col, row);
-            if (activeTool === 'spawn') addSpawnPoint(col, row);
-            if (activeTool === 'objective') setObjectivePoint(col, row);
-        }
-        if (activeTool === 'explorePoint') addExplorePoint(col, row);
-        if (activeTool === 'actor') placeActorFromTemplate(selectedTemplateId, col, row);
-        if (activeTool === 'erase') applyEraserBrush(col, row, getLevel, eraseCellAt);
-        level.status = level.status === 'draft' ? 'needs-work' : level.status;
-        markDirty('已更新地图');
-        renderAll();
-        schedulePreviewRefresh();
-    }
-
-    function togglePathCell(level, col, row) {
-        if (!level.map.enemyPaths.length) {
-            level.map.enemyPaths.push({ id: 'path-main', name: '主敌人路径', cells: [] });
-        }
-        toggleCell(level.map.enemyPaths[0].cells, col, row);
-    }
-
-    function addSpawnPoint(col, row) {
-        var level = getLevel();
-        var existing = level.map.spawnPoints.find(function (point) { return point.col === col && point.row === row; });
-        if (existing) {
-            selectObject('spawn', existing.id);
-            return;
-        }
-        var id = uid('spawn');
-        level.map.spawnPoints.push({ id: id, name: '敌人出口 ' + (level.map.spawnPoints.length + 1), col: col, row: row, pathId: 'path-main' });
-        selectedObject = { kind: 'spawn', id: id };
-    }
-
-    function setObjectivePoint(col, row) {
-        var level = getLevel();
-        level.map.objectivePoint = { id: level.map.objectivePoint && level.map.objectivePoint.id || 'objective-main', name: '防守核心', col: col, row: row };
-        selectedObject = { kind: 'objective', id: level.map.objectivePoint.id };
-    }
-
-    function setExploreStartPoint(col, row) {
-        var level = getLevel();
-        var layout = ensureExplorationLayout(level.map);
-        layout.startPoint = { id: layout.startPoint && layout.startPoint.id || 'explore-start', name: '探索起点', col: col, row: row };
-        selectedObject = { kind: 'spawn', id: layout.startPoint.id };
-    }
-
-    function setExploreExitPoint(col, row) {
-        var level = getLevel();
-        var layout = ensureExplorationLayout(level.map);
-        layout.exitPoint = { id: layout.exitPoint && layout.exitPoint.id || 'explore-exit', name: '探索终点', col: col, row: row };
-        selectedObject = { kind: 'objective', id: layout.exitPoint.id };
-    }
-
-    function addExplorePoint(col, row) {
-        var level = getLevel();
-        var id = uid('poi');
-        level.map.explorationPoints.push({ id: id, name: '探索点 ' + (level.map.explorationPoints.length + 1), col: col, row: row, modelId: '', interaction: 'inspect', radius: 2 });
-        selectedObject = { kind: 'explorePoint', id: id };
+        _handleCellAction(mapEditEnv(), col, row);
     }
 
     function applyWorldHitToActor(actor, wx, wy, wz) {
@@ -3841,64 +1814,16 @@ import { renderMap as _renderMap } from './editor/map-render.js';
     }
 
     function moveActor(actorId, col, row) {
-        var level = getLevel();
-        var actor = level.map.actors.find(function (item) { return item.id === actorId; });
-        if (!actor) return;
-        actor.col = col;
-        actor.row = row;
-        selectedObject = { kind: 'actor', id: actor.id };
-        markDirty('已移动 Actor');
-        renderAll();
+        _moveActor(mapEditEnv(), actorId, col, row);
     }
 
     function moveMarker(kind, id, col, row) {
-        var level = getLevel();
-        var item = null;
-        var layout = ensureExplorationLayout(level.map);
-        if (kind === 'spawn') item = activeEditorMode === 'explore' ? layout.startPoint : level.map.spawnPoints.find(byId(id));
-        if (kind === 'explorePoint') item = level.map.explorationPoints.find(byId(id));
-        if (kind === 'objective') item = activeEditorMode === 'explore' ? layout.exitPoint : level.map.objectivePoint && level.map.objectivePoint.id === id ? level.map.objectivePoint : null;
-        if (!item) return;
-        item.col = col;
-        item.row = row;
-        selectedObject = { kind: kind, id: id };
-        markDirty('已移动地图标记');
-        renderAll();
+        _moveMarker(mapEditEnv(), kind, id, col, row);
     }
 
     function eraseCellAt(col, row) {
-        var level = getLevel();
-        if (!level) return;
-        var layout = ensureExplorationLayout(level.map);
-        var c = Number(col);
-        var r = Number(row);
-        removeCell(layout.path, c, r);
-        removeCell(layout.obstacles, c, r);
-        if (Array.isArray(layout.safeZones)) removeCell(layout.safeZones, c, r);
-        if (layout.startPoint && Number(layout.startPoint.col) === c && Number(layout.startPoint.row) === r) layout.startPoint = null;
-        if (layout.exitPoint && Number(layout.exitPoint.col) === c && Number(layout.exitPoint.row) === r) layout.exitPoint = null;
-
-        removeCell(level.map.roads, c, r);
-        removeCell(level.map.obstacles, c, r);
-        removeCell(level.map.buildSlots, c, r);
-        level.map.enemyPaths.forEach(function (path) {
-            removeCell(path.cells, c, r);
-        });
-        level.map.spawnPoints = level.map.spawnPoints.filter(notAtCell(c, r));
-        if (
-            level.map.objectivePoint &&
-            Number(level.map.objectivePoint.col) === c &&
-            Number(level.map.objectivePoint.row) === r
-        ) {
-            level.map.objectivePoint = null;
-        }
-
-        level.map.explorationPoints = level.map.explorationPoints.filter(notAtCell(c, r));
-        level.map.actors = level.map.actors.filter(notAtCell(c, r));
-        if (Array.isArray(level.map.terrain)) removeCell(level.map.terrain, c, r);
-        selectedObject = null;
+        _eraseCellAt(mapEditEnv(), col, row);
     }
-
     function renderActorPalette() {
         var templates = getAvailableActorTemplates();
         if (!templates.length) {
@@ -3993,412 +1918,27 @@ import { renderMap as _renderMap } from './editor/map-render.js';
     }
 
     function bindActorTemplateModelControls() {
-        if (!refs.actorPalette) return;
-        refs.actorPalette.querySelectorAll('[data-actor-template-scale]').forEach(function (input) {
-            input.addEventListener('change', function () {
-                var id = input.getAttribute('data-actor-template-scale');
-                var t = state.actorTemplates.find(function (x) { return x.id === id; });
-                if (!t) return;
-                t.templateModelScale = clamp(Number(input.value) || 1, 0.1, 8);
-                markDirty('已更新模板缩放');
-                schedulePreviewRefresh();
-            });
-        });
-        refs.actorPalette.querySelectorAll('[data-actor-template-file]').forEach(function (inp) {
-            inp.addEventListener('change', function () {
-                var id = inp.getAttribute('data-actor-template-file');
-                if (!inp.files || !inp.files[0]) return;
-                applyActorTemplateUploadedModel(id, inp.files[0]);
-                inp.value = '';
-            });
-        });
-        refs.actorPalette.querySelectorAll('[data-actor-template-drop]').forEach(function (zone) {
-            zone.addEventListener('dragover', function (e) {
-                e.preventDefault();
-                if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
-            });
-            zone.addEventListener('drop', async function (e) {
-                e.preventDefault();
-                var id = zone.getAttribute('data-actor-template-drop');
-                var f =
-                    e.dataTransfer.files && e.dataTransfer.files[0] ? e.dataTransfer.files[0] : null;
-                if (f) applyActorTemplateUploadedModel(id, f);
-            });
-        });
+        _bindActorTemplateModelControls(refs, actorModelSidebarEnv());
     }
 
     async function applyActorTemplateUploadedModel(templateId, file) {
-        try {
-            setStatus('正在上传「' + file.name + '」…', 'idle');
-            var url = await uploadFileToProjectUrl(file, { gameModelsUpload: true, gameModelsSubdir: 'ActorTemplates' });
-            var tpl = state.actorTemplates.find(function (x) { return x.id === templateId; });
-            if (!tpl) {
-                setStatus('仅能修改「项目 Actor 模板」。城市玩法库条目请在 Gameplay 工作台绑定模型。', 'error');
-                return;
-            }
-            if (!url) {
-                setStatus('上传成功但未返回 publicUrl（请查看终端 /api 报错）', 'error');
-                return;
-            }
-            tpl.modelPath = url;
-            markDirty('已绑定模板模型');
-            renderActorPalette();
-            schedulePreviewRefresh();
-            setStatus(
-                'Actor 模板已绑定「' + file.name + '」 · 当前：' + modelBindShortLabel(url) + '（悬停右侧格可看完整路径）',
-                'success'
-            );
-        } catch (error) {
-            setStatus('上传失败：' + ((error && error.message) || String(error)), 'error');
-        }
+        return _applyActorTemplateUploadedModel(refs, actorModelSidebarEnv(), templateId, file);
     }
 
     function renderSelectionInspector() {
-        var level = getLevel();
-        if (selectedObject && LCB_CELL_KIND_LABEL[selectedObject.kind]) {
-            refs.selectionInspector.className = 'selection-inspector';
-            var label = LCB_CELL_KIND_LABEL[selectedObject.kind] || selectedObject.kind;
-            refs.selectionInspector.innerHTML =
-                '<p class="section-hint">已选「' +
-                escapeHtml(label) +
-                '」棋盘格 (' +
-                selectedObject.col +
-                ',' +
-                selectedObject.row +
-                '）。按 Delete 键从关卡移除。</p>';
-            return;
-        }
-        if (selectedObject && selectedObject.kind === 'boardImage') {
-            var bl = level && findBoardImageLayerById(level, selectedObject.id);
-            if (!bl) {
-                selectedObject = null;
-                refs.selectionInspector.className = 'selection-inspector empty-state';
-                refs.selectionInspector.innerHTML = '未选择对象。';
-                return;
-            }
-            refs.selectionInspector.className = 'selection-inspector';
-            refs.selectionInspector.innerHTML =
-                '<p class="section-hint">数据写入 <code>map.boardImageLayers</code>。Delete 移除该配图层。</p>' +
-                '<div class="form-grid two">' +
-                boardLayerFieldHtml('左上角 X%', 'centerX', bl.centerX, 0.5) +
-                boardLayerFieldHtml('左上角 Y%', 'centerY', bl.centerY, 0.5) +
-                boardLayerFieldHtml('宽度 %（相对棋盘格宽）', 'widthPct', bl.widthPct, 1) +
-                boardLayerFieldHtml('不透明度 0–1', 'opacity', bl.opacity == null ? 1 : bl.opacity, 0.02) +
-                boardLayerFieldHtml('层级顺序 order', 'order', bl.order, 1) +
-                '</div>';
-            refs.selectionInspector.querySelectorAll('[data-board-layer-field]').forEach(function (inp) {
-                inp.addEventListener('input', function () {
-                    syncBoardLayerFieldFromInspector(inp);
-                });
-                inp.addEventListener('change', function () {
-                    syncBoardLayerFieldFromInspector(inp);
-                });
-            });
-            return;
-        }
-        var target = findSelectedObject(level);
-        if (!target) {
-            refs.selectionInspector.className = 'selection-inspector empty-state';
-            refs.selectionInspector.innerHTML = '未选择对象。';
-            return;
-        }
-        refs.selectionInspector.className = 'selection-inspector';
-        refs.selectionInspector.innerHTML = buildInspectorForm(target.kind, target.item);
-        refs.selectionInspector.querySelectorAll('[data-inspect-field]').forEach(function (input) {
-            input.addEventListener('input', function () { updateSelectedField(input); });
-            input.addEventListener('change', function () { updateSelectedField(input); });
-        });
-    }
-
-    function buildInspectorForm(kind, item) {
-        var modelOptions = ['<option value="">未绑定模型</option>'].concat(getBrowsableModelAssets().map(function (asset) {
-            return '<option value="' + escapeAttr(asset.id) + '"' + (asset.id === item.modelId ? ' selected' : '') + '>' + escapeHtml(asset.name) + '</option>';
-        })).join('');
-        var base = [
-            '<div class="form-grid two">',
-            fieldHtml('名称', 'name', item.name || ''),
-            fieldHtml('列', 'col', item.col, 'number'),
-            fieldHtml('行', 'row', item.row, 'number')
-        ];
-        if (kind === 'actor') {
-            ensureWorldOffset(item);
-            base.push(fieldHtml('旋转', 'rotation', item.rotation, 'number'));
-            base.push(fieldHtml('缩放', 'scale', item.scale, 'number', '0.1'));
-            base.push(fieldHtml('偏移 X(米)', 'worldOffsetMeters.x', item.worldOffsetMeters.x, 'number', '0.05'));
-            base.push(fieldHtml('偏移 Y(米)', 'worldOffsetMeters.y', item.worldOffsetMeters.y, 'number', '0.05'));
-            base.push(fieldHtml('偏移 Z(米)', 'worldOffsetMeters.z', item.worldOffsetMeters.z, 'number', '0.05'));
-            base.push(fieldHtml('阵营', 'team', item.team || 'player'));
-            base.push(selectHtml('模型', 'modelId', modelOptions));
-            base.push(fieldHtml('生命', 'stats.hp', item.stats.hp, 'number'));
-            base.push(fieldHtml('攻击', 'stats.attack', item.stats.attack, 'number'));
-            base.push(fieldHtml('射程', 'stats.range', item.stats.range, 'number', '0.1'));
-            base.push(fieldHtml('射速', 'stats.fireRate', item.stats.fireRate, 'number', '0.1'));
-            base.push(fieldHtml('费用', 'stats.cost', item.stats.cost, 'number'));
-            base.push(fieldHtml('冷却', 'stats.cooldown', item.stats.cooldown || 0, 'number', '0.1'));
-        }
-        if (kind === 'spawn') {
-            base.push(fieldHtml('路径 ID', 'pathId', item.pathId || 'path-main'));
-        }
-        if (kind === 'explorePoint') {
-            base.push(selectHtml('模型', 'modelId', modelOptions));
-            base.push(fieldHtml('交互类型', 'interaction', item.interaction || 'inspect'));
-            base.push(fieldHtml('半径', 'radius', item.radius || 2, 'number', '0.1'));
-        }
-        base.push('</div>');
-        return base.join('');
-    }
-
-    function syncBoardLayerFieldFromInspector(input) {
-        var level = getLevel();
-        if (!level || !selectedObject || selectedObject.kind !== 'boardImage') return;
-        var lyr = findBoardImageLayerById(level, selectedObject.id);
-        if (!lyr) return;
-        var key = input.getAttribute('data-board-layer-field');
-        if (!key) return;
-        var raw =
-            input.value === '' || input.value === '-' || input.value === '.' ? NaN : Number(input.value);
-        if (!Number.isFinite(raw)) return;
-        if (key === 'centerX' || key === 'centerY') lyr[key] = clamp(raw, 0, 100);
-        else if (key === 'widthPct') lyr.widthPct = clamp(raw, 5, 500);
-        else if (key === 'opacity') lyr.opacity = clamp(raw, 0, 1);
-        else if (key === 'order') lyr.order = Math.round(raw);
-        markDirty('已更新棋盘配图');
-        renderMap();
-        renderBoardImagesPanel(refs, boardImagesEnv());
-        schedulePreviewRefresh();
-    }
-
-    function updateSelectedField(input) {
-        var target = findSelectedObject(getLevel());
-        if (!target) return;
-        var path = input.getAttribute('data-inspect-field');
-        var next =
-            input.type === 'number'
-                ? input.value === '' || input.value === '-' || input.value === '.' || input.value === '-.'
-                    ? NaN
-                    : Number(input.value)
-                : input.value;
-        if (input.type === 'number' && !Number.isFinite(next)) return;
-        updatePath(target.item, path, next);
-        if (path === 'col' || path === 'row') {
-            target.item[path] = Math.max(0, Math.floor(Number(next) || 0));
-            renderMap();
-        }
-        markDirty('已更新对象属性');
-        renderOverview();
-        schedulePreviewRefresh();
+        _renderSelectionInspector(refs, selectionInspectorEnv());
     }
 
     function renderWaveList() {
-        var level = getLevel();
-        var enemyLookup = getEnemyTypeLookup(level);
-        if (!level) {
-            refs.waveList.innerHTML = '';
-            return;
-        }
-        if (!level.waveRules.length) {
-            refs.waveList.innerHTML = '<div class="empty-state">暂无波次。点击新增波次开始配置。</div>';
-            return;
-        }
-        refs.waveList.innerHTML = level.waveRules.map(function (wave, index) {
-            var enemyName = enemyLookup[wave.enemyTypeId] ? enemyLookup[wave.enemyTypeId].name : (wave.enemyTypeId || '未指定敌人');
-            var op = String(wave.overrideModelPath || '');
-            var oscale = wave.overrideModelScale != null && wave.overrideModelScale > 0 ? wave.overrideModelScale : 1;
-            return [
-                '<div class="wave-card">',
-                '  <div class="wave-card-head">',
-                '    <strong>第 ' + wave.waveNumber + ' 波 · ' + escapeHtml(enemyName) + '</strong>',
-                '    <span>数量 ' + wave.count + ' · 间隔 ' + wave.interval + 's · 出口 ' + escapeHtml(wave.spawnPointId || '自动') + '</span>',
-                '    <div class="inline-controls">',
-                '      <button class="mini-button" data-wave-action="edit" data-wave-index="' + index + '">快速编辑</button>',
-                '      <button class="mini-button danger" data-wave-action="remove" data-wave-index="' + index + '">删除</button>',
-                '    </div>',
-                '  </div>',
-                '  <div class="wave-card-model game-asset-tower-row">',
-                '    <div class="game-asset-tower-title">敌人外观 · 可选覆盖</div>',
-                '    <div class="game-asset-tower-upload-col" data-wave-model-drop="' + index + '">',
-                '      <label class="game-asset-upload tight">替换模型',
-                '        <input type="file" data-wave-model-file="' + index + '" accept=".glb,.gltf,.obj,model/gltf-binary,model/gltf+json" />',
-                '      </label>',
-                '      <div class="game-asset-tower-drop">拖入项目模型</div>',
-                '    </div>',
-                '    <label class="field-block game-asset-scale-tower"><span>缩放</span>',
-                '      <input type="number" data-wave-override-scale="' +
-                    index +
-                    '" min="0.1" max="8" step="0.1" value="' +
-                    String(oscale) +
-                    '" />',
-                '    </label>',
-                '    <div class="asset-url-hint" title="' + escapeAttr(op || '若留空则沿用敌人条目的模型路径') + '">' +
-                escapeHtml(op ? modelBindShortLabel(op) : '沿用敌人') +
-                '</div>',
-                '  </div>',
-                '</div>'
-            ].join('');
-        }).join('');
-        refs.waveList.querySelectorAll('[data-wave-action]').forEach(function (button) {
-            button.addEventListener('click', function () {
-                var index = Number(button.getAttribute('data-wave-index'));
-                if (button.getAttribute('data-wave-action') === 'remove') removeWaveRule(index);
-                else editWaveRule(index);
-            });
-        });
-        bindWaveAppearanceControls(level);
-    }
-
-    function bindWaveAppearanceControls(level) {
-        if (!refs.waveList || !level || !level.waveRules) return;
-        refs.waveList.querySelectorAll('[data-wave-override-scale]').forEach(function (input) {
-            input.addEventListener('input', function () {
-                var wi = Number(input.getAttribute('data-wave-override-scale'));
-                var wave = level.waveRules[wi];
-                if (!wave) return;
-                wave.overrideModelScale = clamp(Number(input.value) || 1, 0.1, 8);
-                markDirty('已更新波次模型缩放');
-            });
-        });
-        refs.waveList.querySelectorAll('[data-wave-model-file]').forEach(function (inp) {
-            inp.addEventListener('change', function () {
-                var wi = Number(inp.getAttribute('data-wave-model-file'));
-                var wave = level.waveRules[wi];
-                if (!wave || !inp.files || !inp.files[0]) return;
-                applyWaveOverrideModel(level, wi, inp.files[0]);
-                inp.value = '';
-            });
-        });
-        refs.waveList.querySelectorAll('[data-wave-model-drop]').forEach(function (zone) {
-            zone.addEventListener('dragover', function (e) {
-                e.preventDefault();
-                if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
-            });
-            zone.addEventListener('drop', function (e) {
-                e.preventDefault();
-                var wi = Number(zone.getAttribute('data-wave-model-drop'));
-                var wave = level.waveRules[wi];
-                if (!wave || !e.dataTransfer.files || !e.dataTransfer.files[0]) return;
-                applyWaveOverrideModel(level, wi, e.dataTransfer.files[0]);
-            });
-        });
-    }
-
-    async function applyWaveOverrideModel(level, waveIndex, file) {
-        try {
-            setStatus('正在上传「' + file.name + '」…', 'idle');
-            var url = await uploadFileToProjectUrl(file, { gameModelsUpload: true, gameModelsSubdir: 'Waves' });
-            var wave = level.waveRules[waveIndex];
-            if (!wave) {
-                setStatus('找不到对应波次', 'error');
-                return;
-            }
-            if (!url) {
-                setStatus('上传成功但未返回 publicUrl', 'error');
-                return;
-            }
-            wave.overrideModelPath = url;
-            markDirty('已绑定波次模型');
-            renderWaveList();
-            setStatus(
-                '波次 #' + String(wave.waveNumber || waveIndex + 1) + ' 已绑定「' + file.name + '」 · ' + modelBindShortLabel(url),
-                'success'
-            );
-        } catch (error) {
-            setStatus('上传失败：' + ((error && error.message) || String(error)), 'error');
-        }
-    }
-
-    function addWaveRule() {
-        var level = getLevel();
-        if (!level) return;
-        var enemies = getAvailableEnemyTypes(level);
-        var enemy = enemies[0] || createEnemyTypeFromTemplates(level);
-        var spawn = level.map.spawnPoints[0];
-        level.waveRules.push({
-            id: uid('wave'),
-            waveNumber: level.waveRules.length + 1,
-            enemyTypeId: enemy.id,
-            count: 12,
-            interval: 1.2,
-            spawnPointId: spawn ? spawn.id : '',
-            pathId: 'path-main',
-            reward: 50,
-            overrideModelPath: '',
-            overrideModelScale: 1
-        });
-        markDirty('已新增波次');
-        renderWaveList();
-        renderOverview();
-    }
-
-    function editWaveRule(index) {
-        var level = getLevel();
-        var wave = level.waveRules[index];
-        if (!wave) return;
-        var enemies = getAvailableEnemyTypes(level);
-        var enemyPrompt = enemies.map(function (enemy) { return enemy.id + ':' + enemy.name; }).join('\n');
-        if (enemyPrompt) {
-            var enemyTypeId = window.prompt('敌人 ID（可用候选）\n' + enemyPrompt, String(wave.enemyTypeId || enemies[0].id));
-            if (enemyTypeId !== null) wave.enemyTypeId = String(enemyTypeId || wave.enemyTypeId || enemies[0].id);
-        }
-        var count = window.prompt('敌人数量', String(wave.count));
-        if (count !== null) wave.count = Math.max(1, Number(count) || wave.count);
-        var interval = window.prompt('刷新间隔（秒）', String(wave.interval));
-        if (interval !== null) wave.interval = Math.max(0.1, Number(interval) || wave.interval);
-        markDirty('已更新波次');
-        renderWaveList();
-    }
-
-    function removeWaveRule(index) {
-        var level = getLevel();
-        level.waveRules.splice(index, 1);
-        level.waveRules.forEach(function (wave, waveIndex) { wave.waveNumber = waveIndex + 1; });
-        markDirty('已删除波次');
-        renderWaveList();
-        renderOverview();
+        _renderWaveList(refs, waveEditorEnv());
     }
 
     function renderModelAssets() {
-        var assets = getBrowsableModelAssets();
-        if (!assets.length) {
-            refs.modelAssetList.innerHTML = '<div class="empty-state">暂无模型资产。上传模型后可作为 Actor 使用。</div>';
-            return;
-        }
-        refs.modelAssetList.innerHTML = assets.map(function (asset) {
-            return [
-                '<div class="list-item">',
-                '  <strong>' + escapeHtml(asset.name) + '</strong>',
-                '  <span>' + escapeHtml(asset.path || asset.url || '未设置路径') + '</span>',
-                '  <div class="inline-controls">',
-                '    <button class="mini-button" data-model-template="' + escapeAttr(asset.id) + '">变成 Actor 模板</button>',
-                '  </div>',
-                '</div>'
-            ].join('');
-        }).join('');
-        refs.modelAssetList.querySelectorAll('[data-model-template]').forEach(function (button) {
-            button.addEventListener('click', function () {
-                createActorTemplateFromModel(button.getAttribute('data-model-template'));
-            });
-        });
+        _renderModelAssets(refs, actorModelSidebarEnv());
     }
 
     async function uploadModelAsset(file) {
-        try {
-            setStatus('正在上传模型 ' + file.name + '…', 'idle');
-            var url = await uploadFileToProjectUrl(file, { gameModelsUpload: true, gameModelsSubdir: '' });
-            var id = uniqueCatalogId(state.catalog.modelAssets, slugify(file.name.replace(/\.[^.]+$/, '')) || 'uploaded-model');
-            state.catalog.modelAssets.push({
-                id: id,
-                name: file.name.replace(/\.[^.]+$/, ''),
-                summary: '上传的自定义模型',
-                path: url || ''
-            });
-            createActorTemplateFromModel(id);
-            refs.modelUpload.value = '';
-            markDirty('已上传模型');
-            renderAll();
-        } catch (error) {
-            refs.modelUpload.value = '';
-            setStatus('模型上传失败: ' + error.message, 'error');
-        }
+        return _uploadModelAsset(refs, actorModelSidebarEnv(), file);
     }
 
     function createActorTemplateFromSelection() {
@@ -4763,6 +2303,7 @@ import { renderMap as _renderMap } from './editor/map-render.js';
         themeEditorCacheKey = '';
         renderAll();
         syncPreviewIfOpen({ preserveView: false });
+        syncEditorCtx();
     }
 
     function selectObject(kind, id) {
@@ -4774,16 +2315,11 @@ import { renderMap as _renderMap } from './editor/map-render.js';
             else previewApi.setSelectedActor(null);
         }
         renderPreviewSceneOutline();
+        syncEditorCtx();
     }
 
     function selectGridCellObject(kind, col, row) {
-        selectedObject = { kind: kind, col: col, row: row };
-        renderSelectionInspector();
-        renderMap();
-        if (viewportViewMode === 'preview' && previewApi && typeof previewApi.setSelectedActor === 'function') {
-            previewApi.setSelectedActor(null);
-        }
-        renderPreviewSceneOutline();
+        _selectGridCellObject(mapEditEnv(), kind, col, row);
     }
 
     function deleteSelection() {
@@ -4905,408 +2441,27 @@ import { renderMap as _renderMap } from './editor/map-render.js';
     }
 
     function ensureCityGameplayConfig(cityContext) {
-        var resolvedKey = resolveCityGameplayConfigKey(cityContext);
-        if (!state.cityGameplayConfigs[resolvedKey]) {
-            state.cityGameplayConfigs[resolvedKey] = {
-                cityCode: cityContext.cityCode,
-                cityName: cityContext.cityName,
-                aliases: mergeDistinctStrings(cityContext.cityName, cityContext.cityCode),
-                enemies: [],
-                characters: [],
-                skills: [],
-                towers: [],
-                cards: [],
-                updatedAt: ''
-            };
-        }
-        if (!Array.isArray(state.cityGameplayConfigs[resolvedKey].towers)) {
-            state.cityGameplayConfigs[resolvedKey].towers = buildDefaultTowerEntries(state.cityGameplayConfigs[resolvedKey]);
-        }
-        if (!Array.isArray(state.cityGameplayConfigs[resolvedKey].cards)) {
-            state.cityGameplayConfigs[resolvedKey].cards = buildDefaultCardEntries(state.cityGameplayConfigs[resolvedKey]);
-        }
-        if (!Array.isArray(state.cityGameplayConfigs[resolvedKey].enemies)) {
-            state.cityGameplayConfigs[resolvedKey].enemies = [];
-        }
-        if (!state.cityGameplayConfigs[resolvedKey].enemies.length) {
-            state.cityGameplayConfigs[resolvedKey].enemies = buildDefaultEnemyEntries(state.cityGameplayConfigs[resolvedKey]);
-        }
-        return state.cityGameplayConfigs[resolvedKey];
-    }
-
-    function createGameplayEntry() {
-        var cityContext = getGameplayCityContext();
-        if (!cityContext) {
-            setStatus('请先在左侧选择一个带城市信息的关卡', 'error');
-            return;
-        }
-        var config = ensureCityGameplayConfig(cityContext);
-        var kindLabel = GAMEPLAY_RESOURCE_CONFIG[activeGameplayTab].label;
-        var id = uniqueGameplayEntryId(config[activeGameplayTab], slugify(cityContext.cityName + '-' + kindLabel) || activeGameplayTab);
-        config[activeGameplayTab].push({
-            id: id,
-            name: cityContext.cityName + '·新' + kindLabel,
-            summary: '',
-            tags: [cityContext.cityName],
-            rarity: 'common',
-            placement: activeGameplayTab === 'characters' || activeGameplayTab === 'towers' ? 'roadside' : '',
-            stats: {},
-            assetRefs: {},
-            cityCode: cityContext.cityCode,
-            cityName: cityContext.cityName,
-            updatedAt: new Date().toISOString()
-        });
-        selectedGameplayEntryId = id;
-        markDirty('已新增' + kindLabel + '条目');
-        renderGameplayEditor();
-    }
-
-    function duplicateGameplayEntry() {
-        var collection = getGameplayCollection();
-        var entry = getSelectedGameplayEntry();
-        if (!collection || !entry) return;
-        var copy = clone(entry);
-        copy.id = uniqueGameplayEntryId(collection, entry.id + '-copy');
-        copy.name = entry.name + ' 复制';
-        copy.updatedAt = new Date().toISOString();
-        var index = collection.findIndex(function (item) { return item.id === entry.id; });
-        collection.splice(index + 1, 0, copy);
-        selectedGameplayEntryId = copy.id;
-        selectedGameplayAssetId = '';
-        markDirty('已复制玩法条目');
-        renderGameplayEditor();
-    }
-
-    function deleteGameplayEntry() {
-        var collection = getGameplayCollection();
-        var entry = getSelectedGameplayEntry();
-        if (!collection || !entry) return;
-        if (!window.confirm('确定删除「' + entry.name + '」吗？')) return;
-        var index = collection.findIndex(function (item) { return item.id === entry.id; });
-        if (index === -1) return;
-        collection.splice(index, 1);
-        selectedGameplayEntryId = collection[index] ? collection[index].id : collection[index - 1] ? collection[index - 1].id : '';
-        selectedGameplayAssetId = '';
-        markDirty('已删除玩法条目');
-        renderGameplayEditor();
-    }
-
-    function moveGameplayEntry(direction) {
-        var collection = getGameplayCollection();
-        var entry = getSelectedGameplayEntry();
-        if (!collection || !entry || !direction) return;
-        var index = collection.findIndex(function (item) { return item.id === entry.id; });
-        var targetIndex = index + direction;
-        if (index < 0 || targetIndex < 0 || targetIndex >= collection.length) return;
-        var moved = collection.splice(index, 1)[0];
-        collection.splice(targetIndex, 0, moved);
-        selectedGameplayEntryId = moved.id;
-        markDirty(direction < 0 ? '已上移玩法条目' : '已下移玩法条目');
-        renderGameplayEditor();
-    }
-
-    function getGameplayCollection() {
-        var cityContext = getGameplayCityContext();
-        if (!cityContext) return null;
-        return ensureCityGameplayConfig(cityContext)[activeGameplayTab];
-    }
-
-    function getSelectedGameplayEntry(entries) {
-        var list = Array.isArray(entries) ? entries : getGameplayCollection();
-        if (!Array.isArray(list) || !list.length) return null;
-        var found = list.find(function (item) { return item.id === selectedGameplayEntryId; }) || null;
-        if (!found) {
-            selectedGameplayEntryId = list[0].id;
-            found = list[0];
-        }
-        return found;
-    }
-
-    function handleGameplayFormInput(target) {
-        var entry = getSelectedGameplayEntry();
-        var list = getGameplayCollection();
-        if (!entry || !list || !target) return;
-        if (target.name === 'name') {
-            entry.name = String(target.value || '').trim();
-            if (refs.gameplayAssetName && !refs.gameplayAssetName.value) refs.gameplayAssetName.value = entry.name;
-            markDirty('已更新玩法条目名称');
-            renderGameplayEditor();
-            return;
-        }
-        if (target.name === 'id') {
-            var nextId = ensureUniqueGameplayEntryId(list, target.value, entry.id);
-            entry.id = nextId;
-            selectedGameplayEntryId = nextId;
-            if (refs.gameplayId && refs.gameplayId.value !== nextId) refs.gameplayId.value = nextId;
-            markDirty('已更新玩法条目 ID');
-            renderGameplayEditor();
-            return;
-        }
-        if (target.name === 'tags') {
-            entry.tags = String(target.value || '').split(',').map(function (part) { return part.trim(); }).filter(Boolean);
-            markDirty('已更新玩法标签');
-            renderGameplayEntryList(getFilteredGameplayEntries(), getGameplayCityContext());
-            return;
-        }
-        if (target.name === 'rarity') {
-            entry.rarity = String(target.value || '').trim();
-            markDirty('已更新玩法稀有度');
-            renderGameplayEntryList(getFilteredGameplayEntries(), getGameplayCityContext());
-            return;
-        }
-        if (target.name === 'summary') {
-            entry.summary = String(target.value || '');
-            markDirty('已更新玩法简介');
-            renderGameplayEntryList(getFilteredGameplayEntries(), getGameplayCityContext());
-            return;
-        }
-        if (target.hasAttribute('data-gameplay-placement')) {
-            entry.placement = normalizeGameplayPlacement(target.value);
-            markDirty('已更新单位部署位置');
-            renderGameplayEntryList(getFilteredGameplayEntries(), getGameplayCityContext());
-            return;
-        }
-        if (target.hasAttribute('data-gameplay-stat')) {
-            var statKey = target.getAttribute('data-gameplay-stat');
-            var numeric = Number(target.value);
-            if (!entry.stats || typeof entry.stats !== 'object') entry.stats = {};
-            entry.stats[statKey] = Number.isFinite(numeric) ? numeric : 0;
-            markDirty('已更新玩法数值');
-        }
-    }
-
-    function getFilteredGameplayEntries() {
-        var config = getGameplayCityContext();
-        var collection = config ? ensureCityGameplayConfig(config)[activeGameplayTab] : [];
-        var keyword = refs.gameplaySearch ? String(refs.gameplaySearch.value || '').trim().toLowerCase() : '';
-        return collection.filter(function (entry) {
-            if (!keyword) return true;
-            var haystack = [entry.name, entry.id, entry.summary].concat(entry.tags || []).join(' ').toLowerCase();
-            return haystack.indexOf(keyword) !== -1;
-        });
-    }
-
-    function ensureUniqueGameplayEntryId(list, value, currentId) {
-        var baseId = String(value || '').trim().replace(/\s+/g, '-');
-        if (!baseId) baseId = currentId || uid(activeGameplayTab);
-        var candidate = baseId;
-        var serial = 1;
-        while (list.some(function (item) { return item.id === candidate && item.id !== currentId; })) {
-            candidate = baseId + '-' + String(serial);
-            serial += 1;
-        }
-        return candidate;
-    }
-
-    function getGameplayAssets(cityContext, assetType) {
-        return (state.editorAssetsCatalog || []).filter(function (asset) {
-            return asset.cityCode === cityContext.cityCode && asset.assetType === assetType;
-        });
-    }
-
-    function bindGameplayAsset(assetId, bindKey) {
-        var entry = getSelectedGameplayEntry();
-        if (!entry) {
-            setStatus('请先选择一个玩法条目', 'error');
-            return;
-        }
-        var asset = (state.editorAssetsCatalog || []).find(function (item) { return item.id === assetId; });
-        if (!asset) return;
-        if (!entry.assetRefs || typeof entry.assetRefs !== 'object') entry.assetRefs = {};
-        entry.assetRefs[bindKey] = asset.publicUrl || asset.path;
-        if (bindKey === 'modelPath') entry.assetRefs.modelId = asset.id;
-        if (bindKey === 'imagePath') entry.assetRefs.imageId = asset.id;
-        entry.updatedAt = new Date().toISOString();
-        selectedGameplayAssetId = asset.id;
-        markDirty('已绑定项目资源');
-        renderGameplayEditor();
-    }
-
-    async function uploadGameplayAsset(file) {
-        var cityContext = getGameplayCityContext();
-        if (!cityContext) {
-            refs.gameplayAssetUpload.value = '';
-            setStatus('请先选择一个城市关卡再上传资源', 'error');
-            return;
-        }
-        var assetType = refs.gameplayAssetType ? refs.gameplayAssetType.value || GAMEPLAY_RESOURCE_CONFIG[activeGameplayTab].assetType : GAMEPLAY_RESOURCE_CONFIG[activeGameplayTab].assetType;
-        var assetName = refs.gameplayAssetName && refs.gameplayAssetName.value ? refs.gameplayAssetName.value.trim() : file.name.replace(/\.[^.]+$/, '');
-        try {
-            setStatus('正在保存城市资源 ' + file.name + '…', 'idle');
-            var content = await fileToBase64(file);
-            var response = await fetch('/api/editor-assets', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    name: file.name,
-                    content: content,
-                    cityCode: cityContext.cityCode,
-                    cityName: cityContext.cityName,
-                    assetType: assetType,
-                    resourceKind: activeGameplayTab,
-                    assetName: assetName
-                })
-            });
-            if (!response.ok) throw new Error('上传失败: ' + response.status);
-            var payload = await response.json();
-            var id = String(payload.id || uniqueCatalogId(state.editorAssetsCatalog || [], slugify(cityContext.cityName + '-' + assetName) || 'editor-asset'));
-            state.editorAssetsCatalog = state.editorAssetsCatalog || [];
-            state.editorAssetsCatalog = state.editorAssetsCatalog.filter(function (item) { return item.id !== id; });
-            state.editorAssetsCatalog.push({
-                id: id,
-                name: String(payload.name || assetName),
-                assetType: String(payload.assetType || assetType),
-                resourceKind: String(payload.resourceKind || activeGameplayTab),
-                cityCode: cityContext.cityCode,
-                cityName: cityContext.cityName,
-                path: String(payload.projectPath || ''),
-                projectPath: String(payload.projectPath || ''),
-                publicUrl: String(payload.publicUrl || ''),
-                summary: cityContext.cityName + ' · ' + assetName,
-                updatedAt: new Date().toISOString()
-            });
-            if (refs.gameplayAssetName) refs.gameplayAssetName.value = assetName;
-            refs.gameplayAssetUpload.value = '';
-            markDirty('已保存城市资源到项目');
-            var selectedEntry = getSelectedGameplayEntry();
-            if (selectedEntry) {
-                var bindKey = /\.(png|jpg|jpeg|webp)$/i.test(file.name) ? 'imagePath' : 'modelPath';
-                bindGameplayAsset(id, bindKey);
-            } else {
-                renderGameplayEditor();
-            }
-            setStatus('已保存到 ' + String(payload.projectPath || 'public/Arts'), 'success');
-        } catch (error) {
-            refs.gameplayAssetUpload.value = '';
-            setStatus('城市资源保存失败: ' + error.message, 'error');
-        }
+        return _ensureCityGameplayConfig(gameplayEnv(), cityContext);
     }
 
     function getCurrentCityGameplayConfig() {
-        var cityContext = getGameplayCityContext();
-        return cityContext ? ensureCityGameplayConfig(cityContext) : null;
-    }
-
-    function buildGameplayEnemyTypes(level) {
-        var cityContext = getGameplayCityContext();
-        var config = cityContext ? ensureCityGameplayConfig(cityContext) : null;
-        if (!config) return [];
-        return config.enemies.map(function (entry) {
-            return {
-                id: entry.id,
-                name: entry.name,
-                modelId: entry.assetRefs && entry.assetRefs.modelId ? entry.assetRefs.modelId : '',
-                modelPath: entry.assetRefs && entry.assetRefs.modelPath ? entry.assetRefs.modelPath : '',
-                hp: Number(entry.stats && entry.stats.hp) || 100,
-                speed: Number(entry.stats && entry.stats.speed) || 1,
-                reward: Number(entry.stats && entry.stats.reward) || 20,
-                source: 'cityGameplay'
-            };
-        });
+        return _getCurrentCityGameplayConfig(gameplayEnv());
     }
 
     function getAvailableEnemyTypes(level) {
-        var localEnemies = Array.isArray(level && level.enemyTypes) ? level.enemyTypes : [];
-        var cityEnemies = buildGameplayEnemyTypes(level);
-        var merged = [];
-        cityEnemies.concat(localEnemies).forEach(function (enemy) {
-            if (!enemy || !enemy.id || merged.some(function (item) { return item.id === enemy.id; })) return;
-            merged.push(enemy);
-        });
-        return merged;
+        return _getAvailableEnemyTypes(gameplayEnv(), level);
     }
 
     function buildGameplayActorTemplates() {
-        var cityContext = getGameplayCityContext();
-        var config = cityContext ? ensureCityGameplayConfig(cityContext) : null;
-        if (!config) return [];
-        return ['enemies', 'characters', 'skills'].flatMap(function (kind) {
-            return config[kind].map(function (entry) {
-                var category = kind === 'enemies' ? 'enemy' : kind === 'characters' ? 'npc' : 'model';
-                return {
-                    id: 'city-template-' + kind + '-' + entry.id,
-                    name: entry.name,
-                    category: category,
-                    modelId: entry.assetRefs && entry.assetRefs.modelId ? entry.assetRefs.modelId : '',
-                    modelPath: entry.assetRefs && entry.assetRefs.modelPath ? entry.assetRefs.modelPath : '',
-                    templateModelScale: 1,
-                    icon: kind === 'enemies' ? 'E' : kind === 'characters' ? 'C' : 'S',
-                    source: 'cityGameplay',
-                    sourceEntryId: entry.id,
-                    sourceKind: kind,
-                    stats: Object.assign({ hp: 100, attack: 0, range: 1, fireRate: 0, cost: 0, cooldown: 0 }, entry.stats || {})
-                };
-            });
-        });
+        return _buildGameplayActorTemplates(gameplayEnv());
     }
 
     function getAvailableActorTemplates() {
-        var merged = [];
-        state.actorTemplates.concat(buildGameplayActorTemplates()).forEach(function (template) {
-            if (!template || !template.id || merged.some(function (item) { return item.id === template.id; })) return;
-            merged.push(template);
-        });
-        return merged;
+        return _getAvailableActorTemplates(gameplayEnv());
     }
 
     function findActorTemplate(templateId) {
-        return getAvailableActorTemplates().find(function (item) { return item.id === templateId; }) || state.actorTemplates[0];
-    }
-
-    function setGameplayEntryActionButtons(disabled, entries, entry) {
-        var list = Array.isArray(entries) ? entries : [];
-        var index = entry ? list.findIndex(function (item) { return item.id === entry.id; }) : -1;
-        if (refs.btnDuplicateGameplayEntry) refs.btnDuplicateGameplayEntry.disabled = disabled;
-        if (refs.btnDeleteGameplayEntry) refs.btnDeleteGameplayEntry.disabled = disabled;
-        if (refs.btnMoveGameplayUp) refs.btnMoveGameplayUp.disabled = disabled || index <= 0;
-        if (refs.btnMoveGameplayDown) refs.btnMoveGameplayDown.disabled = disabled || index === -1 || index >= list.length - 1;
-    }
-
-    function resolveGameplayEntryThumbnail(entry) {
-        if (!entry || !entry.assetRefs) return '';
-        return isImageAssetPath(entry.assetRefs.imagePath) ? entry.assetRefs.imagePath : '';
-    }
-
-    function getSelectedGameplayAsset(entry, assets) {
-        if (!entry && !selectedGameplayAssetId) return null;
-        var list = Array.isArray(assets) ? assets : [];
-        var picked = selectedGameplayAssetId ? list.find(function (asset) { return asset.id === selectedGameplayAssetId; }) : null;
-        if (picked) return picked;
-        if (selectedGameplayAssetId) {
-            picked = (state.editorAssetsCatalog || []).find(function (asset) { return asset.id === selectedGameplayAssetId; }) || null;
-            if (picked) return picked;
-        }
-        if (entry && entry.assetRefs) {
-            var refsToTry = [entry.assetRefs.imagePath, entry.assetRefs.modelPath];
-            for (var i = 0; i < refsToTry.length; i += 1) {
-                var match = list.find(function (asset) { return asset.publicUrl === refsToTry[i] || asset.path === refsToTry[i] || asset.projectPath === refsToTry[i]; }) ||
-                    (state.editorAssetsCatalog || []).find(function (asset) { return asset.publicUrl === refsToTry[i] || asset.path === refsToTry[i] || asset.projectPath === refsToTry[i]; });
-                if (match) {
-                    selectedGameplayAssetId = match.id;
-                    return match;
-                }
-            }
-        }
-        selectedGameplayAssetId = list[0] ? list[0].id : '';
-        return list[0] || null;
-    }
-
-    function renderGameplayAssetPreview(asset, entry) {
-        var hasImage = asset && isImageAssetPath(asset.publicUrl || asset.path);
-        var hasModel = asset && isModelAssetPath(asset.publicUrl || asset.path);
-        if (refs.gameplayPreviewTitle) refs.gameplayPreviewTitle.textContent = asset ? asset.name : (entry ? entry.name : '资源预览');
-        if (refs.gameplayPreviewMeta) refs.gameplayPreviewMeta.textContent = asset ? (asset.assetType + ' · ' + (asset.cityName || '未命名城市')) : '未选择资源';
-        if (refs.gameplayAssetPreviewEmpty) refs.gameplayAssetPreviewEmpty.classList.toggle('view-hidden', !!asset);
-        if (refs.gameplayAssetPreviewImage) {
-            refs.gameplayAssetPreviewImage.classList.toggle('view-hidden', !hasImage);
-            refs.gameplayAssetPreviewImage.src = hasImage ? String(asset.publicUrl || asset.path) : '';
-        }
-        if (refs.gameplayAssetPreviewHost) refs.gameplayAssetPreviewHost.classList.toggle('view-hidden', !hasModel);
-        if (!hasModel) {
-            disposeGameplayAssetPreview();
-            return;
-        }
-        ensureGameplayAssetPreview(String(asset.publicUrl || asset.path));
+        return _findActorTemplate(gameplayEnv(), templateId);
     }
 
     function ensureGameplayAssetPreview(modelUrl) {
@@ -5441,6 +2596,7 @@ import { renderMap as _renderMap } from './editor/map-render.js';
         isDirty = true;
         _persistLocalBackup(state);
         setStatus(message || '已有未保存修改', 'dirty');
+        syncEditorCtx();
     }
 
     function setStatus(message, mode) {
@@ -5540,6 +2696,418 @@ import { renderMap as _renderMap } from './editor/map-render.js';
         };
     }
 
+    function mapEditEnv() {
+        return {
+            getLevel: getLevel,
+            getActiveTool: function () {
+                return activeTool;
+            },
+            getActiveEditorMode: function () {
+                return activeEditorMode;
+            },
+            getSelectedTemplateId: function () {
+                return selectedTemplateId;
+            },
+            setSelectedObject: function (next) {
+                selectedObject = next;
+            },
+            selectObject: selectObject,
+            renderSelectionInspector: renderSelectionInspector,
+            renderMap: renderMap,
+            renderAll: renderAll,
+            renderPreviewSceneOutline: renderPreviewSceneOutline,
+            markDirty: markDirty,
+            schedulePreviewRefresh: schedulePreviewRefresh,
+            placeActorFromTemplate: placeActorFromTemplate,
+            applyEraserBrush: function (col, row) {
+                applyEraserBrush(col, row, getLevel, eraseCellAt);
+            },
+            isPreviewViewport: function () {
+                return viewportViewMode === 'preview';
+            },
+            previewApiHasSelection: function () {
+                return !!(previewApi && typeof previewApi.setSelectedActor === 'function');
+            },
+            setPreviewSelectedActor: function (id) {
+                if (previewApi && typeof previewApi.setSelectedActor === 'function') {
+                    previewApi.setSelectedActor(id);
+                }
+            }
+        };
+    }
+
+    function selectionInspectorEnv() {
+        return {
+            getLevel: getLevel,
+            getSelectedObject: function () {
+                return selectedObject;
+            },
+            setSelectedObject: function (value) {
+                selectedObject = value;
+            },
+            findSelectedObject: findSelectedObject,
+            getBrowsableModelAssets: getBrowsableModelAssets,
+            markDirty: markDirty,
+            renderMap: renderMap,
+            renderOverview: renderOverview,
+            schedulePreviewRefresh: schedulePreviewRefresh,
+            renderBoardImagesPanel: renderBoardImagesPanel,
+            boardImagesEnv: boardImagesEnv
+        };
+    }
+
+    function waveEditorEnv() {
+        return {
+            getLevel: getLevel,
+            getEnemyTypeLookup: getEnemyTypeLookup,
+            getAvailableEnemyTypes: getAvailableEnemyTypes,
+            createEnemyTypeFromTemplates: createEnemyTypeFromTemplates,
+            markDirty: markDirty,
+            setStatus: setStatus,
+            uploadFileToProjectUrl: uploadFileToProjectUrl,
+            renderOverview: renderOverview
+        };
+    }
+
+    function editorEventsEnv() {
+        return {
+            mountExploreGameplayFieldTemplates: mountExploreGameplayFieldTemplates,
+            onExploreGameplayFieldInput: onExploreGameplayFieldInput,
+            setGeoMappingEnabled: function (value) {
+                geoMappingEnabled = !!value;
+            },
+            getGeoMappingEnabled: function () {
+                return geoMappingEnabled;
+            },
+            persistGeoMappingEnabled: function (value) {
+                window.localStorage.setItem(GEO_MAPPING_STORAGE_KEY, value ? '1' : '0');
+            },
+            refreshPreviewPreserveActorSelection: function () {
+                if (viewportViewMode === 'preview' && previewApi && typeof previewApi.refresh === 'function') {
+                    var sid = selectedObject && selectedObject.kind === 'actor' ? selectedObject.id : null;
+                    previewApi.refresh({ preserveView: true, selectActorId: sid });
+                }
+            },
+            reloadState: reloadState,
+            saveState: saveState,
+            exportState: function () {
+                _exportState(state, setStatus);
+            },
+            createManualLevel: createManualLevel,
+            generateRegionLevelSkeletons: generateRegionLevelSkeletons,
+            renderLevelTree: renderLevelTree,
+            applyMapSize: applyMapSize,
+            deleteSelection: deleteSelection,
+            createActorTemplateFromSelection: createActorTemplateFromSelection,
+            bindWaveEditorUi: bindWaveEditorUi,
+            uploadModelAsset: uploadModelAsset,
+            setActiveWorkbench: function (value) {
+                activeWorkbench = value || 'level';
+            },
+            getActiveWorkbench: function () {
+                return activeWorkbench;
+            },
+            resetThemeEditorCache: function () {
+                themeEditorCacheKey = '';
+            },
+            disposeGameplayAssetPreview: disposeGameplayAssetPreview,
+            disposeModelAssetPreview: disposeModelAssetPreview,
+            renderAll: renderAll,
+            setActiveThemeScope: function (value) {
+                activeThemeScope = value === 'explore' ? 'explore' : 'defense';
+            },
+            renderThemeEditor: renderThemeEditor,
+            setThemeWorkbenchTab: setThemeWorkbenchTab,
+            readThemeFormToLevel: readThemeFormToLevel,
+            syncThemeColorSwatches: syncThemeColorSwatches,
+            debounceReadThemeFormToLevel: function () {
+                clearTimeout(themeBoardUrlDebounce);
+                themeBoardUrlDebounce = setTimeout(readThemeFormToLevel, 350);
+            },
+            copyThemeToExplore: function () {
+                var level = getLevel();
+                if (!level || !level.map) return;
+                var layout = ensureExplorationLayout(level.map);
+                layout.theme = normalizeTheme(JSON.parse(JSON.stringify(normalizeTheme(level.map.theme))));
+                markDirty('已复制防守主题到探索');
+                activeThemeScope = 'explore';
+                themeEditorCacheKey = '';
+                if (refs.themeScopeSelect) refs.themeScopeSelect.value = 'explore';
+                fillThemeFormFromLevel();
+                renderAll();
+            },
+            copyThemeToDefense: function () {
+                var level = getLevel();
+                if (!level || !level.map) return;
+                var layout = ensureExplorationLayout(level.map);
+                level.map.theme = normalizeTheme(JSON.parse(JSON.stringify(normalizeTheme(layout.theme))));
+                markDirty('已复制探索主题到防守');
+                activeThemeScope = 'defense';
+                themeEditorCacheKey = '';
+                if (refs.themeScopeSelect) refs.themeScopeSelect.value = 'defense';
+                fillThemeFormFromLevel();
+                renderAll();
+            },
+            bindCutsceneEditorEvents: bindCutsceneEditorEvents,
+            bindGameplayUi: bindGameplayUi,
+            setActiveModelCategory: function (value) {
+                activeModelCategory = value || 'all';
+            },
+            getActiveModelCategory: function () {
+                return activeModelCategory;
+            },
+            setSelectedModelId: function (value) {
+                selectedModelId = value || '';
+            },
+            renderModelEditor: renderModelEditor,
+            replaceSelectedModel: replaceSelectedModel,
+            uploadNewModelFromInspector: uploadNewModelFromInspector,
+            setActiveStatusFilter: function (value) {
+                activeStatusFilter = value || 'all';
+            },
+            setActiveEditorMode: function (value) {
+                activeEditorMode = value || 'defense';
+            },
+            setSelectedObject: function (value) {
+                selectedObject = value;
+            },
+            refreshPreviewNow: refreshPreviewNow,
+            activateTool: function (tool) {
+                activeTool = tool || 'select';
+                document.querySelectorAll('[data-tool]').forEach(function (item) {
+                    item.classList.toggle('active', item.getAttribute('data-tool') === activeTool);
+                });
+                refs.activeToolLabel.textContent = '当前工具：' + TOOL_LABELS[activeTool];
+                updateEraserToolPanelVisibility(refs, activeWorkbench, activeTool);
+                updateStageHintText();
+            },
+            selectLevel: selectLevel,
+            selectObject: selectObject,
+            handleCellAction: handleCellAction,
+            isEraserPreviewActive: function () {
+                return activeWorkbench === 'level' && activeTool === 'erase';
+            },
+            recordEraserPreviewPointer: recordEraserPreviewPointer,
+            updateEraserBrushPreview: function (refsArg, x, y) {
+                updateEraserBrushPreview(refsArg, x, y, eraserPreviewEnv());
+            },
+            clearEraserPreviewPointer: clearEraserPreviewPointer,
+            clearEraserBrushPreview: clearEraserBrushPreview,
+            getLevel: getLevel,
+            tryConsumeBoardImageFileDrop: function (event, refsArg) {
+                return tryConsumeBoardImageFileDrop(event, refsArg, boardImagesEnv());
+            },
+            mapGridPickCellFromClientPoint: mapGridPickCellFromClientPoint,
+            placeActorFromTemplate: placeActorFromTemplate,
+            moveActor: moveActor,
+            moveMarker: moveMarker,
+            bindLevelFields: bindLevelFields,
+            bindGameAssetPanel: bindGameAssetPanel,
+            bindLevelAudioUi: function () {
+                bindLevelAudioUi(refs, audioEnv());
+            },
+            bindGlobalAudioUi: function () {
+                bindGlobalAudioUi(audioEnv());
+            },
+            bindGlobalSettingsChrome: bindGlobalSettingsChrome,
+            bindGlobalCutscenePanel: bindGlobalCutscenePanel,
+            bindGlobalScreenUiPanel: bindGlobalScreenUiPanel,
+            wireViewportViewMode: wireViewportViewMode,
+            setPreviewToolbarMode: setPreviewToolbarMode,
+            focusPreviewSelection: function () {
+                if (previewApi && typeof previewApi.focusSelection === 'function') previewApi.focusSelection();
+            },
+            refreshGameModelsCatalog: refreshGameModelsCatalog,
+            renderContentBrowser: renderContentBrowser,
+            setStatus: setStatus,
+            wireContentBrowserFloating: wireContentBrowserFloating,
+            collapseRegionPanel: function () {
+                shellLeftCollapsedPref = true;
+                _persistShellCollapsedPrefs(
+                    { leftKey: SHELL_LEFT_COLLAPSE_KEY, rightKey: SHELL_RIGHT_COLLAPSE_KEY },
+                    shellLeftCollapsedPref,
+                    shellRightCollapsedPref
+                );
+                applyShellPanelCollapseUi();
+            },
+            expandRegionPanel: function () {
+                shellLeftCollapsedPref = false;
+                _persistShellCollapsedPrefs(
+                    { leftKey: SHELL_LEFT_COLLAPSE_KEY, rightKey: SHELL_RIGHT_COLLAPSE_KEY },
+                    shellLeftCollapsedPref,
+                    shellRightCollapsedPref
+                );
+                applyShellPanelCollapseUi();
+            },
+            collapseInspectorPanel: function () {
+                shellRightCollapsedPref = true;
+                _persistShellCollapsedPrefs(
+                    { leftKey: SHELL_LEFT_COLLAPSE_KEY, rightKey: SHELL_RIGHT_COLLAPSE_KEY },
+                    shellLeftCollapsedPref,
+                    shellRightCollapsedPref
+                );
+                applyShellPanelCollapseUi();
+            },
+            expandInspectorPanel: function () {
+                shellRightCollapsedPref = false;
+                _persistShellCollapsedPrefs(
+                    { leftKey: SHELL_LEFT_COLLAPSE_KEY, rightKey: SHELL_RIGHT_COLLAPSE_KEY },
+                    shellLeftCollapsedPref,
+                    shellRightCollapsedPref
+                );
+                applyShellPanelCollapseUi();
+            },
+            resizePreviewIfOpen: function () {
+                if (viewportViewMode === 'preview' && previewApi && typeof previewApi.resize === 'function') {
+                    previewApi.resize();
+                }
+            },
+            applyShellPanelCollapseUi: applyShellPanelCollapseUi,
+            clampContentBrowserFloatPanelIntoViewport: clampContentBrowserFloatPanelIntoViewport,
+            toggleContentBrowserFloat: toggleContentBrowserFloat,
+            canFocusPreviewSelection: function () {
+                return (
+                    viewportViewMode === 'preview' &&
+                    previewApi &&
+                    typeof previewApi.focusSelection === 'function' &&
+                    selectedObject &&
+                    selectedObject.kind === 'actor'
+                );
+            },
+            isBoardImageSelectedInLevelWorkbench: function () {
+                return activeWorkbench === 'level' && selectedObject && selectedObject.kind === 'boardImage';
+            },
+            clearBoardImageSelection: function () {
+                selectedObject = null;
+                clearBoardImageInteractionState();
+                renderSelectionInspector();
+                renderMap();
+                renderBoardImagesPanel(refs, boardImagesEnv());
+            },
+            getSelectedObject: function () {
+                return selectedObject;
+            },
+            bindEraserToolControls: function (refsArg) {
+                bindEraserToolControls(refsArg, function () {
+                    refreshEraserPreviewIfActive(refsArg, eraserPreviewEnv());
+                });
+            },
+            bindBoardImageGlobalHandlers: function (refsArg) {
+                bindBoardImageGlobalHandlers(refsArg, boardImagesEnv());
+            },
+            ensureBoardImagesPanelDelegated: function (refsArg) {
+                ensureBoardImagesPanelDelegated(refsArg, boardImagesEnv());
+            }
+        };
+    }
+
+    function gameplayEnv() {
+        return {
+            getState: function () {
+                return state;
+            },
+            getGameplayCityContext: getGameplayCityContext,
+            getActiveGameplayTab: function () {
+                return activeGameplayTab;
+            },
+            setActiveGameplayTab: function (value) {
+                activeGameplayTab = value || 'enemies';
+            },
+            getSelectedGameplayEntryId: function () {
+                return selectedGameplayEntryId;
+            },
+            setSelectedGameplayEntryId: function (value) {
+                selectedGameplayEntryId = value || '';
+            },
+            getSelectedGameplayAssetId: function () {
+                return selectedGameplayAssetId;
+            },
+            setSelectedGameplayAssetId: function (value) {
+                selectedGameplayAssetId = value || '';
+            },
+            getActiveWorkbench: function () {
+                return activeWorkbench;
+            },
+            resolveCityGameplayConfigKey: resolveCityGameplayConfigKey,
+            markDirty: markDirty,
+            setStatus: setStatus,
+            renderExploreGameplayPanels: renderExploreGameplayPanels,
+            ensureGameplayAssetPreview: ensureGameplayAssetPreview,
+            disposeGameplayAssetPreview: disposeGameplayAssetPreview
+        };
+    }
+
+    function modelEditorEnv() {
+        return {
+            getBrowsableModelAssets: getBrowsableModelAssets,
+            getActiveWorkbench: function () {
+                return activeWorkbench;
+            },
+            getActiveModelCategory: function () {
+                return activeModelCategory;
+            },
+            setActiveModelCategory: function (value) {
+                activeModelCategory = value || 'all';
+            },
+            getSelectedModelId: function () {
+                return selectedModelId;
+            },
+            setSelectedModelId: function (value) {
+                selectedModelId = value || '';
+            },
+            ensureModelAssetPreview: ensureModelAssetPreview,
+            disposeModelAssetPreview: disposeModelAssetPreview,
+            setStatus: setStatus,
+            refreshGameModelsCatalog: refreshGameModelsCatalog,
+            markDirty: markDirty
+        };
+    }
+
+    function actorModelSidebarEnv() {
+        return {
+            getBrowsableModelAssets: getBrowsableModelAssets,
+            getState: function () {
+                return state;
+            },
+            setStatus: setStatus,
+            markDirty: markDirty,
+            renderAll: renderAll,
+            renderActorPalette: renderActorPalette,
+            schedulePreviewRefresh: schedulePreviewRefresh,
+            uploadFileToProjectUrl: uploadFileToProjectUrl,
+            createActorTemplateFromModel: createActorTemplateFromModel
+        };
+    }
+
+    function levelContentBrowserEnv() {
+        return {
+            getState: function () {
+                return state;
+            },
+            getLevel: getLevel,
+            getSelectedObject: function () {
+                return selectedObject;
+            },
+            selectObject: selectObject,
+            selectGridCellObject: selectGridCellObject,
+            getLevelContentBrowserFilter: function () {
+                return levelContentBrowserFilter;
+            },
+            setLevelContentBrowserFilter: function (value) {
+                levelContentBrowserFilter = value || 'all';
+            },
+            getActiveWorkbench: function () {
+                return activeWorkbench;
+            },
+            getViewportViewMode: function () {
+                return viewportViewMode;
+            },
+            getActiveEditorMode: function () {
+                return activeEditorMode;
+            }
+        };
+    }
+
     function audioEnv() {
         return {
             getLevel: getLevel,
@@ -5570,30 +3138,7 @@ import { renderMap as _renderMap } from './editor/map-render.js';
      * 当落点落在网格 gap / 容器 padding 上时，用几何换算到格子（与 .map-cell 的 grid 布局一致）。
      */
     function mapGridPickCellFromClientPoint(clientX, clientY, grid) {
-        if (!refs.mapGrid || !grid) return null;
-        var el = refs.mapGrid;
-        var rect = el.getBoundingClientRect();
-        var st = getComputedStyle(el);
-        var padL = parseFloat(st.paddingLeft) || 0;
-        var padT = parseFloat(st.paddingTop) || 0;
-        var cols = grid.cols;
-        var rows = grid.rows;
-        var csStr = el.style.getPropertyValue('--cell-size') || getComputedStyle(el).getPropertyValue('--cell-size');
-        var cs = parseFloat(csStr) || 28;
-        var gap = parseFloat(st.rowGap || st.columnGap || st.gap) || 1;
-        var stride = cs + gap;
-        var x = clientX - rect.left - padL;
-        var y = clientY - rect.top - padT;
-        var col = Math.floor(x / stride);
-        var row = Math.floor(y / stride);
-        var ox = x - col * stride;
-        var oy = y - row * stride;
-        if (ox > cs || oy > cs) return null;
-        if (col < 0 || row < 0 || col >= cols || row >= rows) return null;
-        var wrap = document.createElement('div');
-        wrap.setAttribute('data-col', String(col));
-        wrap.setAttribute('data-row', String(row));
-        return wrap;
+        return _mapGridPickCellFromClientPoint(refs, clientX, clientY, grid);
     }
 
     document.addEventListener('DOMContentLoaded', init);

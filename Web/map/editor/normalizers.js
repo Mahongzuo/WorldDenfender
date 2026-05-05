@@ -11,27 +11,8 @@ import {
     DEFAULT_GRID_COLS, DEFAULT_GRID_ROWS, DEFAULT_TILE_SIZE
 } from './content.js';
 
-// ---------------------------------------------------------------------------
-// 区域 / 地区辅助
-// ---------------------------------------------------------------------------
-
-export function splitRegion(region) {
-    var parts = String(region || '').split(/[·・\-\/]/).map(function (part) { return part.trim(); }).filter(Boolean);
-    return { country: parts[0] || region || '', city: parts[1] || '' };
-}
-
-export function buildRegionLabel(location, fallback) {
-    if (location.countryName && location.cityName) return location.countryName + ' · ' + location.cityName;
-    return fallback || location.countryName || '未设置地区';
-}
-
-export function inferCountryCode(countryName) {
-    if (countryName === '中国') return 'CN';
-    if (countryName === '美国') return 'US';
-    if (countryName === '日本') return 'JP';
-    if (countryName === '法国') return 'FR';
-    return '';
-}
+import { splitRegion, buildRegionLabel, inferCountryCode } from './normalize-region.js';
+export { splitRegion, buildRegionLabel, inferCountryCode };
 
 // ---------------------------------------------------------------------------
 // 基础单元格 / 点位
@@ -849,7 +830,7 @@ function wave1EnemyArchetypeStats(archId) {
     };
 }
 
-function buildDefaultEnemyEntries(config) {
+export function buildDefaultEnemyEntries(config) {
     var cityName = config && config.cityName ? config.cityName : '';
     var cityCode = config && config.cityCode ? config.cityCode : '';
     var seen = Object.create(null);
@@ -901,7 +882,7 @@ function buildDefaultEnemyEntries(config) {
     return list;
 }
 
-function buildDefaultTowerEntries(config) {
+export function buildDefaultTowerEntries(config) {
     var cityName = config && config.cityName ? config.cityName : '';
     var cityCode = config && config.cityCode ? config.cityCode : '';
     return TOWER_MODEL_SPECS.map(function (spec) {
@@ -921,7 +902,7 @@ function buildDefaultTowerEntries(config) {
     });
 }
 
-function buildDefaultCardEntries(config) {
+export function buildDefaultCardEntries(config) {
     var source = [].concat(config.characters || []).concat(config.skills || []);
     return source.map(function (entry) {
         var stats = entry.stats || {};

@@ -1,0 +1,782 @@
+import { escapeAttr, escapeHtml, fileToBase64, slugify, uid } from './utils.js';
+import { GAMEPLAY_RESOURCE_CONFIG } from './content.js';
+import {
+    normalizeGameplayPlacement,
+    mergeDistinctStrings,
+    buildDefaultEnemyEntries,
+    buildDefaultTowerEntries,
+    buildDefaultCardEntries
+} from './normalizers.js';
+import { gameplayPlacementLabel, isImageAssetPath, isModelAssetPath, pickPreferredGameplayTab, uniqueCatalogId } from './display-utils.js';
+import { uniqueGameplayEntryId } from './id-utils.js';
+
+function getState(env) {
+    return env.getState();
+}
+
+function getGameplayCityContext(env) {
+    return env.getGameplayCityContext();
+}
+
+function getActiveGameplayTab(env) {
+    return env.getActiveGameplayTab() || 'enemies';
+}
+
+function setActiveGameplayTab(env, tabId) {
+    env.setActiveGameplayTab(tabId || 'enemies');
+}
+
+function getSelectedGameplayEntryId(env) {
+    return env.getSelectedGameplayEntryId() || '';
+}
+
+function setSelectedGameplayEntryId(env, entryId) {
+    env.setSelectedGameplayEntryId(entryId || '');
+}
+
+function getSelectedGameplayAssetId(env) {
+    return env.getSelectedGameplayAssetId() || '';
+}
+
+function setSelectedGameplayAssetId(env, assetId) {
+    env.setSelectedGameplayAssetId(assetId || '');
+}
+
+function updateGameplayTabUi(refs, env) {
+    if (!refs.gameplayResourceTabs) return;
+    refs.gameplayResourceTabs.querySelectorAll('[data-gameplay-tab]').forEach(function (item) {
+        item.classList.toggle('active', item.getAttribute('data-gameplay-tab') === getActiveGameplayTab(env));
+    });
+}
+
+function getGameplayCollection(env) {
+    var cityContext = getGameplayCityContext(env);
+    if (!cityContext) return null;
+    return ensureCityGameplayConfig(env, cityContext)[getActiveGameplayTab(env)];
+}
+
+function getSelectedGameplayEntry(env, entries) {
+    var list = Array.isArray(entries) ? entries : getGameplayCollection(env);
+    if (!Array.isArray(list) || !list.length) return null;
+    var found = list.find(function (item) {
+        return item.id === getSelectedGameplayEntryId(env);
+    }) || null;
+    if (!found) {
+        setSelectedGameplayEntryId(env, list[0].id);
+        found = list[0];
+    }
+    return found;
+}
+
+function getFilteredGameplayEntries(refs, env) {
+    var cityContext = getGameplayCityContext(env);
+    var collection = cityContext ? ensureCityGameplayConfig(env, cityContext)[getActiveGameplayTab(env)] : [];
+    var keyword = refs.gameplaySearch ? String(refs.gameplaySearch.value || '').trim().toLowerCase() : '';
+    return collection.filter(function (entry) {
+        if (!keyword) return true;
+        var haystack = [entry.name, entry.id, entry.summary].concat(entry.tags || []).join(' ').toLowerCase();
+        return haystack.indexOf(keyword) !== -1;
+    });
+}
+
+function ensureUniqueGameplayEntryId(env, list, value, currentId) {
+    var baseId = String(value || '').trim().replace(/\s+/g, '-');
+    if (!baseId) baseId = currentId || uid(getActiveGameplayTab(env));
+    var candidate = baseId;
+    var serial = 1;
+    while (list.some(function (item) { return item.id === candidate && item.id !== currentId; })) {
+        candidate = baseId + '-' + String(serial);
+        serial += 1;
+    }
+    return candidate;
+}
+
+function getGameplayAssets(env, cityContext, assetType) {
+    var state = getState(env);
+    return ((state && state.editorAssetsCatalog) || []).filter(function (asset) {
+        return asset.cityCode === cityContext.cityCode && asset.assetType === assetType;
+    });
+}
+
+function closeAllGameplayEntryMenus(refs) {
+    if (!refs.gameplayEntryList) return;
+    refs.gameplayEntryList.querySelectorAll('[data-gameplay-menu-toggle]').forEach(function (btn) {
+        btn.setAttribute('aria-expanded', 'false');
+    });
+    refs.gameplayEntryList.querySelectorAll('.gameplay-entry-menu').forEach(function (menu) {
+        menu.classList.add('view-hidden');
+    });
+}
+
+function resolveGameplayEntryThumbnail(entry) {
+    if (!entry || !entry.assetRefs) return '';
+    return isImageAssetPath(entry.assetRefs.imagePath) ? entry.assetRefs.imagePath : '';
+}
+
+function setGameplayEntryActionButtons(refs, disabled, entries, entry) {
+    var list = Array.isArray(entries) ? entries : [];
+    var index = entry ? list.findIndex(function (item) { return item.id === entry.id; }) : -1;
+    if (refs.btnDuplicateGameplayEntry) refs.btnDuplicateGameplayEntry.disabled = disabled;
+    if (refs.btnDeleteGameplayEntry) refs.btnDeleteGameplayEntry.disabled = disabled;
+    if (refs.btnMoveGameplayUp) refs.btnMoveGameplayUp.disabled = disabled || index <= 0;
+    if (refs.btnMoveGameplayDown) refs.btnMoveGameplayDown.disabled = disabled || index === -1 || index >= list.length - 1;
+}
+
+function getSelectedGameplayAsset(env, entry, assets) {
+    if (!entry && !getSelectedGameplayAssetId(env)) return null;
+    var state = getState(env);
+    var list = Array.isArray(assets) ? assets : [];
+    var picked = getSelectedGameplayAssetId(env)
+        ? list.find(function (asset) { return asset.id === getSelectedGameplayAssetId(env); })
+        : null;
+    if (picked) return picked;
+    if (getSelectedGameplayAssetId(env)) {
+        picked = ((state && state.editorAssetsCatalog) || []).find(function (asset) {
+            return asset.id === getSelectedGameplayAssetId(env);
+        }) || null;
+        if (picked) return picked;
+    }
+    if (entry && entry.assetRefs) {
+        var refsToTry = [entry.assetRefs.imagePath, entry.assetRefs.modelPath];
+        for (var i = 0; i < refsToTry.length; i += 1) {
+            var match = list.find(function (asset) {
+                return asset.publicUrl === refsToTry[i] || asset.path === refsToTry[i] || asset.projectPath === refsToTry[i];
+            }) || ((state && state.editorAssetsCatalog) || []).find(function (asset) {
+                return asset.publicUrl === refsToTry[i] || asset.path === refsToTry[i] || asset.projectPath === refsToTry[i];
+            });
+            if (match) {
+                setSelectedGameplayAssetId(env, match.id);
+                return match;
+            }
+        }
+    }
+    setSelectedGameplayAssetId(env, list[0] ? list[0].id : '');
+    return list[0] || null;
+}
+
+function renderGameplayAssetPreview(refs, env, asset, entry) {
+    var hasImage = asset && isImageAssetPath(asset.publicUrl || asset.path);
+    var hasModel = asset && isModelAssetPath(asset.publicUrl || asset.path);
+    if (refs.gameplayPreviewTitle) refs.gameplayPreviewTitle.textContent = asset ? asset.name : (entry ? entry.name : '资源预览');
+    if (refs.gameplayPreviewMeta) refs.gameplayPreviewMeta.textContent = asset ? (asset.assetType + ' · ' + (asset.cityName || '未命名城市')) : '未选择资源';
+    if (refs.gameplayAssetPreviewEmpty) refs.gameplayAssetPreviewEmpty.classList.toggle('view-hidden', !!asset);
+    if (refs.gameplayAssetPreviewImage) {
+        refs.gameplayAssetPreviewImage.classList.toggle('view-hidden', !hasImage);
+        refs.gameplayAssetPreviewImage.src = hasImage ? String(asset.publicUrl || asset.path) : '';
+    }
+    if (refs.gameplayAssetPreviewHost) refs.gameplayAssetPreviewHost.classList.toggle('view-hidden', !hasModel);
+    if (!hasModel) {
+        env.disposeGameplayAssetPreview();
+        return;
+    }
+    env.ensureGameplayAssetPreview(String(asset.publicUrl || asset.path));
+}
+
+function renderGameplayEntryList(refs, env, entries, cityContext) {
+    if (!refs.gameplayEntryList) return;
+    if (!cityContext) {
+        refs.gameplayEntryList.innerHTML = '<div class="empty-state">先从左侧选中一个城市关卡，玩法编辑器会自动切到该城市的资源库。</div>';
+        return;
+    }
+    if (!entries.length) {
+        refs.gameplayEntryList.innerHTML = '<div class="empty-state">' + GAMEPLAY_RESOURCE_CONFIG[getActiveGameplayTab(env)].empty + '</div>';
+        return;
+    }
+    if (!getSelectedGameplayEntryId(env) || !entries.some(function (entry) { return entry.id === getSelectedGameplayEntryId(env); })) {
+        setSelectedGameplayEntryId(env, entries[0].id);
+    }
+    refs.gameplayEntryList.innerHTML = entries.map(function (entry) {
+        var thumb = resolveGameplayEntryThumbnail(entry);
+        return [
+            '<div class="list-item gameplay-entry-card' + (entry.id === getSelectedGameplayEntryId(env) ? ' active' : '') + '">',
+            thumb
+                ? '  <button type="button" class="gameplay-entry-thumb-btn" data-gameplay-select-id="' + escapeAttr(entry.id) + '" title="选择此条目">'
+                    + '<img class="gameplay-asset-thumb" src="' + escapeAttr(thumb) + '" alt="' + escapeAttr(entry.name) + '">'
+                    + '</button>'
+                : '',
+            '  <div class="gameplay-entry-main">',
+            '    <div class="gameplay-entry-title-row">',
+            '      <button type="button" class="gameplay-entry-select" data-gameplay-select-id="' + escapeAttr(entry.id) + '">' + escapeHtml(entry.name) + '</button>',
+            '      <div class="gameplay-entry-menu-anchor">',
+            '        <button type="button" class="mini-button gameplay-entry-ops-btn" data-gameplay-menu-toggle aria-expanded="false">操作</button>',
+            '        <div class="gameplay-entry-menu view-hidden" role="menu">',
+            '          <button type="button" role="menuitem" class="gameplay-entry-menu-item" data-gameplay-action="move-up" data-gameplay-entry-id="' + escapeAttr(entry.id) + '">上移</button>',
+            '          <button type="button" role="menuitem" class="gameplay-entry-menu-item" data-gameplay-action="move-down" data-gameplay-entry-id="' + escapeAttr(entry.id) + '">下移</button>',
+            '          <button type="button" role="menuitem" class="gameplay-entry-menu-item" data-gameplay-action="duplicate" data-gameplay-entry-id="' + escapeAttr(entry.id) + '">复制</button>',
+            '          <button type="button" role="menuitem" class="gameplay-entry-menu-item danger" data-gameplay-action="delete" data-gameplay-entry-id="' + escapeAttr(entry.id) + '">删除</button>',
+            '        </div>',
+            '      </div>',
+            '    </div>',
+            '    <span class="gameplay-entry-summary">' + escapeHtml(entry.summary || '未填写简介') + '</span>',
+            '    <div class="gameplay-entry-meta">',
+            '      <span class="gameplay-chip">' + escapeHtml(entry.rarity || 'common') + '</span>',
+            '      <span class="gameplay-chip">' + escapeHtml((entry.tags || []).join(' / ') || cityContext.cityName) + '</span>',
+            entry.placement ? '      <span class="gameplay-chip">' + escapeHtml(gameplayPlacementLabel(entry.placement)) + '</span>' : '',
+            '    </div>',
+            '  </div>',
+            '</div>'
+        ].join('');
+    }).join('');
+}
+
+function renderGameplayForm(refs, env, entries, cityContext) {
+    var entry = getSelectedGameplayEntry(env, entries);
+    var disabled = !entry;
+    if (refs.gameplayEditorTitle) refs.gameplayEditorTitle.textContent = entry ? entry.name : (GAMEPLAY_RESOURCE_CONFIG[getActiveGameplayTab(env)].label + '详情');
+    if (refs.gameplayEditorHint) refs.gameplayEditorHint.textContent = cityContext ? cityContext.cityName + ' · ' + GAMEPLAY_RESOURCE_CONFIG[getActiveGameplayTab(env)].label : '城市玩法配置';
+    if (refs.gameplayName) refs.gameplayName.value = entry ? entry.name : '';
+    if (refs.gameplayId) refs.gameplayId.value = entry ? entry.id : '';
+    if (refs.gameplayTags) refs.gameplayTags.value = entry ? (entry.tags || []).join(', ') : '';
+    if (refs.gameplayRarity) refs.gameplayRarity.value = entry ? entry.rarity : '';
+    if (refs.gameplaySummary) refs.gameplaySummary.value = entry ? entry.summary : '';
+    [refs.gameplayName, refs.gameplayId, refs.gameplayTags, refs.gameplayRarity, refs.gameplaySummary].forEach(function (field) {
+        if (field) field.disabled = disabled;
+    });
+    setGameplayEntryActionButtons(refs, disabled, entries, entry);
+    if (refs.gameplayStatGrid) {
+        var statsHtml = GAMEPLAY_RESOURCE_CONFIG[getActiveGameplayTab(env)].stats.map(function (field) {
+            var value = entry && entry.stats ? entry.stats[field.key] : '';
+            return [
+                '<label class="field-block">',
+                '  <span>' + escapeHtml(field.label) + '</span>',
+                '  <input type="number" data-gameplay-stat="' + escapeAttr(field.key) + '" step="' + escapeAttr(field.step) + '" value="' + escapeAttr(value === '' || value == null ? '' : String(value)) + '"' + (disabled ? ' disabled' : '') + '>',
+                '</label>'
+            ].join('');
+        }).join('');
+        var placementHtml = getActiveGameplayTab(env) === 'characters' || getActiveGameplayTab(env) === 'towers'
+            ? [
+                '<label class="field-block">',
+                '  <span>部署位置</span>',
+                '  <select data-gameplay-placement' + (disabled ? ' disabled' : '') + '>',
+                '    <option value="roadside"' + (!entry || entry.placement !== 'road' ? ' selected' : '') + '>道路两侧</option>',
+                '    <option value="road"' + (entry && entry.placement === 'road' ? ' selected' : '') + '>道路上</option>',
+                '  </select>',
+                '</label>'
+            ].join('')
+            : '';
+        refs.gameplayStatGrid.innerHTML = statsHtml + placementHtml;
+    }
+}
+
+function renderGameplayInspector(refs, env, cityContext, config, entries) {
+    var entry = getSelectedGameplayEntry(env, entries);
+    var assetType = refs.gameplayAssetType ? refs.gameplayAssetType.value : GAMEPLAY_RESOURCE_CONFIG[getActiveGameplayTab(env)].assetType;
+    var assets = cityContext ? getGameplayAssets(env, cityContext, assetType) : [];
+    if (refs.gameplayAssetType && (!refs.gameplayAssetType.value || refs.gameplayAssetType.value === '')) {
+        refs.gameplayAssetType.value = GAMEPLAY_RESOURCE_CONFIG[getActiveGameplayTab(env)].assetType;
+    }
+    if (refs.gameplayAssetName && !refs.gameplayAssetName.value && entry) refs.gameplayAssetName.value = entry.name;
+    if (refs.gameplayInspectorMeta) {
+        refs.gameplayInspectorMeta.textContent = cityContext
+            ? '当前城市：' + cityContext.cityName + '（' + cityContext.cityCode + '）'
+            : '先从左侧关卡树选择一个城市关卡，再在这里维护该关卡的敌人、防御塔、卡片、角色和技能。';
+    }
+    if (refs.gameplaySelectionMeta) {
+        refs.gameplaySelectionMeta.innerHTML = cityContext
+            ? [
+                '<div class="list-item"><strong>城市代码</strong><span>' + escapeHtml(cityContext.cityCode) + '</span></div>',
+                '<div class="gameplay-inspector-counts" role="group" aria-label="敌人、防御塔、卡片、角色、技能数量">',
+                [['敌人', config.enemies.length], ['防御塔', config.towers.length], ['卡片', config.cards.length], ['角色', config.characters.length], ['技能', config.skills.length]].map(function (pair) {
+                    return '<span class="gic-chip"><strong>' + String(pair[1]) + '</strong><span>' + escapeHtml(pair[0]) + '</span></span>';
+                }).join(''),
+                '</div>',
+                '<div class="list-item"><strong>当前选择</strong><span>' + escapeHtml(entry ? entry.name : '未选择条目') + '</span></div>',
+                '<div class="list-item"><strong>模型 / 图片</strong><span>' + escapeHtml(entry ? String(entry.assetRefs.modelPath || '未绑定') + ' / ' + String(entry.assetRefs.imagePath || '未绑定') : '未绑定') + '</span></div>'
+            ].join('')
+            : '<div class="empty-state">没有可编辑的城市。</div>';
+    }
+    if (!refs.gameplayAssetList) return;
+    if (!cityContext) {
+        refs.gameplayAssetList.innerHTML = '<div class="empty-state">请选择城市后再上传资源。</div>';
+        renderGameplayAssetPreview(refs, env, null, entry);
+        return;
+    }
+    if (!assets.length) {
+        refs.gameplayAssetList.innerHTML = '<div class="empty-state">当前分类下还没有项目资源。上传后会写入 public/Arts/' + escapeHtml(assetType) + '/' + escapeHtml(cityContext.cityName) + '/</div>';
+        renderGameplayAssetPreview(refs, env, null, entry);
+        return;
+    }
+    refs.gameplayAssetList.innerHTML = assets.map(function (asset) {
+        var isImage = isImageAssetPath(asset.publicUrl || asset.path);
+        return [
+            '<div class="list-item gameplay-asset-card' + (asset.id === getSelectedGameplayAssetId(env) ? ' active' : '') + '" data-asset-preview-id="' + escapeAttr(asset.id) + '">',
+            isImage ? '  <img class="gameplay-asset-thumb" src="' + escapeAttr(asset.publicUrl || asset.path) + '" alt="' + escapeAttr(asset.name) + '">' : '',
+            '  <div class="gameplay-asset-kind">' + escapeHtml(asset.resourceKind || asset.assetType) + '</div>',
+            '  <strong>' + escapeHtml(asset.name) + '</strong>',
+            '  <span>' + escapeHtml(asset.summary || asset.publicUrl || asset.path) + '</span>',
+            '  <code>' + escapeHtml(asset.path || asset.projectPath || '') + '</code>',
+            '  <div class="inline-controls">',
+            '    <button type="button" class="mini-button" data-asset-id="' + escapeAttr(asset.id) + '" data-asset-bind="modelPath">绑定模型</button>',
+            '    <button type="button" class="mini-button" data-asset-id="' + escapeAttr(asset.id) + '" data-asset-bind="imagePath">绑定图片</button>',
+            '  </div>',
+            '</div>'
+        ].join('');
+    }).join('');
+    renderGameplayAssetPreview(refs, env, getSelectedGameplayAsset(env, entry, assets), entry);
+    env.renderExploreGameplayPanels();
+}
+
+function bindGameplayAsset(refs, env, assetId, bindKey) {
+    var entry = getSelectedGameplayEntry(env);
+    if (!entry) {
+        env.setStatus('请先选择一个玩法条目', 'error');
+        return;
+    }
+    var state = getState(env);
+    var asset = ((state && state.editorAssetsCatalog) || []).find(function (item) { return item.id === assetId; });
+    if (!asset) return;
+    if (!entry.assetRefs || typeof entry.assetRefs !== 'object') entry.assetRefs = {};
+    entry.assetRefs[bindKey] = asset.publicUrl || asset.path;
+    if (bindKey === 'modelPath') entry.assetRefs.modelId = asset.id;
+    if (bindKey === 'imagePath') entry.assetRefs.imageId = asset.id;
+    entry.updatedAt = new Date().toISOString();
+    setSelectedGameplayAssetId(env, asset.id);
+    env.markDirty('已绑定项目资源');
+    renderGameplayEditor(refs, env);
+}
+
+function handleGameplayFormInput(refs, env, target) {
+    var entry = getSelectedGameplayEntry(env);
+    var list = getGameplayCollection(env);
+    if (!entry || !list || !target) return;
+    if (target.name === 'name') {
+        entry.name = String(target.value || '').trim();
+        if (refs.gameplayAssetName && !refs.gameplayAssetName.value) refs.gameplayAssetName.value = entry.name;
+        env.markDirty('已更新玩法条目名称');
+        renderGameplayEditor(refs, env);
+        return;
+    }
+    if (target.name === 'id') {
+        var nextId = ensureUniqueGameplayEntryId(env, list, target.value, entry.id);
+        entry.id = nextId;
+        setSelectedGameplayEntryId(env, nextId);
+        if (refs.gameplayId && refs.gameplayId.value !== nextId) refs.gameplayId.value = nextId;
+        env.markDirty('已更新玩法条目 ID');
+        renderGameplayEditor(refs, env);
+        return;
+    }
+    if (target.name === 'tags') {
+        entry.tags = String(target.value || '').split(',').map(function (part) { return part.trim(); }).filter(Boolean);
+        env.markDirty('已更新玩法标签');
+        renderGameplayEntryList(refs, env, getFilteredGameplayEntries(refs, env), getGameplayCityContext(env));
+        return;
+    }
+    if (target.name === 'rarity') {
+        entry.rarity = String(target.value || '').trim();
+        env.markDirty('已更新玩法稀有度');
+        renderGameplayEntryList(refs, env, getFilteredGameplayEntries(refs, env), getGameplayCityContext(env));
+        return;
+    }
+    if (target.name === 'summary') {
+        entry.summary = String(target.value || '');
+        env.markDirty('已更新玩法简介');
+        renderGameplayEntryList(refs, env, getFilteredGameplayEntries(refs, env), getGameplayCityContext(env));
+        return;
+    }
+    if (target.hasAttribute('data-gameplay-placement')) {
+        entry.placement = normalizeGameplayPlacement(target.value);
+        env.markDirty('已更新单位部署位置');
+        renderGameplayEntryList(refs, env, getFilteredGameplayEntries(refs, env), getGameplayCityContext(env));
+        return;
+    }
+    if (target.hasAttribute('data-gameplay-stat')) {
+        var statKey = target.getAttribute('data-gameplay-stat');
+        var numeric = Number(target.value);
+        if (!entry.stats || typeof entry.stats !== 'object') entry.stats = {};
+        entry.stats[statKey] = Number.isFinite(numeric) ? numeric : 0;
+        env.markDirty('已更新玩法数值');
+    }
+}
+
+async function uploadGameplayAsset(refs, env, file) {
+    var cityContext = getGameplayCityContext(env);
+    if (!cityContext) {
+        if (refs.gameplayAssetUpload) refs.gameplayAssetUpload.value = '';
+        env.setStatus('请先选择一个城市关卡再上传资源', 'error');
+        return;
+    }
+    var assetType = refs.gameplayAssetType
+        ? refs.gameplayAssetType.value || GAMEPLAY_RESOURCE_CONFIG[getActiveGameplayTab(env)].assetType
+        : GAMEPLAY_RESOURCE_CONFIG[getActiveGameplayTab(env)].assetType;
+    var assetName = refs.gameplayAssetName && refs.gameplayAssetName.value
+        ? refs.gameplayAssetName.value.trim()
+        : file.name.replace(/\.[^.]+$/, '');
+    try {
+        env.setStatus('正在保存城市资源 ' + file.name + '…', 'idle');
+        var content = await fileToBase64(file);
+        var response = await fetch('/api/editor-assets', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name: file.name,
+                content: content,
+                cityCode: cityContext.cityCode,
+                cityName: cityContext.cityName,
+                assetType: assetType,
+                resourceKind: getActiveGameplayTab(env),
+                assetName: assetName
+            })
+        });
+        if (!response.ok) throw new Error('上传失败: ' + response.status);
+        var payload = await response.json();
+        var state = getState(env);
+        var id = String(payload.id || uniqueCatalogId((state && state.editorAssetsCatalog) || [], slugify(cityContext.cityName + '-' + assetName) || 'editor-asset'));
+        state.editorAssetsCatalog = state.editorAssetsCatalog || [];
+        state.editorAssetsCatalog = state.editorAssetsCatalog.filter(function (item) { return item.id !== id; });
+        state.editorAssetsCatalog.push({
+            id: id,
+            name: String(payload.name || assetName),
+            assetType: String(payload.assetType || assetType),
+            resourceKind: String(payload.resourceKind || getActiveGameplayTab(env)),
+            cityCode: cityContext.cityCode,
+            cityName: cityContext.cityName,
+            path: String(payload.projectPath || ''),
+            projectPath: String(payload.projectPath || ''),
+            publicUrl: String(payload.publicUrl || ''),
+            summary: cityContext.cityName + ' · ' + assetName,
+            updatedAt: new Date().toISOString()
+        });
+        if (refs.gameplayAssetName) refs.gameplayAssetName.value = assetName;
+        if (refs.gameplayAssetUpload) refs.gameplayAssetUpload.value = '';
+        env.markDirty('已保存城市资源到项目');
+        var selectedEntry = getSelectedGameplayEntry(env);
+        if (selectedEntry) {
+            var bindKey = /\.(png|jpg|jpeg|webp)$/i.test(file.name) ? 'imagePath' : 'modelPath';
+            bindGameplayAsset(refs, env, id, bindKey);
+        } else {
+            renderGameplayEditor(refs, env);
+        }
+        env.setStatus('已保存到 ' + String(payload.projectPath || 'public/Arts'), 'success');
+    } catch (error) {
+        if (refs.gameplayAssetUpload) refs.gameplayAssetUpload.value = '';
+        env.setStatus('城市资源保存失败: ' + error.message, 'error');
+    }
+}
+
+export function ensureCityGameplayConfig(env, cityContext) {
+    var state = getState(env);
+    state.cityGameplayConfigs = state.cityGameplayConfigs || {};
+    var resolvedKey = env.resolveCityGameplayConfigKey(cityContext);
+    var created = !state.cityGameplayConfigs[resolvedKey];
+    if (created) {
+        state.cityGameplayConfigs[resolvedKey] = {
+            cityCode: cityContext.cityCode,
+            cityName: cityContext.cityName,
+            aliases: mergeDistinctStrings(cityContext.cityName, cityContext.cityCode),
+            enemies: buildDefaultEnemyEntries(cityContext),
+            towers: buildDefaultTowerEntries(cityContext),
+            cards: buildDefaultCardEntries(cityContext),
+            characters: [],
+            skills: [],
+            updatedAt: ''
+        };
+    }
+    if (!Array.isArray(state.cityGameplayConfigs[resolvedKey].aliases)) {
+        state.cityGameplayConfigs[resolvedKey].aliases = mergeDistinctStrings(
+            cityContext.cityName,
+            cityContext.cityCode,
+            state.cityGameplayConfigs[resolvedKey].cityName,
+            state.cityGameplayConfigs[resolvedKey].cityCode
+        );
+    }
+    if (!Array.isArray(state.cityGameplayConfigs[resolvedKey].towers)) {
+        state.cityGameplayConfigs[resolvedKey].towers = buildDefaultTowerEntries(state.cityGameplayConfigs[resolvedKey]);
+    }
+    if (!Array.isArray(state.cityGameplayConfigs[resolvedKey].cards)) {
+        state.cityGameplayConfigs[resolvedKey].cards = buildDefaultCardEntries(state.cityGameplayConfigs[resolvedKey]);
+    }
+    if (!Array.isArray(state.cityGameplayConfigs[resolvedKey].enemies)) state.cityGameplayConfigs[resolvedKey].enemies = [];
+    if (!state.cityGameplayConfigs[resolvedKey].enemies.length) {
+        state.cityGameplayConfigs[resolvedKey].enemies = buildDefaultEnemyEntries(state.cityGameplayConfigs[resolvedKey]);
+    }
+    if (!Array.isArray(state.cityGameplayConfigs[resolvedKey].characters)) state.cityGameplayConfigs[resolvedKey].characters = [];
+    if (!Array.isArray(state.cityGameplayConfigs[resolvedKey].skills)) state.cityGameplayConfigs[resolvedKey].skills = [];
+    return state.cityGameplayConfigs[resolvedKey];
+}
+
+export function getCurrentCityGameplayConfig(env) {
+    var cityContext = getGameplayCityContext(env);
+    return cityContext ? ensureCityGameplayConfig(env, cityContext) : null;
+}
+
+function buildGameplayEnemyTypes(env) {
+    var cityContext = getGameplayCityContext(env);
+    var config = cityContext ? ensureCityGameplayConfig(env, cityContext) : null;
+    if (!config) return [];
+    return config.enemies.map(function (entry) {
+        return {
+            id: entry.id,
+            name: entry.name,
+            modelId: entry.assetRefs && entry.assetRefs.modelId ? entry.assetRefs.modelId : '',
+            modelPath: entry.assetRefs && entry.assetRefs.modelPath ? entry.assetRefs.modelPath : '',
+            hp: Number(entry.stats && entry.stats.hp) || 100,
+            speed: Number(entry.stats && entry.stats.speed) || 1,
+            reward: Number(entry.stats && entry.stats.reward) || 20,
+            source: 'cityGameplay'
+        };
+    });
+}
+
+export function getAvailableEnemyTypes(env, level) {
+    var localEnemies = Array.isArray(level && level.enemyTypes) ? level.enemyTypes : [];
+    var cityEnemies = buildGameplayEnemyTypes(env);
+    var merged = [];
+    cityEnemies.concat(localEnemies).forEach(function (enemy) {
+        if (!enemy || !enemy.id || merged.some(function (item) { return item.id === enemy.id; })) return;
+        merged.push(enemy);
+    });
+    return merged;
+}
+
+export function buildGameplayActorTemplates(env) {
+    var cityContext = getGameplayCityContext(env);
+    var config = cityContext ? ensureCityGameplayConfig(env, cityContext) : null;
+    if (!config) return [];
+    return ['enemies', 'characters', 'skills'].flatMap(function (kind) {
+        return config[kind].map(function (entry) {
+            var category = kind === 'enemies' ? 'enemy' : kind === 'characters' ? 'npc' : 'model';
+            return {
+                id: 'city-template-' + kind + '-' + entry.id,
+                name: entry.name,
+                category: category,
+                modelId: entry.assetRefs && entry.assetRefs.modelId ? entry.assetRefs.modelId : '',
+                modelPath: entry.assetRefs && entry.assetRefs.modelPath ? entry.assetRefs.modelPath : '',
+                templateModelScale: 1,
+                icon: kind === 'enemies' ? 'E' : kind === 'characters' ? 'C' : 'S',
+                source: 'cityGameplay',
+                sourceEntryId: entry.id,
+                sourceKind: kind,
+                stats: Object.assign({ hp: 100, attack: 0, range: 1, fireRate: 0, cost: 0, cooldown: 0 }, entry.stats || {})
+            };
+        });
+    });
+}
+
+export function getAvailableActorTemplates(env) {
+    var state = getState(env);
+    var merged = [];
+    (state.actorTemplates || []).concat(buildGameplayActorTemplates(env)).forEach(function (template) {
+        if (!template || !template.id || merged.some(function (item) { return item.id === template.id; })) return;
+        merged.push(template);
+    });
+    return merged;
+}
+
+export function findActorTemplate(env, templateId) {
+    var state = getState(env);
+    return getAvailableActorTemplates(env).find(function (item) { return item.id === templateId; }) || state.actorTemplates[0];
+}
+
+export function createGameplayEntry(refs, env) {
+    var cityContext = getGameplayCityContext(env);
+    if (!cityContext) {
+        env.setStatus('请先选择一个城市关卡。', 'error');
+        return;
+    }
+    var config = ensureCityGameplayConfig(env, cityContext);
+    var activeTab = getActiveGameplayTab(env);
+    var kindLabel = GAMEPLAY_RESOURCE_CONFIG[activeTab].label;
+    var id = uniqueGameplayEntryId(config[activeTab], slugify(cityContext.cityName + '-' + kindLabel) || activeTab);
+    config[activeTab].push({
+        id: id,
+        name: cityContext.cityName + '·新' + kindLabel,
+        summary: '',
+        tags: [cityContext.cityName],
+        rarity: 'common',
+        placement: activeTab === 'characters' || activeTab === 'towers' ? 'roadside' : '',
+        stats: {},
+        assetRefs: {},
+        cityCode: cityContext.cityCode,
+        cityName: cityContext.cityName,
+        updatedAt: new Date().toISOString()
+    });
+    setSelectedGameplayEntryId(env, id);
+    env.markDirty('已新增' + kindLabel + '条目');
+    renderGameplayEditor(refs, env);
+}
+
+export function duplicateGameplayEntry(refs, env) {
+    var collection = getGameplayCollection(env);
+    var entry = getSelectedGameplayEntry(env);
+    if (!collection || !entry) return;
+    var copy = JSON.parse(JSON.stringify(entry));
+    copy.id = uniqueGameplayEntryId(collection, entry.id + '-copy');
+    copy.name = entry.name + ' 复制';
+    copy.updatedAt = new Date().toISOString();
+    var index = collection.findIndex(function (item) { return item.id === entry.id; });
+    collection.splice(index + 1, 0, copy);
+    setSelectedGameplayEntryId(env, copy.id);
+    setSelectedGameplayAssetId(env, '');
+    env.markDirty('已复制玩法条目');
+    renderGameplayEditor(refs, env);
+}
+
+export function deleteGameplayEntry(refs, env) {
+    var collection = getGameplayCollection(env);
+    var entry = getSelectedGameplayEntry(env);
+    if (!collection || !entry) return;
+    if (!window.confirm('确定删除「' + entry.name + '」吗？')) return;
+    var index = collection.findIndex(function (item) { return item.id === entry.id; });
+    if (index === -1) return;
+    collection.splice(index, 1);
+    setSelectedGameplayEntryId(env, collection[index] ? collection[index].id : collection[index - 1] ? collection[index - 1].id : '');
+    setSelectedGameplayAssetId(env, '');
+    env.markDirty('已删除玩法条目');
+    renderGameplayEditor(refs, env);
+}
+
+export function moveGameplayEntry(refs, env, direction) {
+    var collection = getGameplayCollection(env);
+    var entry = getSelectedGameplayEntry(env);
+    if (!collection || !entry || !direction) return;
+    var index = collection.findIndex(function (item) { return item.id === entry.id; });
+    var targetIndex = index + direction;
+    if (index < 0 || targetIndex < 0 || targetIndex >= collection.length) return;
+    var moved = collection.splice(index, 1)[0];
+    collection.splice(targetIndex, 0, moved);
+    setSelectedGameplayEntryId(env, moved.id);
+    env.markDirty(direction < 0 ? '已上移玩法条目' : '已下移玩法条目');
+    renderGameplayEditor(refs, env);
+}
+
+export function renderGameplayEditor(refs, env) {
+    var cityContext = getGameplayCityContext(env);
+    var config = cityContext ? ensureCityGameplayConfig(env, cityContext) : null;
+    if (config) {
+        var preferredTab = pickPreferredGameplayTab(config, getActiveGameplayTab(env));
+        if (preferredTab !== getActiveGameplayTab(env)) {
+            setActiveGameplayTab(env, preferredTab);
+            updateGameplayTabUi(refs, env);
+        }
+    }
+    var collection = config ? config[getActiveGameplayTab(env)] : [];
+    var keyword = refs.gameplaySearch ? String(refs.gameplaySearch.value || '').trim().toLowerCase() : '';
+    var filtered = collection.filter(function (entry) {
+        if (!keyword) return true;
+        var haystack = [entry.name, entry.id, entry.summary].concat(entry.tags || []).join(' ').toLowerCase();
+        return haystack.indexOf(keyword) !== -1;
+    });
+    if (refs.gameplayCityTitle) {
+        refs.gameplayCityTitle.textContent = cityContext ? cityContext.cityName + ' · 卡片/玩法编辑器' : '请选择带城市信息的关卡';
+    }
+    if (refs.gameplayCityMeta) {
+        refs.gameplayCityMeta.textContent = cityContext
+            ? '当前城市代码：' + cityContext.cityCode + '，保存后会写入该关卡可用卡片、防御塔与城市资源。'
+            : '先在左侧选择一个城市关卡，然后维护该关卡的敌人、防御塔、卡片、角色和技能。';
+    }
+    if (refs.gameplayOverviewStats) {
+        refs.gameplayOverviewStats.innerHTML = cityContext
+            ? [
+                { label: '敌人', value: config.enemies.length },
+                { label: '防御塔', value: config.towers.length },
+                { label: '卡片', value: config.cards.length },
+                { label: '角色', value: config.characters.length },
+                { label: '技能', value: config.skills.length }
+            ].map(function (card) {
+                return '<div class="stat-card"><strong>' + escapeHtml(String(card.value)) + '</strong><span>' + escapeHtml(card.label) + '</span></div>';
+            }).join('')
+            : '';
+    }
+    renderGameplayEntryList(refs, env, filtered, cityContext);
+    renderGameplayForm(refs, env, filtered, cityContext, config);
+    renderGameplayInspector(refs, env, cityContext, config, filtered);
+}
+
+export function bindGameplayUi(refs, env) {
+    var root = refs.gameplayWorkbench || refs.gameplayInspectorWorkspace || refs.gameplayEntryList;
+    if (!root || root.dataset.gameplayUiBound === '1') return;
+    root.dataset.gameplayUiBound = '1';
+
+    if (refs.gameplayResourceTabs) {
+        refs.gameplayResourceTabs.addEventListener('click', function (event) {
+            var button = event.target.closest('[data-gameplay-tab]');
+            if (!button) return;
+            setActiveGameplayTab(env, button.getAttribute('data-gameplay-tab') || 'enemies');
+            setSelectedGameplayEntryId(env, '');
+            setSelectedGameplayAssetId(env, '');
+            updateGameplayTabUi(refs, env);
+            renderGameplayEditor(refs, env);
+        });
+    }
+    if (refs.gameplaySearch) refs.gameplaySearch.addEventListener('input', function () { renderGameplayEditor(refs, env); });
+    if (refs.btnCreateGameplayEntry) refs.btnCreateGameplayEntry.addEventListener('click', function () { createGameplayEntry(refs, env); });
+    if (refs.btnDuplicateGameplayEntry) refs.btnDuplicateGameplayEntry.addEventListener('click', function () { duplicateGameplayEntry(refs, env); });
+    if (refs.btnDeleteGameplayEntry) refs.btnDeleteGameplayEntry.addEventListener('click', function () { deleteGameplayEntry(refs, env); });
+    if (refs.btnMoveGameplayUp) refs.btnMoveGameplayUp.addEventListener('click', function () { moveGameplayEntry(refs, env, -1); });
+    if (refs.btnMoveGameplayDown) refs.btnMoveGameplayDown.addEventListener('click', function () { moveGameplayEntry(refs, env, 1); });
+
+    if (refs.gameplayEntryList) {
+        refs.gameplayEntryList.addEventListener('click', function (event) {
+            var menuToggle = event.target.closest('[data-gameplay-menu-toggle]');
+            if (menuToggle) {
+                event.stopPropagation();
+                var wrap = menuToggle.closest('.gameplay-entry-menu-anchor');
+                var menu = wrap && wrap.querySelector('.gameplay-entry-menu');
+                var expanded = menuToggle.getAttribute('aria-expanded') === 'true';
+                closeAllGameplayEntryMenus(refs);
+                if (!expanded && menu) {
+                    menuToggle.setAttribute('aria-expanded', 'true');
+                    menu.classList.remove('view-hidden');
+                }
+                return;
+            }
+            var actionButton = event.target.closest('[data-gameplay-action]');
+            if (actionButton) {
+                event.stopPropagation();
+                var action = actionButton.getAttribute('data-gameplay-action');
+                var id = actionButton.getAttribute('data-gameplay-entry-id') || '';
+                setSelectedGameplayEntryId(env, id);
+                closeAllGameplayEntryMenus(refs);
+                if (action === 'duplicate') duplicateGameplayEntry(refs, env);
+                if (action === 'delete') deleteGameplayEntry(refs, env);
+                if (action === 'move-up') moveGameplayEntry(refs, env, -1);
+                if (action === 'move-down') moveGameplayEntry(refs, env, 1);
+                return;
+            }
+            var selectBtn = event.target.closest('[data-gameplay-select-id]');
+            if (!selectBtn) return;
+            event.stopPropagation();
+            setSelectedGameplayEntryId(env, selectBtn.getAttribute('data-gameplay-select-id') || '');
+            setSelectedGameplayAssetId(env, '');
+            closeAllGameplayEntryMenus(refs);
+            renderGameplayEditor(refs, env);
+        });
+    }
+
+    document.addEventListener('click', function (event) {
+        if (env.getActiveWorkbench() !== 'gameplay') return;
+        if (!refs.gameplayEntryList) return;
+        if (event.target.closest('.gameplay-entry-menu-anchor')) return;
+        closeAllGameplayEntryMenus(refs);
+    });
+
+    if (refs.gameplayEditorForm) {
+        refs.gameplayEditorForm.addEventListener('input', function (event) {
+            handleGameplayFormInput(refs, env, event.target);
+        });
+        refs.gameplayEditorForm.addEventListener('change', function (event) {
+            handleGameplayFormInput(refs, env, event.target);
+        });
+    }
+    if (refs.gameplayAssetType) refs.gameplayAssetType.addEventListener('change', function () { renderGameplayEditor(refs, env); });
+    if (refs.gameplayAssetUpload) {
+        refs.gameplayAssetUpload.addEventListener('change', function () {
+            if (refs.gameplayAssetUpload.files && refs.gameplayAssetUpload.files[0]) {
+                uploadGameplayAsset(refs, env, refs.gameplayAssetUpload.files[0]);
+            }
+        });
+    }
+    if (refs.gameplayAssetList) {
+        refs.gameplayAssetList.addEventListener('click', function (event) {
+            var previewCard = event.target.closest('[data-asset-preview-id]');
+            if (previewCard && !event.target.closest('[data-asset-bind]')) {
+                setSelectedGameplayAssetId(env, previewCard.getAttribute('data-asset-preview-id') || '');
+                renderGameplayEditor(refs, env);
+                return;
+            }
+            var button = event.target.closest('[data-asset-bind]');
+            if (!button) return;
+            bindGameplayAsset(refs, env, button.getAttribute('data-asset-id') || '', button.getAttribute('data-asset-bind') || 'imagePath');
+        });
+    }
+}
