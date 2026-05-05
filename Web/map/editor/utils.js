@@ -128,3 +128,76 @@ export function inBounds(cols, rows) {
 export function byId(id) {
     return function (item) { return item && item.id === id; };
 }
+
+/** Clamp a raw value to the [0, 1] range for audio volume fields. */
+export function editorVol01(raw) {
+    var n = Number(raw);
+    if (!Number.isFinite(n)) return undefined;
+    return Math.max(0, Math.min(1, n));
+}
+
+/**
+ * 将 vol01 原始音量值换算为编辑器显示百分比（0-100）。
+ * 无法解析时返回 fallbackPct。
+ * @param {*} v
+ * @param {number} fallbackPct
+ * @returns {number}
+ */
+export function editorPctFromVol01(v, fallbackPct) {
+    var x = editorVol01(v);
+    if (x === undefined) return fallbackPct;
+    return Math.round(x * 100);
+}
+
+/**
+ * 将 Inspector 宽度夹到合法像素范围 [280, min(580, viewport-based-max)]。
+ * @param {number} px
+ * @returns {number}
+ */
+export function clampInspectorWidthPx(px) {
+    var min = 280;
+    var max = Math.min(580, Math.max(320, window.innerWidth - 280 - 480));
+    return Math.round(Math.max(min, Math.min(max, px)));
+}
+
+/**
+ * 当前视口宽度是否为窄屏布局（≤1180px）。
+ * @returns {boolean}
+ */
+export function isNarrowWorkbenchLayout() {
+    return typeof window.matchMedia !== 'undefined' && window.matchMedia('(max-width: 1180px)').matches;
+}
+
+/**
+ * 从 DragEvent 中安全读取 JSON payload（application/json 优先，text/plain 备用）。
+ * @param {DragEvent} event
+ * @returns {*}
+ */
+export function readDragPayload(event) {
+    try {
+        return JSON.parse(event.dataTransfer.getData('application/json'));
+    } catch (_e) {
+        try {
+            var raw = event.dataTransfer.getData('text/plain');
+            return raw ? JSON.parse(raw) : null;
+        } catch (_e2) {
+            return null;
+        }
+    }
+}
+
+/**
+ * 将 File 对象异步读取为 Base64 字符串（不含 data:xxx;base64, 前缀）。
+ * @param {File} file
+ * @returns {Promise<string>}
+ */
+export function fileToBase64(file) {
+    return new Promise(function (resolve, reject) {
+        var reader = new FileReader();
+        reader.onload = function () {
+            resolve(String(reader.result || '').split(',')[1] || '');
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+}

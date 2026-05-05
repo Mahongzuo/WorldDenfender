@@ -1,14 +1,34 @@
 ﻿import { CITY_GEO_CONFIGS, DEFAULT_CESIUM_ION_3D_TILES_ASSET_ID, JINAN_MAP_TEXTURE_URL } from './editor/city-geo-configs.js';
 import { BUILT_IN_CITY_LAYOUTS, matchBuiltInCity } from './editor/built-in-layouts.js';
-import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, slugify, updatePath, cellsRect, toggleCell, removeCell, hasCell, cloneCells, atCell, notAtCell, inBounds, byId } from './editor/utils.js';
+import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, slugify, updatePath, cellsRect, toggleCell, removeCell, hasCell, cloneCells, atCell, notAtCell, inBounds, byId, editorVol01, editorPctFromVol01, clampInspectorWidthPx, isNarrowWorkbenchLayout, readDragPayload, fileToBase64 } from './editor/utils.js';
+import { splitRegion, buildRegionLabel, inferCountryCode, normalizeCell, normalizeCells, normalizePoint, defaultObjectivePoint, normalizeStatus, normalizeLocation, normalizeEnvironment, normalizeBoardImageLayers, normalizeStats, normalizeActorTemplate, normalizeActors, normalizeEnemyTypes, normalizeWaveRules, normalizeModeProfiles, normalizeSpawnPoints, normalizeExplorePoints, EXPLORE_GAMEPLAY_STORE_KEYS, normalizeExploreGameplayNormalized, normalizeGeoConfig, makeGeoConfig, visitCoordinatePairs, geometryCenter, fetchCountryCapitalCoords, countryGeoFromFeature, geoFromLonLatArray, normalizeEditorThemeColorHex, normalizeTheme, normalizeEnemyPaths, normalizeExplorationLayout, normalizeCatalog, normalizeCatalogItem, normalizeEditorAssetsCatalog, defaultGlobalAudio, normalizeGlobalAudio, normalizeLevelAudioSource, defaultGlobalScreenUi, normalizeGlobalScreenUi, defaultGameAssetConfig, normalizeGameAssetConfig, mergeDistinctStrings, normalizeGameplayPlacement, normalizeGameplayEntries, normalizeCityGameplayConfigs, createDefaultMap, trimMapToBounds, normalizeMap, normalizeLevel, sortLevels, normalizeState } from './editor/normalizers.js';
+import { API_URL, LOCAL_BACKUP_KEY, LEGACY_BACKUP_KEY, ENGINE_VERSION, DEFAULT_GRID_COLS, DEFAULT_GRID_ROWS, DEFAULT_TILE_SIZE, GEO_MAPPING_STORAGE_KEY, SHELL_LEFT_COLLAPSE_KEY, SHELL_RIGHT_COLLAPSE_KEY, SHELL_INSPECTOR_WIDTH_KEY, CONTENT_BROWSER_FLOAT_GEOM_KEY, TOOL_LABELS, LEVEL_CONTENT_BROWSER_FILTER_ORDER, LCB_CELL_KIND_LABEL, MODEL_CATEGORY_CONFIG, DEFAULT_ACTOR_TEMPLATES, TOWER_MODEL_SPECS, DEFAULT_TOWER_GAMEPLAY_STATS, GAMEPLAY_RESOURCE_CONFIG } from './editor/content.js';
+import { sanitizeStateForSave as _sanitizeStateForSave, persistLocalBackup as _persistLocalBackup, readLocalBackup as _readLocalBackup, exportState as _exportState, readShellCollapsedPrefs as _readShellCollapsedPrefs, persistShellCollapsedPrefs as _persistShellCollapsedPrefs } from './editor/storage.js';
+import { expandPathWaypointPolyline, uniqueDefenseCells, manhattanDefense, sameDefenseCell, orderEditorPathCellsDefense, projectGridCellDefense, defensePathSourceCells, buildDefenseFallbackVertexList, getDefenseEditorPathKeys } from './editor/path-utils.js';
+import {
+    bindEraserToolControls,
+    updateEraserToolPanelVisibility,
+    clearEraserBrushPreview,
+    updateEraserBrushPreview,
+    recordEraserPreviewPointer,
+    clearEraserPreviewPointer,
+    refreshEraserPreviewIfActive,
+    applyEraserBrush,
+    resetEraserPreviewAfterMapRebuild
+} from './editor/eraser-tool.js';
+import { statusLabel, actorCategoryLabel, summaryStats, gameplayPlacementLabel, modelBindShortLabel, isImageAssetPath, isModelAssetPath, groupLevels, compareRegionKeys, hasDefenseLayout, hasExploreLayout, isJinanLevel, normalizePlaceSearchResult, uniqueCatalogId, levelVideoCityContext, normalizeCityIdentity, pickPreferredGameplayTab } from './editor/display-utils.js';
+import { pickLevelId, uniqueLevelId, uniqueTemplateId, findLevelById, uniqueGameplayEntryId } from './editor/id-utils.js';
+import { resolveSpecialGeoForLevel, cloneGeoConfig, applyDefenseLayout, applyExploreLayout, createDraftLevel, ensureExplorationLayout } from './editor/layout-presets.js';
+import { mergeExploreGameplayDisplay, readExploreGameplayRawFromDomSection } from './editor/explore-gameplay-defaults.js';
+import { fieldHtml, selectHtml, boardLayerFieldHtml, markerHtml, lcbSection, themeColorInput, sortCells, findBoardImageLayerById, clampContentBrowserGeom } from './editor/html-builders.js';
+import { projectPathFromVideoPublicUrl, effectiveCutsceneVideoProjectPath, formatIntroVideoStatusLines } from './editor/cutscene-utils.js';
+import { parseFetchErrorBody } from './editor/fetch-utils.js';
+import { ensureWorldOffset, mergeGameplayEntryList } from './editor/level-mutators.js';
+import { renderBoardImagesPanel, ensureBoardImagesPanelDelegated, tryConsumeBoardImageFileDrop, bindBoardImageGlobalHandlers, clearBoardImageInteractionState } from './editor/board-images.js';
+import { renderLevelAudioFields, renderGlobalAudioPanel, bindLevelAudioUi, bindGlobalAudioUi } from './editor/audio.js';
+import { refreshGlobalSettingsWorkbench as _refreshGlobalSettingsWorkbench, bindGlobalCutscenePanel as _bindGlobalCutscenePanel, bindGlobalSettingsChrome as _bindGlobalSettingsChrome } from './editor/global-settings.js';
+import { renderMap as _renderMap } from './editor/map-render.js';
 
-    var API_URL = '/api/level-editor-config';
-    var LOCAL_BACKUP_KEY = 'earth-guardian.level-engine.backup.v2';
-    var LEGACY_BACKUP_KEY = 'earth-guardian.level-editor.backup.v1';
-    var ENGINE_VERSION = 2;
-    var DEFAULT_GRID_COLS = 28;
-    var DEFAULT_GRID_ROWS = 18;
-    var DEFAULT_TILE_SIZE = 2;
     var state = null;
     var selectedLevelId = new URLSearchParams(window.location.search).get('levelId') || '';
     var selectedObject = null;
@@ -23,15 +43,6 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
     var activeThemeWorkbenchTab = 'colors';
     var themeEditorCacheKey = '';
     var themeBoardUrlDebounce = 0;
-    var ERASER_RADIUS_STORAGE_KEY = 'earth-guardian.level-editor.eraserBrushRadius';
-    var ERASER_RADIUS_MAX = 12;
-    var eraserBrushRadius = 0;
-    /** @type {{ clientX: number, clientY: number } | null} */
-    var eraserPreviewLastPointer = null;
-    /** @type {{ pointerId:number, id:string, startClientX:number, startClientY:number, startLeft:number, startTop:number } | null} */
-    var boardImagePointerDrag = null;
-    /** @type {{ pointerId:number, handle:string, id:string, startX:number, startY:number, startLayer:{centerX:number,centerY:number,widthPct:number}, aspect:number, innerW:number, innerH:number } | null} */
-    var boardImageResize = null;
     var activeEditorMode = 'defense';
     var activeGameplayTab = 'enemies';
     var selectedGameplayEntryId = '';
@@ -46,15 +57,10 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
     var previewInitGeneration = 0;
     var gameplayPreviewInitGeneration = 0;
     var previewRefreshTimer = null;
-    var GEO_MAPPING_STORAGE_KEY = 'earth-guardian.level-editor.geoMappingEnabled';
     var shellLeftCollapsedPref = false;
     var shellRightCollapsedPref = false;
-    var SHELL_LEFT_COLLAPSE_KEY = 'earth-guardian.level-editor.shellLeftCollapsed';
-    var SHELL_RIGHT_COLLAPSE_KEY = 'earth-guardian.level-editor.shellRightCollapsed';
-    var SHELL_INSPECTOR_WIDTH_KEY = 'earth-guardian.level-editor.shellInspectorWidthPx';
     var inspectorSplitPointerStartX = 0;
     var inspectorSplitStartWidthPx = 380;
-    var CONTENT_BROWSER_FLOAT_GEOM_KEY = 'earth-guardian.level-editor.contentBrowserFloat.geometry';
     var geoMappingEnabled = true;
     var isDirty = false;
     /** 程序化回填探索玩法表单时跳过 input 写回，避免递归 */
@@ -281,393 +287,16 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
         viewportInspectorSplitter: document.getElementById('viewportInspectorSplitter')
     };
 
-    function editorVol01(raw) {
-        var n = Number(raw);
-        if (!Number.isFinite(n)) return undefined;
-        return Math.max(0, Math.min(1, n));
-    }
-
-    function editorPctFromVol01(v, fallbackPct) {
-        var x = editorVol01(v);
-        if (x === undefined) return fallbackPct;
-        return Math.round(x * 100);
-    }
-
-    function applyVolSliderDisp(sliderId, dispId, vol01, fallbackPct) {
-        var s = document.getElementById(sliderId);
-        var d = document.getElementById(dispId);
-        var pct = editorPctFromVol01(vol01, fallbackPct);
-        if (s) s.value = String(pct);
-        if (d) d.textContent = pct + '%';
-    }
-
-    function bindAudioVolumeSlider(sliderId, dispId, readTarget, applyVol, dirtyLabel) {
-        var s = document.getElementById(sliderId);
-        if (!s) return;
-        s.addEventListener('input', function () {
-            var pct = Math.max(0, Math.min(100, Math.round(Number(s.value)) || 0));
-            var d = document.getElementById(dispId);
-            if (d) d.textContent = pct + '%';
-            var target = readTarget();
-            if (!target) return;
-            applyVol(target, pct / 100);
-            markDirty(dirtyLabel);
-        });
-    }
-
-    var TOOL_LABELS = {
-        select: '选择/拖拽',
-        road: '道路',
-        obstacle: '障碍',
-        spawn: '敌人出口',
-        path: '敌人路径',
-        buildSlot: '塔位',
-        objective: '防守目标',
-        explorePoint: '探索点',
-        safeZone: '安全区',
-        actor: '模型 Actor',
-        erase: '橡皮擦',
-        boardImage: '棋盘配图'
-    };
-
-    var LEVEL_CONTENT_BROWSER_FILTER_ORDER = [
-        'all',
-        'obstacle',
-        'spawn',
-        'path',
-        'buildSlot',
-        'objective',
-        'explorePoint',
-        'safeZone',
-        'actor'
-    ];
-
-    var LCB_CELL_KIND_LABEL = {
-        obstacleCell: '障碍',
-        pathCell: '敌人路径',
-        buildSlotCell: '塔位',
-        safeZoneCell: '安全区'
-    };
-
-    var MODEL_CATEGORY_CONFIG = {
-        all: { label: '全部', folder: '', color: '#8b9bb4' },
-        Enemy: { label: '敌人', folder: 'Enemy', color: '#e55c5c' },
-        Tower: { label: '防御塔', folder: 'Tower', color: '#5c8be5' },
-        Buildings: { label: '建筑', folder: 'Buildings', color: '#e5a35c' },
-        Props: { label: '地形/阻挡物/地板', folder: 'Props', color: '#5ce58b' },
-        Charactor: { label: '角色', folder: 'Charactor', color: '#c85ce5' }
-    };
-
-    var DEFAULT_ACTOR_TEMPLATES = [
-        {
-            id: 'tower-machine',
-            name: '机枪塔 Actor',
-            category: 'tower',
-            modelId: '',
-            icon: 'T',
-            stats: { hp: 160, attack: 18, range: 4.5, fireRate: 1.7, cost: 80, cooldown: 0, targeting: 'nearest' }
-        },
-        {
-            id: 'tower-cannon',
-            name: '加农炮 Actor',
-            category: 'tower',
-            modelId: '',
-            icon: 'C',
-            stats: { hp: 220, attack: 58, range: 4.1, fireRate: 0.75, cost: 150, cooldown: 0, targeting: 'area' }
-        },
-        {
-            id: 'enemy-drone',
-            name: '侦察无人机',
-            category: 'enemy',
-            modelId: '',
-            icon: 'E',
-            stats: { hp: 80, attack: 8, speed: 1.25, reward: 20, range: 0, fireRate: 0, cost: 0 }
-        },
-        {
-            id: 'enemy-heavy',
-            name: '重甲敌人',
-            category: 'enemy',
-            modelId: '',
-            icon: 'H',
-            stats: { hp: 260, attack: 20, speed: 0.62, reward: 55, range: 0, fireRate: 0, cost: 0 }
-        },
-        {
-            id: 'defense-core',
-            name: '防守核心',
-            category: 'objective',
-            modelId: '',
-            icon: 'O',
-            stats: { hp: 1000, attack: 0, range: 0, fireRate: 0, cost: 0, cooldown: 0 }
-        },
-        {
-            id: 'explore-item',
-            name: '探索交互物',
-            category: 'model',
-            modelId: '',
-            icon: 'M',
-            stats: { hp: 1, attack: 0, range: 1.5, fireRate: 0, cost: 0, cooldown: 0 }
-        },
-        {
-            id: 'npc-guide',
-            name: '探索 NPC',
-            category: 'npc',
-            modelId: '',
-            icon: 'N',
-            stats: { hp: 100, attack: 0, range: 2, fireRate: 0, cost: 0, cooldown: 0 }
-        }
-    ];
-
-    var TOWER_MODEL_SPECS = [
-        { id: 'machine', key: 'Q', name: '机枪塔' },
-        { id: 'cannon', key: 'W', name: '加农炮' },
-        { id: 'frost', key: 'E', name: '冰霜塔' },
-        { id: 'mine', key: 'R', name: '感应地雷' },
-        { id: 'beacon', key: 'T', name: '能量信标' },
-        { id: 'stellar', key: 'Y', name: '星辉棱镜·天河' },
-        { id: 'qinqiong', key: '1', name: '秦琼·门神' },
-        { id: 'liqingzhao', key: '2', name: '李清照·易安' },
-        { id: 'bianque', key: '3', name: '扁鹊·神医' }
-    ];
-
-    var DEFAULT_TOWER_GAMEPLAY_STATS = {
-        machine: { cost: 80, hp: 100, attack: 18, range: 4.5, fireRate: 1.7, splash: 0 },
-        cannon: { cost: 150, hp: 120, attack: 58, range: 4.1, fireRate: 0.75, splash: 1.35 },
-        frost: { cost: 125, hp: 100, attack: 9, range: 4.8, fireRate: 1.05, splash: 0 },
-        mine: { cost: 55, hp: 1, attack: 105, range: 0.72, fireRate: 0, splash: 1.45 },
-        beacon: { cost: 115, hp: 80, attack: 0, range: 3.3, fireRate: 0, splash: 0 },
-        stellar: { cost: 320, hp: 420, attack: 86, range: 6.2, fireRate: 1.25, splash: 1.25 },
-        qinqiong: { cost: 260, hp: 780, attack: 74, range: 1.2, fireRate: 1.15, splash: 0 },
-        liqingzhao: { cost: 300, hp: 180, attack: 140, range: 7.2, fireRate: 0.62, splash: 2.35 },
-        bianque: { cost: 240, hp: 260, attack: 90, range: 4.8, fireRate: 0.85, splash: 0 }
-    };
-
-    var GAMEPLAY_RESOURCE_CONFIG = {
-        enemies: {
-            label: '敌人',
-            assetType: 'Enemies',
-            empty: '当前城市还没有敌人条目。',
-            stats: [
-                { key: 'hp', label: '生命值', step: '1' },
-                { key: 'attack', label: '攻击', step: '1' },
-                { key: 'speed', label: '速度', step: '0.1' },
-                { key: 'reward', label: '奖励', step: '1' }
-            ]
-        },
-        characters: {
-            label: '角色',
-            assetType: 'Characters',
-            empty: '当前城市还没有角色条目。',
-            stats: [
-                { key: 'hp', label: '生命值', step: '1' },
-                { key: 'attack', label: '攻击', step: '1' },
-                { key: 'cost', label: '部署消耗', step: '1' },
-                { key: 'range', label: '范围', step: '0.1' }
-            ]
-        },
-        skills: {
-            label: '技能',
-            assetType: 'Skills',
-            empty: '当前城市还没有技能条目。',
-            stats: [
-                { key: 'damage', label: '伤害', step: '1' },
-                { key: 'cooldown', label: '冷却', step: '0.1' },
-                { key: 'cost', label: '消耗', step: '1' },
-                { key: 'range', label: '范围', step: '0.1' }
-            ]
-        },
-        towers: {
-            label: '防御塔',
-            assetType: 'Towers',
-            empty: '当前关卡还没有可用防御塔配置。',
-            stats: [
-                { key: 'cost', label: '费用', step: '1' },
-                { key: 'hp', label: '生命值', step: '1' },
-                { key: 'attack', label: '攻击/治疗', step: '1' },
-                { key: 'range', label: '范围', step: '0.1' },
-                { key: 'fireRate', label: '攻速', step: '0.1' },
-                { key: 'splash', label: '溅射/效果范围', step: '0.1' }
-            ]
-        },
-        cards: {
-            label: '卡片',
-            assetType: 'Cards',
-            empty: '当前关卡还没有卡片配置，可从角色/技能生成后再微调。',
-            stats: [
-                { key: 'cost', label: '费用/票券', step: '1' },
-                { key: 'weight', label: '抽取权重', step: '0.1' },
-                { key: 'cooldown', label: '冷却', step: '0.1' },
-                { key: 'unlockWave', label: '解锁波次', step: '1' },
-                { key: 'maxCopies', label: '最大张数', step: '1' }
-            ]
-        }
-    };
-
-    function defaultGlobalAudio() {
-        return {
-            menuBgmUrl: '',
-            towerBuildSfxUrl: '',
-            towerAttackDefaultSfxUrl: '',
-            defenseEnemyDeathSfxUrl: '',
-            exploreBasicAttackSfxUrl: '',
-            exploreEnemyDeathSfxUrl: '',
-            explorePlayerHitSfxUrl: '',
-            towerAttackSfxByBuildId: {}
-        };
-    }
-
-    function normalizeGlobalAudio(raw) {
-        var d = defaultGlobalAudio();
-        var src = raw && typeof raw === 'object' ? raw : {};
-        d.menuBgmUrl = String(src.menuBgmUrl || '').trim();
-        d.towerBuildSfxUrl = String(src.towerBuildSfxUrl || '').trim();
-        d.towerAttackDefaultSfxUrl = String(src.towerAttackDefaultSfxUrl || '').trim();
-        d.defenseEnemyDeathSfxUrl = String(src.defenseEnemyDeathSfxUrl || '').trim();
-        d.exploreBasicAttackSfxUrl = String(src.exploreBasicAttackSfxUrl || '').trim();
-        d.exploreEnemyDeathSfxUrl = String(src.exploreEnemyDeathSfxUrl || '').trim();
-        d.explorePlayerHitSfxUrl = String(src.explorePlayerHitSfxUrl || '').trim();
-        var mv = editorVol01(src.menuBgmVolume);
-        var bv = editorVol01(src.towerBuildSfxVolume);
-        var av = editorVol01(src.towerAttackSfxVolume);
-        var dv = editorVol01(src.defenseEnemyDeathSfxVolume);
-        var eav = editorVol01(src.exploreBasicAttackSfxVolume);
-        var edv = editorVol01(src.exploreEnemyDeathSfxVolume);
-        var phv = editorVol01(src.explorePlayerHitSfxVolume);
-        if (mv !== undefined) d.menuBgmVolume = mv;
-        if (bv !== undefined) d.towerBuildSfxVolume = bv;
-        if (av !== undefined) d.towerAttackSfxVolume = av;
-        if (dv !== undefined) d.defenseEnemyDeathSfxVolume = dv;
-        if (eav !== undefined) d.exploreBasicAttackSfxVolume = eav;
-        if (edv !== undefined) d.exploreEnemyDeathSfxVolume = edv;
-        if (phv !== undefined) d.explorePlayerHitSfxVolume = phv;
-        d.towerAttackSfxByBuildId = {};
-        if (src.towerAttackSfxByBuildId && typeof src.towerAttackSfxByBuildId === 'object') {
-            TOWER_MODEL_SPECS.forEach(function (spec) {
-                var u = String(src.towerAttackSfxByBuildId[spec.id] || '').trim();
-                if (u) d.towerAttackSfxByBuildId[spec.id] = u;
-            });
-        }
-        return d;
-    }
-
-    function normalizeLevelAudioSource(raw) {
-        var out = { defenseBgmUrl: '', exploreBgmUrl: '', towerAttackSfxByBuildId: {} };
-        var src = raw && typeof raw === 'object' ? raw : {};
-        out.defenseBgmUrl = String(src.defenseBgmUrl || '').trim();
-        out.exploreBgmUrl = String(src.exploreBgmUrl || '').trim();
-        var dBv = editorVol01(src.defenseBgmVolume);
-        var eBv = editorVol01(src.exploreBgmVolume);
-        var tV = editorVol01(src.towerAttackSfxVolume);
-        if (dBv !== undefined) out.defenseBgmVolume = dBv;
-        if (eBv !== undefined) out.exploreBgmVolume = eBv;
-        if (tV !== undefined) out.towerAttackSfxVolume = tV;
-        if (src.towerAttackSfxByBuildId && typeof src.towerAttackSfxByBuildId === 'object') {
-            TOWER_MODEL_SPECS.forEach(function (spec) {
-                var u = String(src.towerAttackSfxByBuildId[spec.id] || '').trim();
-                if (u) out.towerAttackSfxByBuildId[spec.id] = u;
-            });
-        }
-        return out;
-    }
-
-    function defaultGlobalScreenUi() {
-        return {
-            startScreenBackgroundUrl: '',
-            levelSelectBackgroundUrl: '',
-            levelSelectBackgroundColor: '#0d1418',
-            levelSelectAccentColor: '#8fb8ae'
-        };
-    }
-
-    function normalizeGlobalScreenUi(raw) {
-        var d = defaultGlobalScreenUi();
-        var src = raw && typeof raw === 'object' ? raw : {};
-        d.startScreenBackgroundUrl = String(src.startScreenBackgroundUrl || '').trim();
-        d.levelSelectBackgroundUrl = String(src.levelSelectBackgroundUrl || '').trim();
-        var bgc = String(src.levelSelectBackgroundColor || '').trim();
-        var acc = String(src.levelSelectAccentColor || '').trim();
-        if (/^#[0-9a-fA-F]{6}$/.test(bgc)) d.levelSelectBackgroundColor = bgc;
-        if (/^#[0-9a-fA-F]{6}$/.test(acc)) d.levelSelectAccentColor = acc;
-        return d;
-    }
-
-    function defaultGameAssetConfig() {
-        return {
-            customModelUrls: {},
-            customDropModelUrl: '',
-            customPlayerModelUrl: '',
-            customAnimationUrls: { idle: '', walk: '', run: '' },
-            modelScales: { moneyDrop: 1, player: 1, machine: 1, cannon: 1, frost: 1, mine: 1, beacon: 1, stellar: 1, qinqiong: 1, liqingzhao: 1, bianque: 1 },
-            playerExploreTransform: {
-                offsetMeters: { x: 0, y: 0, z: 0 },
-                rotationDeg: { x: 0, y: 0, z: 0 }
-            },
-            globalAudio: defaultGlobalAudio(),
-            globalScreenUi: defaultGlobalScreenUi()
-        };
-    }
-
-    function normalizeGameAssetConfig(raw) {
-        var d = defaultGameAssetConfig();
-        var src = raw && typeof raw === 'object' ? raw : {};
-        d.customModelUrls = src.customModelUrls && typeof src.customModelUrls === 'object' ? Object.assign({}, src.customModelUrls) : {};
-        d.customDropModelUrl = String(src.customDropModelUrl || '');
-        d.customPlayerModelUrl = String(src.customPlayerModelUrl || '');
-        d.customAnimationUrls = Object.assign({}, d.customAnimationUrls, src.customAnimationUrls && typeof src.customAnimationUrls === 'object' ? src.customAnimationUrls : {});
-        d.modelScales = Object.assign({}, d.modelScales, src.modelScales && typeof src.modelScales === 'object' ? src.modelScales : {});
-        var defPt = defaultGameAssetConfig().playerExploreTransform;
-        d.playerExploreTransform = {
-            offsetMeters: Object.assign(
-                {},
-                defPt.offsetMeters,
-                src.playerExploreTransform && src.playerExploreTransform.offsetMeters && typeof src.playerExploreTransform.offsetMeters === 'object'
-                    ? src.playerExploreTransform.offsetMeters
-                    : {}
-            ),
-            rotationDeg: Object.assign(
-                {},
-                defPt.rotationDeg,
-                src.playerExploreTransform && src.playerExploreTransform.rotationDeg && typeof src.playerExploreTransform.rotationDeg === 'object'
-                    ? src.playerExploreTransform.rotationDeg
-                    : {}
-            )
-        };
-        d.globalAudio = normalizeGlobalAudio(src.globalAudio);
-        d.globalScreenUi = normalizeGlobalScreenUi(src.globalScreenUi);
-        return d;
-    }
-
     function readShellCollapsedPrefsFromStorage() {
-        try {
-            shellLeftCollapsedPref = window.localStorage.getItem(SHELL_LEFT_COLLAPSE_KEY) === '1';
-            shellRightCollapsedPref = window.localStorage.getItem(SHELL_RIGHT_COLLAPSE_KEY) === '1';
-        } catch (_e) {
-            shellLeftCollapsedPref = shellRightCollapsedPref = false;
-        }
-    }
-
-    function persistShellCollapsedPrefs() {
-        try {
-            window.localStorage.setItem(SHELL_LEFT_COLLAPSE_KEY, shellLeftCollapsedPref ? '1' : '0');
-            window.localStorage.setItem(SHELL_RIGHT_COLLAPSE_KEY, shellRightCollapsedPref ? '1' : '0');
-        } catch (_e) {
-            /* ignore */
-        }
-    }
-
-    function isNarrowWorkbenchLayout() {
-        return typeof window.matchMedia !== 'undefined' && window.matchMedia('(max-width: 1180px)').matches;
+        var prefs = _readShellCollapsedPrefs({ leftKey: SHELL_LEFT_COLLAPSE_KEY, rightKey: SHELL_RIGHT_COLLAPSE_KEY });
+        shellLeftCollapsedPref = prefs.left;
+        shellRightCollapsedPref = prefs.right;
     }
 
     function bumpShellLayoutDependentUi() {
         window.requestAnimationFrame(function () {
             if (viewportViewMode === 'preview' && previewApi && typeof previewApi.resize === 'function') previewApi.resize();
         });
-    }
-
-    function clampInspectorWidthPx(px) {
-        var min = 280;
-        var max = Math.min(580, Math.max(320, window.innerWidth - 280 - 480));
-        return Math.round(Math.max(min, Math.min(max, px)));
     }
 
     function applyPersistedInspectorWidth() {
@@ -774,130 +403,6 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
         bumpShellLayoutDependentUi();
     }
 
-    function readPersistedEraserBrushRadius() {
-        try {
-            var n = Number(window.localStorage.getItem(ERASER_RADIUS_STORAGE_KEY));
-            eraserBrushRadius = clamp(Number.isFinite(n) ? Math.floor(n) : 0, 0, ERASER_RADIUS_MAX);
-        } catch (ignore) {
-            eraserBrushRadius = 0;
-        }
-    }
-
-    function persistEraserBrushRadius() {
-        try {
-            window.localStorage.setItem(ERASER_RADIUS_STORAGE_KEY, String(eraserBrushRadius));
-        } catch (ignore) {}
-    }
-
-    function syncEraserBrushUi() {
-        if (refs.eraserRadiusSlider) refs.eraserRadiusSlider.value = String(eraserBrushRadius);
-        if (refs.eraserRadiusNumber) refs.eraserRadiusNumber.value = String(eraserBrushRadius);
-    }
-
-    function bindEraserToolControls() {
-        readPersistedEraserBrushRadius();
-        syncEraserBrushUi();
-        if (!refs.eraserRadiusSlider || !refs.eraserRadiusNumber || refs.eraserRadiusSlider.dataset.bound === '1') return;
-        refs.eraserRadiusSlider.dataset.bound = '1';
-        refs.eraserRadiusSlider.addEventListener('input', function () {
-            eraserBrushRadius = clamp(parseInt(refs.eraserRadiusSlider.value, 10) || 0, 0, ERASER_RADIUS_MAX);
-            refs.eraserRadiusNumber.value = String(eraserBrushRadius);
-            persistEraserBrushRadius();
-            refreshEraserPreviewIfActive();
-        });
-        refs.eraserRadiusNumber.addEventListener('change', function () {
-            eraserBrushRadius = clamp(Math.floor(Number(refs.eraserRadiusNumber.value) || 0), 0, ERASER_RADIUS_MAX);
-            refs.eraserRadiusSlider.value = String(eraserBrushRadius);
-            refs.eraserRadiusNumber.value = String(eraserBrushRadius);
-            persistEraserBrushRadius();
-            refreshEraserPreviewIfActive();
-        });
-        refs.eraserRadiusNumber.addEventListener('input', function () {
-            eraserBrushRadius = clamp(Math.floor(Number(refs.eraserRadiusNumber.value) || 0), 0, ERASER_RADIUS_MAX);
-            refs.eraserRadiusSlider.value = String(eraserBrushRadius);
-            persistEraserBrushRadius();
-            refreshEraserPreviewIfActive();
-        });
-    }
-
-    function updateEraserToolPanelVisibility() {
-        if (!refs.eraserToolPanel) return;
-        var show = activeWorkbench === 'level' && activeTool === 'erase';
-        refs.eraserToolPanel.classList.toggle('view-hidden', !show);
-        if (!show) {
-            eraserPreviewLastPointer = null;
-            clearEraserBrushPreview();
-        }
-    }
-
-    function cellsInEraserBrush(centerCol, centerRow, radius, cols, rows) {
-        var r = clamp(Math.floor(Number(radius) || 0), 0, ERASER_RADIUS_MAX);
-        var out = [];
-        var c0 = Number(centerCol);
-        var r0 = Number(centerRow);
-        for (var dr = -r; dr <= r; dr += 1) {
-            for (var dc = -r; dc <= r; dc += 1) {
-                var c = c0 + dc;
-                var rw = r0 + dr;
-                if (c >= 0 && c < cols && rw >= 0 && rw < rows) out.push({ col: c, row: rw });
-            }
-        }
-        return out;
-    }
-
-    function clearEraserBrushPreview() {
-        if (!refs.mapGrid) return;
-        refs.mapGrid.querySelectorAll('.map-cell--eraser-preview').forEach(function (el) {
-            el.classList.remove('map-cell--eraser-preview');
-        });
-    }
-
-    function updateEraserBrushPreview(clientX, clientY) {
-        if (!refs.mapGrid) return;
-        var level = getLevel();
-        if (!level || !level.map || !level.map.grid) {
-            clearEraserBrushPreview();
-            return;
-        }
-        if (activeWorkbench !== 'level' || activeTool !== 'erase') {
-            clearEraserBrushPreview();
-            return;
-        }
-        var g = level.map.grid;
-        var pick = mapGridPickCellFromClientPoint(clientX, clientY, g);
-        clearEraserBrushPreview();
-        if (!pick) return;
-        var centerCol = Number(pick.getAttribute('data-col'));
-        var centerRow = Number(pick.getAttribute('data-row'));
-        if (!Number.isFinite(centerCol) || !Number.isFinite(centerRow)) return;
-        var cells = cellsInEraserBrush(centerCol, centerRow, eraserBrushRadius, g.cols, g.rows);
-        for (var i = 0; i < cells.length; i += 1) {
-            var sel =
-                '.map-grid-cells--floor .map-cell[data-col="' +
-                String(cells[i].col) +
-                '"][data-row="' +
-                String(cells[i].row) +
-                '"]';
-            var el = refs.mapGrid.querySelector(sel);
-            if (el) el.classList.add('map-cell--eraser-preview');
-        }
-    }
-
-    function refreshEraserPreviewIfActive() {
-        if (!eraserPreviewLastPointer) return;
-        updateEraserBrushPreview(eraserPreviewLastPointer.clientX, eraserPreviewLastPointer.clientY);
-    }
-
-    function applyEraserBrush(centerCol, centerRow) {
-        var level = getLevel();
-        if (!level || !level.map || !level.map.grid) return;
-        var g = level.map.grid;
-        var cells = cellsInEraserBrush(centerCol, centerRow, eraserBrushRadius, g.cols, g.rows);
-        for (var i = 0; i < cells.length; i += 1) {
-            eraseCellAt(cells[i].col, cells[i].row);
-        }
-    }
-
     function init() {
         initGeoMappingToggle();
         readShellCollapsedPrefsFromStorage();
@@ -919,479 +424,6 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
         if (refs.toggleGeoMapping) {
             refs.toggleGeoMapping.checked = geoMappingEnabled;
         }
-    }
-
-    function renumberBoardImageOrders(level) {
-        if (!level || !Array.isArray(level.map.boardImageLayers) || !level.map.boardImageLayers.length) return;
-        level.map.boardImageLayers
-            .slice()
-            .sort(function (a, b) {
-                return (Number(a.order) || 0) - (Number(b.order) || 0);
-            })
-            .forEach(function (L, i) {
-                L.order = i;
-            });
-    }
-
-    function moveBoardLayerOrder(level, id, dir) {
-        if (!level || !Array.isArray(level.map.boardImageLayers) || level.map.boardImageLayers.length < 2) return;
-        renumberBoardImageOrders(level);
-        var sorted = level.map.boardImageLayers.slice().sort(function (a, b) {
-            return (Number(a.order) || 0) - (Number(b.order) || 0);
-        });
-        var i = sorted.findIndex(function (L) {
-            return L.id === id;
-        });
-        var j = i + dir;
-        if (i < 0 || j < 0 || j >= sorted.length) return;
-        var tmp = sorted[i].order;
-        sorted[i].order = sorted[j].order;
-        sorted[j].order = tmp;
-    }
-
-    function renderBoardImagesPanel() {
-        if (!refs.boardImagesPanel) return;
-        var show = activeWorkbench === 'level' && viewportViewMode === 'board';
-        refs.boardImagesPanel.classList.toggle('view-hidden', !show);
-        if (!show) return;
-        var level = getLevel();
-        if (!level) {
-            refs.boardImagesPanel.innerHTML =
-                '<p class="board-images-panel__title">棋盘配图</p>' +
-                '<div class="board-images-panel__empty">请先选择关卡。</div>';
-            return;
-        }
-        var layers = Array.isArray(level.map.boardImageLayers) ? level.map.boardImageLayers : [];
-        if (!layers.length) {
-            refs.boardImagesPanel.innerHTML =
-                '<p class="board-images-panel__title">棋盘配图</p>' +
-                '<div class="board-images-panel__empty">拖入 PNG / JPEG / WebP 等到棋盘添加图层。</div>';
-            return;
-        }
-        var raw = layers.slice().sort(function (a, b) {
-            return (Number(a.order) || 0) - (Number(b.order) || 0);
-        });
-        var sid = selectedObject && selectedObject.kind === 'boardImage' ? selectedObject.id : '';
-        var rows = raw
-            .map(function (L, idx) {
-                var selCls = L.id === sid ? ' board-images-layer-row--selected' : '';
-                var thumb =
-                    '<img class="board-images-layer-thumb" alt="" draggable="false" src="' +
-                    escapeAttr(L.src) +
-                    '">';
-                return (
-                    '<div class="board-images-layer-row' +
-                    selCls +
-                    '" data-board-panel-id="' +
-                    escapeAttr(L.id) +
-                    '" role="group">' +
-                    thumb +
-                    '<div class="board-images-layer-meta">' +
-                    '<strong>图层 ' +
-                    escapeHtml(String(idx + 1)) +
-                    '</strong>' +
-                    '<span>order ' +
-                    escapeHtml(String(L.order != null ? L.order : idx)) +
-                    ' · 位置 X' +
-                    escapeHtml(String(L.centerX)) +
-                    '% Y' +
-                    escapeHtml(String(L.centerY)) +
-                    '% · 宽度 ' +
-                    escapeHtml(String(L.widthPct)) +
-                    '%</span>' +
-                    '<div class="board-images-layer-actions">' +
-                    '<button type="button" class="mini-button" data-board-panel-act="bil-up" data-board-panel-id="' +
-                    escapeAttr(L.id) +
-                    '">上移</button>' +
-                    '<button type="button" class="mini-button" data-board-panel-act="bil-down" data-board-panel-id="' +
-                    escapeAttr(L.id) +
-                    '">下移</button>' +
-                    '<button type="button" class="mini-button" data-board-panel-act="bil-del" data-board-panel-id="' +
-                    escapeAttr(L.id) +
-                    '">删除</button>' +
-                    '</div></div></div>'
-                );
-            })
-            .join('');
-        refs.boardImagesPanel.innerHTML = '<p class="board-images-panel__title">棋盘配图</p>' + rows;
-    }
-
-    function ensureBoardImagesPanelDelegated() {
-        if (!refs.boardImagesPanel || refs.boardImagesPanel.dataset.bilDelegated === '1') return;
-        refs.boardImagesPanel.dataset.bilDelegated = '1';
-        refs.boardImagesPanel.addEventListener('click', function (event) {
-            var level = getLevel();
-            var btn = event.target.closest('[data-board-panel-act]');
-            var row = event.target.closest('.board-images-layer-row[data-board-panel-id]');
-            if (btn && level && level.map.boardImageLayers) {
-                var id = btn.getAttribute('data-board-panel-id') || '';
-                var act = btn.getAttribute('data-board-panel-act') || '';
-                if (act === 'bil-up') {
-                    moveBoardLayerOrder(level, id, -1);
-                    markDirty('已调整棋盘配图顺序');
-                    renderMap();
-                    schedulePreviewRefresh();
-                    renderBoardImagesPanel();
-                    return;
-                }
-                if (act === 'bil-down') {
-                    moveBoardLayerOrder(level, id, 1);
-                    markDirty('已调整棋盘配图顺序');
-                    renderMap();
-                    schedulePreviewRefresh();
-                    renderBoardImagesPanel();
-                    return;
-                }
-                if (act === 'bil-del') {
-                    selectedObject =
-                        selectedObject && selectedObject.kind === 'boardImage' && selectedObject.id === id
-                            ? null
-                            : selectedObject;
-                    boardImagePointerDrag = null;
-                    boardImageResize = null;
-                    level.map.boardImageLayers = level.map.boardImageLayers.filter(function (L) {
-                        return L.id !== id;
-                    });
-                    markDirty('已删除棋盘配图');
-                    renderSelectionInspector();
-                    renderMap();
-                    schedulePreviewRefresh();
-                    renderBoardImagesPanel();
-                    return;
-                }
-            }
-            if (row && !btn && level) {
-                var id2 = row.getAttribute('data-board-panel-id');
-                selectedObject = { kind: 'boardImage', id: id2 };
-                renderSelectionInspector();
-                renderMap();
-                renderBoardImagesPanel();
-            }
-        });
-    }
-
-    function clampBoardAspect(v) {
-        var x = Number(v);
-        if (!Number.isFinite(x) || x <= 0) return 0.75;
-        return Math.min(24, Math.max(0.04, x));
-    }
-
-    function readSpriteAspect(layer, spr) {
-        var asp = Number(layer.aspect);
-        if (Number.isFinite(asp) && asp > 0) return clampBoardAspect(asp);
-        var img = spr && spr.querySelector ? spr.querySelector('.bil-img-wrap img, img') : null;
-        if (img && img.naturalWidth > 0) {
-            var a = img.naturalHeight / img.naturalWidth;
-            layer.aspect = clampBoardAspect(a);
-            return layer.aspect;
-        }
-        return clampBoardAspect(0.75);
-    }
-
-    function toolAllowsBoardSpriteEdit() {
-        return activeTool === 'select' || activeTool === 'boardImage';
-    }
-
-    function applyBoardImageResizePointerMove(event) {
-        var r = boardImageResize;
-        if (!r) return;
-        var level = getLevel();
-        var layer = findBoardImageLayerById(level, r.id);
-        if (!layer || !level || !level.map.grid) return;
-        var iw = r.innerW;
-        var ih = r.innerH;
-        var dx = event.clientX - r.startX;
-        var dy = event.clientY - r.startY;
-        var asp = r.aspect > 0 ? r.aspect : 0.75;
-        var sl = r.startLayer;
-        var lx = ((Number(sl.centerX) || 0) / 100) * iw;
-        var ty = ((Number(sl.centerY) || 0) / 100) * ih;
-        var wp = ((Number(sl.widthPct) || 40) / 100) * iw;
-        var hp = wp * asp;
-        var minWp = (5 / 100) * iw;
-        var maxWp = (500 / 100) * iw;
-        var h = r.handle;
-
-        if (h === 'e') {
-            var nwE = clamp(wp + dx, minWp, maxWp);
-            layer.centerX = Number(sl.centerX) || 0;
-            layer.centerY = Number(sl.centerY) || 0;
-            layer.widthPct = (nwE / iw) * 100;
-        } else if (h === 'w') {
-            var right = lx + wp;
-            var nl = lx + dx;
-            var nwW = clamp(right - nl, minWp, maxWp);
-            nl = right - nwW;
-            layer.centerX = clamp((nl / iw) * 100, 0, 100);
-            layer.centerY = Number(sl.centerY) || 0;
-            layer.widthPct = (nwW / iw) * 100;
-        } else if (h === 's') {
-            var nb = ty + hp + dy;
-            var nhS = Math.max(minWp * asp, nb - ty);
-            var nwS = clamp(nhS / asp, minWp, maxWp);
-            layer.centerX = Number(sl.centerX) || 0;
-            layer.centerY = Number(sl.centerY) || 0;
-            layer.widthPct = (nwS / iw) * 100;
-        } else if (h === 'n') {
-            var botN = ty + hp;
-            var nt = ty + dy;
-            var nhN = Math.max(minWp * asp, botN - nt);
-            var nwN = clamp(nhN / asp, minWp, maxWp);
-            nhN = nwN * asp;
-            nt = botN - nhN;
-            layer.centerX = Number(sl.centerX) || 0;
-            layer.centerY = clamp((nt / ih) * 100, 0, 100);
-            layer.widthPct = (nwN / iw) * 100;
-        } else if (h === 'se') {
-            var sSe = Math.min((wp + dx) / wp, (hp + dy) / hp);
-            sSe = Math.max(minWp / wp, Math.min(maxWp / wp, sSe));
-            layer.centerX = Number(sl.centerX) || 0;
-            layer.centerY = Number(sl.centerY) || 0;
-            layer.widthPct = sl.widthPct * sSe;
-        } else if (h === 'nw') {
-            var sNw = Math.min((lx + wp - (lx + dx)) / wp, (ty + hp - (ty + dy)) / hp);
-            sNw = Math.max(minWp / wp, Math.min(maxWp / wp, sNw));
-            var nLeft = lx + wp - wp * sNw;
-            var nTop = ty + hp - hp * sNw;
-            layer.centerX = clamp((nLeft / iw) * 100, 0, 100);
-            layer.centerY = clamp((nTop / ih) * 100, 0, 100);
-            layer.widthPct = sl.widthPct * sNw;
-        } else if (h === 'ne') {
-            var fixBot = ty + hp;
-            var sNe = Math.min((wp + dx) / wp, (fixBot - (ty + dy)) / hp);
-            sNe = Math.max(minWp / wp, Math.min(maxWp / wp, sNe));
-            var nTop2 = fixBot - hp * sNe;
-            layer.centerX = Number(sl.centerX) || 0;
-            layer.centerY = clamp((nTop2 / ih) * 100, 0, 100);
-            layer.widthPct = sl.widthPct * sNe;
-        } else if (h === 'sw') {
-            var fixRw = lx + wp;
-            var sSw = Math.min((fixRw - (lx + dx)) / wp, (ty + hp + dy - ty) / hp);
-            sSw = Math.max(minWp / wp, Math.min(maxWp / wp, sSw));
-            var nLeft2 = fixRw - wp * sSw;
-            layer.centerX = clamp((nLeft2 / iw) * 100, 0, 100);
-            layer.centerY = Number(sl.centerY) || 0;
-            layer.widthPct = sl.widthPct * sSw;
-        }
-    }
-
-    function bindBoardImageGlobalHandlers() {
-        if (!refs.mapStage) return;
-        if (refs.mapStage.dataset.boardImgGlobalHandlers === '1') return;
-        refs.mapStage.dataset.boardImgGlobalHandlers = '1';
-        refs.mapStage.addEventListener(
-            'pointerdown',
-            function (event) {
-                if (activeWorkbench !== 'level' || viewportViewMode !== 'board' || !toolAllowsBoardSpriteEdit()) return;
-                var spr = event.target.closest('.map-board-image-sprite');
-                if (!spr) return;
-                var lid = spr.getAttribute('data-board-image-id') || '';
-                if (!lid) return;
-                var level = getLevel();
-                var layer = findBoardImageLayerById(level, lid);
-                if (!layer) return;
-                var handle = event.target.closest('[data-board-resize]');
-                if (handle && spr.contains(handle)) {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    var aspectR = readSpriteAspect(layer, spr);
-                    var mMet = boardGridPaintMetrics(level.map.grid);
-                    if (!mMet || mMet.innerW <= 2 || mMet.innerH <= 2) return;
-                    boardImageResize = {
-                        pointerId: event.pointerId,
-                        handle: handle.getAttribute('data-board-resize') || 'se',
-                        id: lid,
-                        startX: event.clientX,
-                        startY: event.clientY,
-                        startLayer: {
-                            centerX: Number(layer.centerX) || 0,
-                            centerY: Number(layer.centerY) || 0,
-                            widthPct: Number(layer.widthPct) || 40
-                        },
-                        aspect: aspectR,
-                        innerW: mMet.innerW,
-                        innerH: mMet.innerH
-                    };
-                    boardImagePointerDrag = null;
-                    if (handle.setPointerCapture) handle.setPointerCapture(event.pointerId);
-                    renderBoardImagesPanel();
-                    return;
-                }
-                if (spr.setPointerCapture) spr.setPointerCapture(event.pointerId);
-                selectedObject = { kind: 'boardImage', id: lid };
-                boardImageResize = null;
-                boardImagePointerDrag = {
-                    pointerId: event.pointerId,
-                    id: lid,
-                    startX: event.clientX,
-                    startY: event.clientY,
-                    startLeft: Number(layer.centerX) || 0,
-                    startTop: Number(layer.centerY) || 0
-                };
-                event.preventDefault();
-                renderSelectionInspector();
-                renderMap();
-                renderBoardImagesPanel();
-            },
-            true
-        );
-        document.addEventListener(
-            'pointermove',
-            function (event) {
-                if (boardImageResize && event.pointerId === boardImageResize.pointerId) {
-                    applyBoardImageResizePointerMove(event);
-                    markDirty('已缩放棋盘配图');
-                    renderMap();
-                    schedulePreviewRefresh();
-                    return;
-                }
-                if (!boardImagePointerDrag || event.pointerId !== boardImagePointerDrag.pointerId) return;
-                var level = getLevel();
-                if (!level || !level.map.grid) return;
-                var layer = findBoardImageLayerById(level, boardImagePointerDrag.id);
-                if (!layer) return;
-                var m = boardGridPaintMetrics(level.map.grid);
-                if (!m || m.innerW <= 2 || m.innerH <= 2) return;
-                var dxPct = ((event.clientX - boardImagePointerDrag.startX) / m.innerW) * 100;
-                var dyPct = ((event.clientY - boardImagePointerDrag.startY) / m.innerH) * 100;
-                layer.centerX = Math.max(0, Math.min(100, boardImagePointerDrag.startLeft + dxPct));
-                layer.centerY = Math.max(0, Math.min(100, boardImagePointerDrag.startTop + dyPct));
-                markDirty('已移动棋盘配图');
-                renderMap();
-                schedulePreviewRefresh();
-            },
-            true
-        );
-        document.addEventListener(
-            'pointerup',
-            function (event) {
-                if (boardImagePointerDrag && event.pointerId === boardImagePointerDrag.pointerId) {
-                    boardImagePointerDrag = null;
-                    renderBoardImagesPanel();
-                }
-                if (boardImageResize && event.pointerId === boardImageResize.pointerId) {
-                    boardImageResize = null;
-                    renderBoardImagesPanel();
-                }
-            },
-            true
-        );
-        document.addEventListener('pointercancel', function () {
-            boardImagePointerDrag = null;
-            boardImageResize = null;
-        });
-        refs.mapStage.addEventListener(
-            'wheel',
-            function (event) {
-                if (activeWorkbench !== 'level' || viewportViewMode !== 'board' || !toolAllowsBoardSpriteEdit()) return;
-                var spr = event.target.closest('.map-board-image-sprite');
-                if (!spr) return;
-                event.preventDefault();
-                var lid = spr.getAttribute('data-board-image-id') || '';
-                if (!lid) return;
-                var level = getLevel();
-                var layer = findBoardImageLayerById(level, lid);
-                if (!layer) return;
-                readSpriteAspect(layer, spr);
-                var w = Number(layer.widthPct) || 40;
-                w *= event.deltaY < 0 ? 1.075 : 0.935;
-                w = clamp(w, 5, 500);
-                layer.widthPct = w;
-                markDirty('已缩放棋盘配图');
-                renderMap();
-                schedulePreviewRefresh();
-                renderBoardImagesPanel();
-            },
-            { passive: false }
-        );
-    }
-
-    function findBoardImageLayerById(level, id) {
-        if (!level || !level.map.boardImageLayers) return null;
-        return (
-            level.map.boardImageLayers.find(function (layer) {
-                return layer.id === id;
-            }) || null
-        );
-    }
-
-    function tryConsumeBoardImageFileDrop(event) {
-        var files = event.dataTransfer && event.dataTransfer.files;
-        if (!files || !files.length) return false;
-        var imgs = [];
-        for (var i = 0; i < files.length; i += 1) {
-            var f = files[i];
-            if (!f) continue;
-            if (/^image\//i.test(String(f.type || '')) || /\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(String(f.name || '')))
-                imgs.push(f);
-        }
-        if (!imgs.length) return false;
-        var level = getLevel();
-        if (!level || !level.map.grid) return true;
-        if (!Array.isArray(level.map.boardImageLayers)) level.map.boardImageLayers = [];
-        var base = clientPointToBoardLayerPercents(event.clientX, event.clientY, level.map.grid);
-        var maxOrd =
-            level.map.boardImageLayers.length === 0
-                ? -1
-                : Math.max.apply(
-                      null,
-                      level.map.boardImageLayers.map(function (layer) {
-                          return Number(layer.order) || 0;
-                      })
-                  );
-        var j = 0;
-        function ingestNext() {
-            if (j >= imgs.length) {
-                markDirty('已导入棋盘配图');
-                activeTool = 'boardImage';
-                document.querySelectorAll('[data-tool]').forEach(function (item) {
-                    item.classList.toggle('active', item.getAttribute('data-tool') === 'boardImage');
-                });
-                if (refs.activeToolLabel) refs.activeToolLabel.textContent = '当前工具：' + TOOL_LABELS.boardImage;
-                updateEraserToolPanelVisibility();
-                updateStageHintText();
-                renderAll();
-                schedulePreviewRefresh();
-                return;
-            }
-            var offset = j;
-            var reader = new FileReader();
-            reader.onload = function () {
-                var url = typeof reader.result === 'string' ? reader.result : '';
-                if (!url) {
-                    j += 1;
-                    ingestNext();
-                    return;
-                }
-                var im = new Image();
-                im.onload = function () {
-                    var id = uid('board-img');
-                    var asp =
-                        im.naturalWidth > 0 ? clampBoardAspect(im.naturalHeight / im.naturalWidth) : clampBoardAspect(0.75);
-                    level.map.boardImageLayers.push({
-                        id: id,
-                        src: url,
-                        centerX: clamp(base.lx + (offset % 3) * 3, 0, 100),
-                        centerY: clamp(base.ty + Math.floor(offset / 3) * 3, 0, 100),
-                        widthPct: 46,
-                        opacity: 1,
-                        order: maxOrd + 1 + offset,
-                        aspect: asp
-                    });
-                    selectedObject = { kind: 'boardImage', id: id };
-                    j += 1;
-                    ingestNext();
-                };
-                im.onerror = function () {
-                    j += 1;
-                    ingestNext();
-                };
-                im.src = url;
-            };
-            reader.readAsDataURL(imgs[offset]);
-        }
-        ingestNext();
-        return true;
     }
 
     function bindEvents() {
@@ -1438,7 +470,7 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
         });
         refs.btnReload.addEventListener('click', reloadState);
         if (refs.btnSave) refs.btnSave.addEventListener('click', saveState);
-        refs.btnExport.addEventListener('click', exportState);
+        refs.btnExport.addEventListener('click', function() { _exportState(state, setStatus); });
         refs.btnCreateLevel.addEventListener('click', createManualLevel);
         refs.btnGenerateRegions.addEventListener('click', function () { generateRegionLevelSkeletons(true); });
         refs.levelSearch.addEventListener('input', renderLevelTree);
@@ -1696,7 +728,7 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
                     item.classList.toggle('active', item === button);
                 });
                 refs.activeToolLabel.textContent = '当前工具：' + TOOL_LABELS[activeTool];
-                updateEraserToolPanelVisibility();
+                updateEraserToolPanelVisibility(refs, activeWorkbench, activeTool);
                 updateStageHintText();
             });
         });
@@ -1720,13 +752,13 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
 
         refs.mapGrid.addEventListener('mousemove', function (event) {
             if (activeWorkbench !== 'level' || activeTool !== 'erase') return;
-            eraserPreviewLastPointer = { clientX: event.clientX, clientY: event.clientY };
-            updateEraserBrushPreview(event.clientX, event.clientY);
+            recordEraserPreviewPointer(event.clientX, event.clientY);
+            updateEraserBrushPreview(refs, event.clientX, event.clientY, eraserPreviewEnv());
         });
         refs.mapGrid.addEventListener('mouseleave', function () {
             if (activeWorkbench !== 'level' || activeTool !== 'erase') return;
-            eraserPreviewLastPointer = null;
-            clearEraserBrushPreview();
+            clearEraserPreviewPointer();
+            clearEraserBrushPreview(refs);
         });
 
         refs.mapGrid.addEventListener('dragover', function (event) {
@@ -1739,7 +771,7 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
             event.preventDefault();
             var level = getLevel();
             if (!level || !level.map || !level.map.grid) return;
-            if (tryConsumeBoardImageFileDrop(event)) return;
+            if (tryConsumeBoardImageFileDrop(event, refs, boardImagesEnv())) return;
             var cellEl = event.target.closest('.map-grid-cells--floor .map-cell[data-col][data-row]');
             var resolved =
                 cellEl ||
@@ -1772,8 +804,8 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
 
         bindLevelFields();
         bindGameAssetPanel();
-        bindLevelAudioUi();
-        bindGlobalAudioUi();
+        bindLevelAudioUi(refs, audioEnv());
+        bindGlobalAudioUi(audioEnv());
         bindGlobalSettingsChrome();
         bindGlobalCutscenePanel();
         bindGlobalScreenUiPanel();
@@ -1828,28 +860,44 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
         if (refs.collapseRegionPanel) {
             refs.collapseRegionPanel.addEventListener('click', function () {
                 shellLeftCollapsedPref = true;
-                persistShellCollapsedPrefs();
+                _persistShellCollapsedPrefs(
+            { leftKey: SHELL_LEFT_COLLAPSE_KEY, rightKey: SHELL_RIGHT_COLLAPSE_KEY },
+            shellLeftCollapsedPref,
+            shellRightCollapsedPref
+        );
                 applyShellPanelCollapseUi();
             });
         }
         if (refs.railExpandRegionPanel) {
             refs.railExpandRegionPanel.addEventListener('click', function () {
                 shellLeftCollapsedPref = false;
-                persistShellCollapsedPrefs();
+                _persistShellCollapsedPrefs(
+            { leftKey: SHELL_LEFT_COLLAPSE_KEY, rightKey: SHELL_RIGHT_COLLAPSE_KEY },
+            shellLeftCollapsedPref,
+            shellRightCollapsedPref
+        );
                 applyShellPanelCollapseUi();
             });
         }
         if (refs.collapseInspectorPanel) {
             refs.collapseInspectorPanel.addEventListener('click', function () {
                 shellRightCollapsedPref = true;
-                persistShellCollapsedPrefs();
+                _persistShellCollapsedPrefs(
+            { leftKey: SHELL_LEFT_COLLAPSE_KEY, rightKey: SHELL_RIGHT_COLLAPSE_KEY },
+            shellLeftCollapsedPref,
+            shellRightCollapsedPref
+        );
                 applyShellPanelCollapseUi();
             });
         }
         if (refs.railExpandInspectorPanel) {
             refs.railExpandInspectorPanel.addEventListener('click', function () {
                 shellRightCollapsedPref = false;
-                persistShellCollapsedPrefs();
+                _persistShellCollapsedPrefs(
+            { leftKey: SHELL_LEFT_COLLAPSE_KEY, rightKey: SHELL_RIGHT_COLLAPSE_KEY },
+            shellLeftCollapsedPref,
+            shellRightCollapsedPref
+        );
                 applyShellPanelCollapseUi();
             });
         }
@@ -1897,11 +945,10 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
             ) {
                 e.preventDefault();
                 selectedObject = null;
-                boardImagePointerDrag = null;
-                boardImageResize = null;
+                clearBoardImageInteractionState();
                 renderSelectionInspector();
                 renderMap();
-                renderBoardImagesPanel();
+                renderBoardImagesPanel(refs, boardImagesEnv());
                 return;
             }
 
@@ -1910,9 +957,11 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
             e.preventDefault();
             deleteSelection();
         });
-        bindEraserToolControls();
-        bindBoardImageGlobalHandlers();
-        ensureBoardImagesPanelDelegated();
+        bindEraserToolControls(refs, function () {
+            refreshEraserPreviewIfActive(refs, eraserPreviewEnv());
+        });
+        bindBoardImageGlobalHandlers(refs, boardImagesEnv());
+        ensureBoardImagesPanelDelegated(refs, boardImagesEnv());
     }
 
     function normalizeGameModelsForCatalog() {
@@ -1930,12 +979,6 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
         });
     }
 
-    function sanitizeStateForSave(src) {
-        var o = JSON.parse(JSON.stringify(src));
-        delete o.gameModelsCatalog;
-        return o;
-    }
-
     async function refreshGameModelsCatalog() {
         if (!state) return;
         try {
@@ -1947,26 +990,6 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
             console.warn('[GameModels catalog]', e);
             state.gameModelsCatalog = [];
         }
-    }
-
-    function parseFetchErrorBody(status, text) {
-        var detail = String(text || '').trim();
-        if (!detail) return 'HTTP ' + status;
-        try {
-            var j = JSON.parse(detail);
-            if (j && typeof j === 'object' && j.error) return String(j.error);
-        } catch (ignore) {}
-        return detail.length > 220 ? detail.slice(0, 220) + '…' : detail;
-    }
-
-    /** 状态栏与列表上展示：优先文件名，完整路径放 title */
-    function modelBindShortLabel(url) {
-        if (!url) return '未配置';
-        var s = String(url);
-        var tail = s.split(/[/\\?#]/).filter(Boolean).pop() || s;
-        tail = tail.replace(/\+/g, ' ');
-        if (tail.length > 36) tail = tail.slice(0, 34) + '…';
-        return tail;
     }
 
     async function uploadFileToProjectUrl(file, options) {
@@ -2102,366 +1125,6 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
         if (elRx) elRx.value = String(rd.x != null ? rd.x : 0);
         if (elRy) elRy.value = String(rd.y != null ? rd.y : 0);
         if (elRz) elRz.value = String(rd.z != null ? rd.z : 0);
-    }
-
-    function ensureLevelMapAudio(map) {
-        if (!map.levelAudio || typeof map.levelAudio !== 'object') {
-            map.levelAudio = normalizeLevelAudioSource(null);
-        } else {
-            map.levelAudio = normalizeLevelAudioSource(map.levelAudio);
-        }
-        return map.levelAudio;
-    }
-
-    function renderLevelAudioFields(level) {
-        if (!refs.levelAudioTowerRows || !level || !level.map) return;
-        var la = ensureLevelMapAudio(level.map);
-        var dEl = document.getElementById('levelAudioDefenseBgmUrl');
-        var eEl = document.getElementById('levelAudioExploreBgmUrl');
-        if (dEl) dEl.value = la.defenseBgmUrl || '';
-        if (eEl) eEl.value = la.exploreBgmUrl || '';
-        refs.levelAudioTowerRows.innerHTML = TOWER_MODEL_SPECS.map(function (spec) {
-            var url = (la.towerAttackSfxByBuildId && la.towerAttackSfxByBuildId[spec.id]) || '';
-            return [
-                '<div class="game-asset-tower-row level-audio-tower-row">',
-                '  <div class="game-asset-tower-title">' + escapeHtml(spec.key + ' · ' + spec.name + ' 开火') + '</div>',
-                '  <input type="text" class="field-inline level-audio-tower-url" data-level-tower-sfx-id="' +
-                    escapeAttr(spec.id) +
-                    '" placeholder="URL" value="' +
-                    escapeAttr(url) +
-                    '" />',
-                '  <label class="game-asset-upload tight">上传<input type="file" data-level-tower-sfx-file="' +
-                    escapeAttr(spec.id) +
-                    '" accept=".mp3,.wav,.ogg,.m4a,audio/*" /></label>',
-                '</div>'
-            ].join('');
-        }).join('');
-        applyVolSliderDisp('levelAudioDefenseBgmVol', 'levelAudioDefenseBgmVolDisp', la.defenseBgmVolume, 55);
-        applyVolSliderDisp('levelAudioExploreBgmVol', 'levelAudioExploreBgmVolDisp', la.exploreBgmVolume, 55);
-        applyVolSliderDisp('levelAudioTowerVol', 'levelAudioTowerVolDisp', la.towerAttackSfxVolume, 62);
-    }
-
-    function renderGlobalAudioPanel() {
-        if (!state || !state.gameAssetConfig) return;
-        state.gameAssetConfig.globalAudio = normalizeGlobalAudio(state.gameAssetConfig.globalAudio);
-        var g = state.gameAssetConfig.globalAudio;
-        function setv(id, val) {
-            var el = document.getElementById(id);
-            if (el) el.value = val || '';
-        }
-        setv('gaGlobalMenuBgmUrl', g.menuBgmUrl);
-        setv('gaGlobalTowerBuildUrl', g.towerBuildSfxUrl);
-        setv('gaGlobalTowerAttackDefaultUrl', g.towerAttackDefaultSfxUrl);
-        setv('gaGlobalDefenseKillUrl', g.defenseEnemyDeathSfxUrl);
-        setv('gaGlobalExploreAttackUrl', g.exploreBasicAttackSfxUrl);
-        setv('gaGlobalExploreEnemyDeathUrl', g.exploreEnemyDeathSfxUrl);
-        setv('gaGlobalExplorePlayerHitUrl', g.explorePlayerHitSfxUrl);
-        applyVolSliderDisp('gaGlobalMenuBgmVol', 'gaGlobalMenuBgmVolDisp', g.menuBgmVolume, 55);
-        applyVolSliderDisp('gaGlobalTowerBuildVol', 'gaGlobalTowerBuildVolDisp', g.towerBuildSfxVolume, 55);
-        applyVolSliderDisp('gaGlobalTowerAttackVol', 'gaGlobalTowerAttackVolDisp', g.towerAttackSfxVolume, 62);
-        applyVolSliderDisp('gaGlobalDefenseKillVol', 'gaGlobalDefenseKillVolDisp', g.defenseEnemyDeathSfxVolume, 50);
-        applyVolSliderDisp('gaGlobalExploreAttackVol', 'gaGlobalExploreAttackVolDisp', g.exploreBasicAttackSfxVolume, 45);
-        applyVolSliderDisp('gaGlobalExploreEnemyDeathVol', 'gaGlobalExploreEnemyDeathVolDisp', g.exploreEnemyDeathSfxVolume, 50);
-        applyVolSliderDisp('gaGlobalExplorePlayerHitVol', 'gaGlobalExplorePlayerHitVolDisp', g.explorePlayerHitSfxVolume, 55);
-        var mount = document.getElementById('gaGlobalTowerAttackRows');
-        if (mount) {
-            mount.innerHTML = TOWER_MODEL_SPECS.map(function (spec) {
-                var url = (g.towerAttackSfxByBuildId && g.towerAttackSfxByBuildId[spec.id]) || '';
-                return [
-                    '<div class="game-asset-tower-row level-audio-tower-row">',
-                    '  <div class="game-asset-tower-title">' + escapeHtml(spec.key + ' · ' + spec.name + '（全局）') + '</div>',
-                    '  <input type="text" class="field-inline global-tower-sfx-url" data-global-tower-sfx-id="' +
-                        escapeAttr(spec.id) +
-                        '" placeholder="URL" value="' +
-                        escapeAttr(url) +
-                        '" />',
-                    '  <label class="game-asset-upload tight">上传<input type="file" data-global-tower-sfx-file="' +
-                        escapeAttr(spec.id) +
-                        '" accept=".mp3,.wav,.ogg,.m4a,audio/*" /></label>',
-                    '</div>'
-                ].join('');
-            }).join('');
-        }
-    }
-
-    function bindLevelAudioUi() {
-        var sec = document.getElementById('levelAudioSection');
-        if (!sec || sec.dataset.bound === '1') return;
-        sec.dataset.bound = '1';
-        function currentLevelAudio() {
-            var level = getLevel();
-            if (!level || !level.map) return null;
-            return ensureLevelMapAudio(level.map);
-        }
-        var dUrl = document.getElementById('levelAudioDefenseBgmUrl');
-        var eUrl = document.getElementById('levelAudioExploreBgmUrl');
-        if (dUrl) {
-            dUrl.addEventListener('input', function () {
-                var la = currentLevelAudio();
-                if (!la) return;
-                la.defenseBgmUrl = dUrl.value.trim();
-                markDirty('已更新关卡塔防 BGM');
-            });
-        }
-        if (eUrl) {
-            eUrl.addEventListener('input', function () {
-                var la = currentLevelAudio();
-                if (!la) return;
-                la.exploreBgmUrl = eUrl.value.trim();
-                markDirty('已更新关卡探索 BGM');
-            });
-        }
-        function bindBgmFile(inputId, field) {
-            var inp = document.getElementById(inputId);
-            if (!inp) return;
-            inp.addEventListener('change', function () {
-                var f = inp.files && inp.files[0];
-                inp.value = '';
-                if (!f) return;
-                (async function () {
-                    try {
-                        setStatus('正在上传「' + f.name + '」…', 'idle');
-                        var url = await uploadFileToProjectUrl(f, { gameModelsUpload: true, gameModelsSubdir: 'Audio' });
-                        var la = currentLevelAudio();
-                        if (!la) return;
-                        la[field] = url;
-                        if (field === 'defenseBgmUrl' && dUrl) dUrl.value = url;
-                        if (field === 'exploreBgmUrl' && eUrl) eUrl.value = url;
-                        markDirty('已上传关卡 BGM');
-                        setStatus('已上传「' + f.name + '」', 'success');
-                    } catch (err) {
-                        setStatus((err && err.message) || '上传失败', 'error');
-                    }
-                })();
-            });
-        }
-        bindBgmFile('levelAudioDefenseBgmFile', 'defenseBgmUrl');
-        bindBgmFile('levelAudioExploreBgmFile', 'exploreBgmUrl');
-        bindAudioVolumeSlider(
-            'levelAudioDefenseBgmVol',
-            'levelAudioDefenseBgmVolDisp',
-            currentLevelAudio,
-            function (la, v) {
-                la.defenseBgmVolume = v;
-            },
-            '已更新关卡塔防 BGM 音量'
-        );
-        bindAudioVolumeSlider(
-            'levelAudioExploreBgmVol',
-            'levelAudioExploreBgmVolDisp',
-            currentLevelAudio,
-            function (la, v) {
-                la.exploreBgmVolume = v;
-            },
-            '已更新关卡探索 BGM 音量'
-        );
-        bindAudioVolumeSlider(
-            'levelAudioTowerVol',
-            'levelAudioTowerVolDisp',
-            currentLevelAudio,
-            function (la, v) {
-                la.towerAttackSfxVolume = v;
-            },
-            '已更新本关塔开火音效音量'
-        );
-        sec.addEventListener('input', function (e) {
-            var t = e.target;
-            if (!t || !t.classList || !t.classList.contains('level-audio-tower-url')) return;
-            var id = t.getAttribute('data-level-tower-sfx-id');
-            var la = currentLevelAudio();
-            if (!la || !id) return;
-            if (!la.towerAttackSfxByBuildId) la.towerAttackSfxByBuildId = {};
-            var v = t.value.trim();
-            if (v) la.towerAttackSfxByBuildId[id] = v;
-            else delete la.towerAttackSfxByBuildId[id];
-            markDirty('已更新关卡塔开火音效');
-        });
-        sec.addEventListener('change', function (e) {
-            var t = e.target;
-            if (!t || !t.getAttribute('data-level-tower-sfx-file')) return;
-            var id = t.getAttribute('data-level-tower-sfx-file');
-            var f = t.files && t.files[0];
-            t.value = '';
-            if (!f || !id) return;
-            (async function () {
-                try {
-                    setStatus('正在上传「' + f.name + '」…', 'idle');
-                    var url = await uploadFileToProjectUrl(f, { gameModelsUpload: true, gameModelsSubdir: 'Audio' });
-                    var la = currentLevelAudio();
-                    if (!la) return;
-                    if (!la.towerAttackSfxByBuildId) la.towerAttackSfxByBuildId = {};
-                    la.towerAttackSfxByBuildId[id] = url;
-                    var inp2 = sec.querySelector('.level-audio-tower-url[data-level-tower-sfx-id="' + id + '"]');
-                    if (inp2) inp2.value = url;
-                    markDirty('已上传关卡塔开火音效');
-                    setStatus('已绑定「' + f.name + '」', 'success');
-                } catch (err) {
-                    setStatus((err && err.message) || '上传失败', 'error');
-                }
-            })();
-        });
-    }
-
-    function bindGlobalAudioUi() {
-        var sec = document.getElementById('globalAudioBindRoot');
-        if (!sec || sec.dataset.bound === '1') return;
-        sec.dataset.bound = '1';
-        function ga() {
-            if (!state || !state.gameAssetConfig) return null;
-            state.gameAssetConfig.globalAudio = normalizeGlobalAudio(state.gameAssetConfig.globalAudio);
-            return state.gameAssetConfig.globalAudio;
-        }
-        var fields = [
-            ['gaGlobalMenuBgmUrl', 'menuBgmUrl'],
-            ['gaGlobalTowerBuildUrl', 'towerBuildSfxUrl'],
-            ['gaGlobalTowerAttackDefaultUrl', 'towerAttackDefaultSfxUrl'],
-            ['gaGlobalDefenseKillUrl', 'defenseEnemyDeathSfxUrl'],
-            ['gaGlobalExploreAttackUrl', 'exploreBasicAttackSfxUrl'],
-            ['gaGlobalExploreEnemyDeathUrl', 'exploreEnemyDeathSfxUrl'],
-            ['gaGlobalExplorePlayerHitUrl', 'explorePlayerHitSfxUrl']
-        ];
-        fields.forEach(function (pair) {
-            var el = document.getElementById(pair[0]);
-            if (!el) return;
-            el.addEventListener('input', function () {
-                var g = ga();
-                if (!g) return;
-                g[pair[1]] = el.value.trim();
-                markDirty('已更新全局音效');
-            });
-        });
-        var uploads = [
-            ['gaGlobalMenuBgmFile', 'menuBgmUrl', 'gaGlobalMenuBgmUrl'],
-            ['gaGlobalTowerBuildFile', 'towerBuildSfxUrl', 'gaGlobalTowerBuildUrl'],
-            ['gaGlobalTowerAttackDefaultFile', 'towerAttackDefaultSfxUrl', 'gaGlobalTowerAttackDefaultUrl'],
-            ['gaGlobalDefenseKillFile', 'defenseEnemyDeathSfxUrl', 'gaGlobalDefenseKillUrl'],
-            ['gaGlobalExploreAttackFile', 'exploreBasicAttackSfxUrl', 'gaGlobalExploreAttackUrl'],
-            ['gaGlobalExploreEnemyDeathFile', 'exploreEnemyDeathSfxUrl', 'gaGlobalExploreEnemyDeathUrl'],
-            ['gaGlobalExplorePlayerHitFile', 'explorePlayerHitSfxUrl', 'gaGlobalExplorePlayerHitUrl']
-        ];
-        uploads.forEach(function (triple) {
-            var inp = document.getElementById(triple[0]);
-            if (!inp) return;
-            inp.addEventListener('change', function () {
-                var f = inp.files && inp.files[0];
-                inp.value = '';
-                if (!f) return;
-                (async function () {
-                    try {
-                        setStatus('正在上传「' + f.name + '」…', 'idle');
-                        var url = await uploadFileToProjectUrl(f, { gameModelsUpload: true, gameModelsSubdir: 'Audio' });
-                        var g = ga();
-                        if (!g) return;
-                        g[triple[1]] = url;
-                        var urlEl = document.getElementById(triple[2]);
-                        if (urlEl) urlEl.value = url;
-                        markDirty('已上传全局音效');
-                        setStatus('已绑定「' + f.name + '」', 'success');
-                    } catch (err) {
-                        setStatus((err && err.message) || '上传失败', 'error');
-                    }
-                })();
-            });
-        });
-        bindAudioVolumeSlider(
-            'gaGlobalMenuBgmVol',
-            'gaGlobalMenuBgmVolDisp',
-            ga,
-            function (g, v) {
-                g.menuBgmVolume = v;
-            },
-            '已更新全局菜单 BGM 音量'
-        );
-        bindAudioVolumeSlider(
-            'gaGlobalTowerBuildVol',
-            'gaGlobalTowerBuildVolDisp',
-            ga,
-            function (g, v) {
-                g.towerBuildSfxVolume = v;
-            },
-            '已更新全局建造音效音量'
-        );
-        bindAudioVolumeSlider(
-            'gaGlobalTowerAttackVol',
-            'gaGlobalTowerAttackVolDisp',
-            ga,
-            function (g, v) {
-                g.towerAttackSfxVolume = v;
-            },
-            '已更新全局塔开火默认音量'
-        );
-        bindAudioVolumeSlider(
-            'gaGlobalDefenseKillVol',
-            'gaGlobalDefenseKillVolDisp',
-            ga,
-            function (g, v) {
-                g.defenseEnemyDeathSfxVolume = v;
-            },
-            '已更新全局塔防击杀音量'
-        );
-        bindAudioVolumeSlider(
-            'gaGlobalExploreAttackVol',
-            'gaGlobalExploreAttackVolDisp',
-            ga,
-            function (g, v) {
-                g.exploreBasicAttackSfxVolume = v;
-            },
-            '已更新全局探索普攻音量'
-        );
-        bindAudioVolumeSlider(
-            'gaGlobalExploreEnemyDeathVol',
-            'gaGlobalExploreEnemyDeathVolDisp',
-            ga,
-            function (g, v) {
-                g.exploreEnemyDeathSfxVolume = v;
-            },
-            '已更新全局探索敌杀音量'
-        );
-        bindAudioVolumeSlider(
-            'gaGlobalExplorePlayerHitVol',
-            'gaGlobalExplorePlayerHitVolDisp',
-            ga,
-            function (g, v) {
-                g.explorePlayerHitSfxVolume = v;
-            },
-            '已更新全局探索受击音量'
-        );
-        sec.addEventListener('input', function (e) {
-            var t = e.target;
-            if (!t || !t.classList || !t.classList.contains('global-tower-sfx-url')) return;
-            var id = t.getAttribute('data-global-tower-sfx-id');
-            var g = ga();
-            if (!g || !id) return;
-            if (!g.towerAttackSfxByBuildId) g.towerAttackSfxByBuildId = {};
-            var v = t.value.trim();
-            if (v) g.towerAttackSfxByBuildId[id] = v;
-            else delete g.towerAttackSfxByBuildId[id];
-            markDirty('已更新全局塔开火音效');
-        });
-        sec.addEventListener('change', function (e) {
-            var t = e.target;
-            if (!t || !t.getAttribute('data-global-tower-sfx-file')) return;
-            var id = t.getAttribute('data-global-tower-sfx-file');
-            var f = t.files && t.files[0];
-            t.value = '';
-            if (!f || !id) return;
-            (async function () {
-                try {
-                    setStatus('正在上传「' + f.name + '」…', 'idle');
-                    var url = await uploadFileToProjectUrl(f, { gameModelsUpload: true, gameModelsSubdir: 'Audio' });
-                    var g = ga();
-                    if (!g) return;
-                    if (!g.towerAttackSfxByBuildId) g.towerAttackSfxByBuildId = {};
-                    g.towerAttackSfxByBuildId[id] = url;
-                    var inp2 = sec.querySelector('.global-tower-sfx-url[data-global-tower-sfx-id="' + id + '"]');
-                    if (inp2) inp2.value = url;
-                    markDirty('已上传全局塔开火音效');
-                    setStatus('已绑定「' + f.name + '」', 'success');
-                } catch (err) {
-                    setStatus((err && err.message) || '上传失败', 'error');
-                }
-            })();
-        });
     }
 
     function bindGameAssetPanel() {
@@ -2703,16 +1366,16 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
             var generated = generateRegionLevelSkeletons(false);
             var geoSynced = syncGeoConfigs(false);
             var synced = syncBuiltInCityLayouts(false);
-            selectedLevelId = pickLevelId(selectedLevelId);
+            selectedLevelId = pickLevelId(state.levels, selectedLevelId);
             await refreshGameModelsCatalog();
             renderAll();
             isDirty = generated > 0 || synced > 0 || geoSynced > 0 || gameplaySynced > 0;
-            persistLocalBackup();
+            _persistLocalBackup(state);
             setStatus(generated + synced + geoSynced + gameplaySynced > 0 ? '已同步 ' + gameplaySynced + ' 个运行时玩法条目、' + synced + ' 个城市布局、' + geoSynced + ' 个真实地图坐标，生成 ' + generated + ' 个骨架，保存后写入项目' : '配置已加载', generated + synced + geoSynced + gameplaySynced > 0 ? 'dirty' : 'success');
         } catch (error) {
-            var backup = readLocalBackup();
+            var backup = _readLocalBackup();
             state = normalizeState(backup || { version: ENGINE_VERSION, catalog: {}, levels: [] });
-            selectedLevelId = pickLevelId(selectedLevelId);
+            selectedLevelId = pickLevelId(state.levels, selectedLevelId);
             await refreshGameModelsCatalog();
             renderAll();
             isDirty = false;
@@ -2731,33 +1394,20 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
             var response = await fetch(API_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(sanitizeStateForSave(state))
+                body: JSON.stringify(_sanitizeStateForSave(state))
             });
             if (!response.ok) throw new Error('保存失败: ' + response.status);
             state = normalizeState(await response.json());
-            selectedLevelId = pickLevelId(selectedLevelId);
+            selectedLevelId = pickLevelId(state.levels, selectedLevelId);
             isDirty = false;
-            persistLocalBackup();
+            _persistLocalBackup(state);
             await refreshGameModelsCatalog();
             renderAll();
             setStatus('已保存到 Web/data/level-editor-state.json', 'success');
         } catch (error) {
-            persistLocalBackup();
+            _persistLocalBackup(state);
             setStatus('保存失败，已保留本地备份: ' + error.message, 'error');
         }
-    }
-
-    function exportState() {
-        var blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
-        var url = URL.createObjectURL(blob);
-        var link = document.createElement('a');
-        link.href = url;
-        link.download = 'earth-guardian-level-engine-export.json';
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        URL.revokeObjectURL(url);
-        setStatus('已导出当前编辑配置', 'success');
     }
 
     async function loadRegionSources() {
@@ -2877,9 +1527,9 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
             created += 1;
         });
         if (created > 0) {
-            sortLevels();
+            sortLevels(state);
             if (markAsDirty) {
-                selectedLevelId = pickLevelId(selectedLevelId);
+                selectedLevelId = pickLevelId(state.levels, selectedLevelId);
                 markDirty('已生成 ' + created + ' 个国家/城市关卡骨架');
                 renderAll();
             }
@@ -2940,7 +1590,7 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
             synced += 1;
         });
         if (synced > 0) {
-            sortLevels();
+            sortLevels(state);
             if (markAsDirty) {
                 markDirty('已同步 ' + synced + ' 个城市的塔防/探索布局');
                 renderAll();
@@ -2972,102 +1622,6 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
         return country && country.geo ? country.geo : null;
     }
 
-    function resolveSpecialGeoForLevel(level) {
-        var text = [
-            level && level.id,
-            level && level.name,
-            level && level.location && level.location.cityCode,
-            level && level.location && level.location.cityName,
-            level && level.location && level.location.regionLabel
-        ].filter(Boolean).join(' ').replace(/\s+/g, '');
-        if (/city-cn-370100|中国·济南市|中国·济南|济南市/i.test(text)) return CITY_GEO_CONFIGS.jinanOlympic;
-        if (/CN_shandong_370100|泉城浮生录|山东·济南|山东_370100/i.test(text)) return CITY_GEO_CONFIGS.jinan;
-        return null;
-    }
-
-    function isJinanLevel(level) {
-        var haystack = [
-            level && level.id,
-            level && level.name,
-            level && level.location && level.location.cityName,
-            level && level.location && level.location.regionLabel,
-            level && level.location && level.location.cityCode
-        ].filter(Boolean).join(' ').replace(/\s+/g, '');
-        return /济南|泉城|370100|shandong|cn-370100|shandong_370100/i.test(haystack);
-    }
-
-    function hasDefenseLayout(map) {
-        return !!(map.roads.length || map.obstacles.length || map.enemyPaths.some(function (path) { return path.cells.length; }));
-    }
-
-    function hasExploreLayout(map) {
-        return !!(map.explorationLayout && (map.explorationLayout.path.length || map.explorationLayout.obstacles.length));
-    }
-
-    function applyDefenseLayout(level, layout) {
-        var path = cloneCells(layout.defense.path);
-        level.map.grid = { cols: DEFAULT_GRID_COLS, rows: DEFAULT_GRID_ROWS, tileSize: DEFAULT_TILE_SIZE };
-        level.map.theme = clone(layout.defense.theme);
-        level.map.roads = cloneCells(layout.defense.path);
-        level.map.enemyPaths = [{ id: 'path-main', name: '主敌人路径', cells: path }];
-        level.map.obstacles = cloneCells(layout.defense.obstacles);
-        level.map.spawnPoints = [{ id: 'spawn-main', name: '敌人入口', col: path[0].col, row: path[0].row, pathId: 'path-main' }];
-        level.map.enemyExits = level.map.spawnPoints;
-        level.map.objectivePoint = { id: 'objective-main', name: '防守核心', col: path[path.length - 1].col, row: path[path.length - 1].row };
-        if (/未设计关卡/.test(level.name)) level.name = layout.defenseName;
-    }
-
-    function applyExploreLayout(level, layout) {
-        var path = cloneCells(layout.explore.path);
-        level.map.explorationLayout = {
-            grid: { cols: DEFAULT_GRID_COLS, rows: DEFAULT_GRID_ROWS, tileSize: DEFAULT_TILE_SIZE },
-            theme: clone(layout.explore.theme),
-            path: path,
-            obstacles: cloneCells(layout.explore.obstacles),
-            startPoint: { id: 'explore-start', name: '探索起点', col: path[0].col, row: path[0].row },
-            exitPoint: { id: 'explore-exit', name: '探索终点', col: path[path.length - 1].col, row: path[path.length - 1].row }
-        };
-        if (!level.map.explorationPoints.length) {
-            level.map.explorationPoints = path.map(function (cell, index) {
-                return {
-                    id: 'explore-point-' + (index + 1),
-                    name: index === 0 ? '探索起点' : '探索点 ' + (index + 1),
-                    col: cell.col,
-                    row: cell.row,
-                    modelId: '',
-                    interaction: index === 0 ? 'spawn' : 'inspect',
-                    radius: 2
-                };
-            });
-        }
-    }
-
-    function createDraftLevel(options) {
-        return normalizeLevel({
-            id: options.id,
-            folder: options.id,
-            name: options.name,
-            status: 'draft',
-            difficulty: 3,
-            description: '自动生成的空白关卡骨架。你可以在编辑器中自由设计地图、道路、敌人出口、防御塔、模型和探索点。',
-            location: {
-                countryCode: options.countryCode,
-                countryName: options.countryName,
-                cityCode: options.cityCode,
-                cityName: options.cityName,
-                regionLabel: options.regionLabel,
-                source: options.source
-            },
-            environment: {},
-            map: Object.assign(createDefaultMap(), options.geo ? { geo: options.geo } : {}),
-            modeProfiles: {},
-            rosters: {},
-            props: [],
-            resources: [],
-            uiModules: []
-        });
-    }
-
     function renderAll() {
         renderWorkbenchShell();
         renderLevelTree();
@@ -3083,8 +1637,8 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
         renderThemeEditor();
         syncViewportPanels();
         renderContentBrowser();
-        renderBoardImagesPanel();
-        updateEraserToolPanelVisibility();
+        renderBoardImagesPanel(refs, boardImagesEnv());
+        updateEraserToolPanelVisibility(refs, activeWorkbench, activeTool);
     }
 
     function ensureLevelContentBrowserUiWired() {
@@ -3147,14 +1701,6 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
         return true;
     }
 
-    function sortCells(cells) {
-        return cells
-            .slice()
-            .sort(function (a, b) {
-                return Number(a.row) - Number(b.row) || Number(a.col) - Number(b.col);
-            });
-    }
-
     function lcbItemButton(meta) {
         var sk = meta.selKind;
         var active = lcbBtnActive(sk, meta.probe || {}) ? ' lcb-item--active' : '';
@@ -3181,18 +1727,6 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
             '</span>' +
             '</span>' +
             '</button>'
-        );
-    }
-
-    function lcbSection(title, inner) {
-        if (!inner) return '';
-        return (
-            '<div class="level-content-browser-section">' +
-            '<h4>' +
-            escapeHtml(title) +
-            '</h4>' +
-            inner +
-            '</div>'
         );
     }
 
@@ -3421,111 +1955,8 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
         if (refs.previewSceneOutlineList) refs.previewSceneOutlineList.innerHTML = '';
     }
 
-    function findLevelById(levelId) {
-        if (!state || !levelId) return null;
-        return state.levels.find(function (l) {
-            return l.id === levelId;
-        }) || null;
-    }
-
-    function levelVideoCityContext(level) {
-        if (!level) return null;
-        var loc = level.location || {};
-        var code = String(level.cityCode || loc.cityCode || '').trim();
-        var name = String(level.cityName || level.countryName || loc.cityName || level.name || '').trim();
-        if (!code && name) code = slugify(name) || slugify(String(level.id || '')) || 'CUSTOM';
-        if (!code && !name) return null;
-        return { cityCode: code || 'CUSTOM', cityName: name || 'Level' };
-    }
-
-    function setGlobalSettingsTab(tabId) {
-        var next = tabId || 'levels';
-        if (next !== 'levels' && next !== 'cutscenes' && next !== 'audio' && next !== 'backgrounds') next = 'levels';
-        activeGlobalSettingsTab = next;
-        if (refs.globalSettingsSubTabs) {
-            refs.globalSettingsSubTabs.querySelectorAll('[data-global-tab]').forEach(function (btn) {
-                var on = btn.getAttribute('data-global-tab') === activeGlobalSettingsTab;
-                btn.classList.toggle('active', on);
-                btn.setAttribute('aria-selected', on ? 'true' : 'false');
-            });
-        }
-        ['levels', 'cutscenes', 'audio', 'backgrounds'].forEach(function (key) {
-            var panel = document.getElementById('globalTabPanel' + key.charAt(0).toUpperCase() + key.slice(1));
-            if (!panel) return;
-            var show = key === activeGlobalSettingsTab;
-            panel.classList.toggle('view-hidden', !show);
-            panel.setAttribute('aria-hidden', show ? 'false' : 'true');
-        });
-        syncGlobalSettingsHero();
-        if (activeGlobalSettingsTab === 'cutscenes') {
-            syncGlobalCutsceneEditTarget();
-            populateGlobalCutsceneLevelSelect();
-            renderGlobalCutsceneOverview();
-            renderGlobalCutsceneEditor();
-        }
-        if (activeGlobalSettingsTab === 'audio') renderGlobalAudioPanel();
-        if (activeGlobalSettingsTab === 'backgrounds') renderGlobalScreenUiForm();
-    }
-
-    function syncGlobalSettingsHero() {
-        if (refs.globalSettingsHeroTitle) refs.globalSettingsHeroTitle.textContent = '全局设置';
-        if (!refs.globalSettingsHeroDetail) return;
-        var lines = {
-            levels: '当前：关卡管理。可新建/删除关卡，与左侧关卡树数据一致。',
-            cutscenes: '当前：过场动画。总览各关已配置的 map.cutscenes；选择关卡后编辑开场与波次视频（与棋盘主题工作台同源）。',
-            audio: '当前：全局音效。配置 gameAssetConfig.globalAudio，进入关卡前菜单 BGM 与各默认战斗音效。',
-            backgrounds: '当前：背景图片。配置 gameAssetConfig.globalScreenUi，用于开始页与选关页等 UI。'
-        };
-        refs.globalSettingsHeroDetail.textContent = lines[activeGlobalSettingsTab] || lines.levels;
-    }
-
-    function syncGlobalCutsceneEditTarget() {
-        if (!state || !state.levels.length) {
-            globalCutsceneEditLevelId = '';
-            return;
-        }
-        if (!globalCutsceneEditLevelId || !findLevelById(globalCutsceneEditLevelId)) {
-            globalCutsceneEditLevelId = (getLevel() && getLevel().id) || state.levels[0].id;
-        }
-    }
-
-    function getGlobalCutsceneTargetLevel() {
-        return findLevelById(globalCutsceneEditLevelId);
-    }
-
     function refreshGlobalSettingsWorkbench() {
-        applyGlobalSettingsTabUi();
-    }
-
-    function applyGlobalSettingsTabUi() {
-        setGlobalSettingsTab(activeGlobalSettingsTab);
-        if (activeGlobalSettingsTab === 'levels') renderGlobalLevelsManageList();
-    }
-
-    function renderGlobalLevelsManageList() {
-        var mount = refs.globalLevelsManageList;
-        if (!mount || !state) return;
-        if (!state.levels.length) {
-            mount.innerHTML = '<p class="section-hint">暂无关卡，请点击「新建关卡」。</p>';
-            return;
-        }
-        mount.innerHTML = state.levels
-            .map(function (level) {
-                var region = [level.countryName, level.cityName].filter(Boolean).join(' · ') || '—';
-                return [
-                    '<div class="global-level-manage-row panel-surface" data-level-manage-id="' + escapeAttr(level.id) + '">',
-                    '  <div class="global-level-manage-row__main">',
-                    '    <strong>' + escapeHtml(level.name || level.id) + '</strong>',
-                    '    <span class="section-hint">' + escapeHtml(region) + ' · id: ' + escapeHtml(level.id) + '</span>',
-                    '  </div>',
-                    '  <div class="global-level-manage-row__actions">',
-                    '    <button type="button" class="mini-button" data-level-open="' + escapeAttr(level.id) + '">在编辑器中打开</button>',
-                    '    <button type="button" class="mini-button danger" data-level-delete="' + escapeAttr(level.id) + '">删除</button>',
-                    '  </div>',
-                    '</div>'
-                ].join('');
-            })
-            .join('');
+        _refreshGlobalSettingsWorkbench(refs, globalSettingsEnv());
     }
 
     function deleteLevelById(levelId) {
@@ -3548,7 +1979,7 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
     }
 
     function focusLevelInEditor(levelId) {
-        if (!levelId || !findLevelById(levelId)) return;
+        if (!levelId || !findLevelById(state.levels, levelId)) return;
         selectedLevelId = levelId;
         activeWorkbench = 'level';
         if (refs.workbenchTabs) {
@@ -3561,136 +1992,6 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
             return el.getAttribute('data-level-id') === levelId;
         });
         if (treeBtn && typeof treeBtn.scrollIntoView === 'function') treeBtn.scrollIntoView({ block: 'nearest' });
-    }
-
-    function populateGlobalCutsceneLevelSelect() {
-        var sel = refs.globalCutsceneLevelSelect;
-        if (!sel || !state) return;
-        var preserveId = globalCutsceneEditLevelId || '';
-        sel.innerHTML = state.levels
-            .map(function (level) {
-                var label = (level.name || level.id) + ' (' + level.id + ')';
-                return '<option value="' + escapeAttr(level.id) + '">' + escapeHtml(label) + '</option>';
-            })
-            .join('');
-        syncGlobalCutsceneEditTarget();
-        if (preserveId && findLevelById(preserveId)) {
-            globalCutsceneEditLevelId = preserveId;
-        }
-        sel.value = globalCutsceneEditLevelId || '';
-        if (!sel.value && state.levels.length) {
-            sel.selectedIndex = 0;
-            globalCutsceneEditLevelId = sel.value || '';
-        }
-    }
-
-    function renderGlobalCutsceneOverview() {
-        var mount = refs.globalCutsceneOverview;
-        if (!mount || !state) return;
-        if (!state.levels.length) {
-            mount.innerHTML = '<p class="section-hint">暂无关卡。</p>';
-            return;
-        }
-        mount.innerHTML = [
-            '<table class="global-cutscene-table">',
-            '<thead><tr><th>关卡</th><th>开场</th><th>波次视频</th><th></th></tr></thead>',
-            '<tbody>',
-            state.levels
-                .map(function (level) {
-                    var cs = level.map && level.map.cutscenes;
-                    var intro = cs && cs.introVideo && cs.introVideo.url;
-                    var waves = cs && Array.isArray(cs.waveVideos) ? cs.waveVideos : [];
-                    var waveWithUrl = waves.filter(function (w) {
-                        return w && w.url;
-                    }).length;
-                    var introLabel = intro ? modelBindShortLabel(intro) : '—';
-                    return (
-                        '<tr data-cutscene-overview-id="' +
-                        escapeAttr(level.id) +
-                        '">' +
-                        '<td>' +
-                        escapeHtml(level.name || level.id) +
-                        '</td>' +
-                        '<td>' +
-                        escapeHtml(introLabel) +
-                        '</td>' +
-                        '<td>' +
-                        waveWithUrl +
-                        ' / ' +
-                        waves.length +
-                        '</td>' +
-                        '<td><button type="button" class="mini-button" data-cutscene-edit="' +
-                        escapeAttr(level.id) +
-                        '">编辑</button></td>' +
-                        '</tr>'
-                    );
-                })
-                .join(''),
-            '</tbody></table>'
-        ].join('');
-    }
-
-    function ensureCutscenesForLevel(level) {
-        if (!level || !level.map) return null;
-        if (!level.map.cutscenes) level.map.cutscenes = {};
-        return level.map.cutscenes;
-    }
-
-    function renderGlobalCutsceneEditor() {
-        if (!refs.gIntroVideoInfo) return;
-        var level = getGlobalCutsceneTargetLevel();
-        if (!level || !level.map) {
-            refs.gIntroVideoInfo.textContent = '请先选择关卡';
-            if (refs.gIntroVideoTitle) refs.gIntroVideoTitle.value = '';
-            if (refs.gWaveVideoList) refs.gWaveVideoList.innerHTML = '';
-            return;
-        }
-        var cutscenes = level.map.cutscenes || {};
-        var intro = cutscenes.introVideo || {};
-        var gst = formatIntroVideoStatusLines(intro);
-        refs.gIntroVideoInfo.textContent = gst.text;
-        if (refs.gBtnOpenIntroVideoLocation) {
-            refs.gBtnOpenIntroVideoLocation.disabled = !gst.openPath;
-            refs.gBtnOpenIntroVideoLocation.title = gst.openPath
-                ? '在文件管理器中打开该文件，便于手动替换'
-                : '上传并保存到项目 public 目录后可在此打开';
-        }
-        if (refs.gIntroVideoTitle) refs.gIntroVideoTitle.value = intro.title || '';
-        if (!refs.gWaveVideoList) return;
-        var waveVideos = Array.isArray(cutscenes.waveVideos) ? cutscenes.waveVideos : [];
-        if (!waveVideos.length) {
-            refs.gWaveVideoList.innerHTML = '<p class="section-hint" style="margin:8px 0;">暂无波次视频，点击「＋ 添加」新增。</p>';
-            return;
-        }
-        refs.gWaveVideoList.innerHTML = waveVideos
-            .map(function (wv, idx) {
-                var hasUrl = !!wv.url;
-                return [
-                    '<div class="wave-video-item" data-wv-idx="' + idx + '" style="border:1px solid var(--border,#354);border-radius:6px;padding:10px 12px;margin-bottom:8px;">',
-                    '  <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">',
-                    '    <label style="flex:0 0 auto;font-size:12px;opacity:.7;">第',
-                    '      <input type="number" class="g-wv-wave-input" min="1" max="999" value="' + (wv.afterWave || 1) + '"',
-                    '        style="width:52px;margin:0 3px;" data-wv-idx="' + idx + '">',
-                    '    波后</label>',
-                    '    <button type="button" class="mini-button g-wv-upload-btn" data-wv-idx="' + idx + '" style="flex:1;">',
-                    '      ' + (hasUrl ? '替换视频' : '上传视频'),
-                    '      <input type="file" class="g-wv-file-input" accept="video/mp4,video/webm,video/ogg,video/*"',
-                    '        data-wv-idx="' + idx + '" style="position:absolute;inset:0;opacity:0;cursor:pointer;">',
-                    '    </button>',
-                    '    <button type="button" class="mini-button g-wv-remove-btn" data-wv-idx="' + idx + '" style="color:var(--error-color,#d87880);">✕</button>',
-                    '  </div>',
-                    '  <div class="section-hint g-wv-url-info" style="word-break:break-all;min-height:1.2em;font-size:11px;">',
-                    '    ' + escapeHtml(hasUrl ? wv.url : '未上传视频'),
-                    '  </div>',
-                    '  <label class="field-block" style="margin-top:6px;">',
-                    '    <span style="font-size:12px;">字幕标题（可选）</span>',
-                    '    <input type="text" class="g-wv-title-input" placeholder="留空则不显示字幕"',
-                    '      value="' + escapeAttr(wv.title || '') + '" data-wv-idx="' + idx + '">',
-                    '  </label>',
-                    '</div>'
-                ].join('');
-            })
-            .join('');
     }
 
     function renderGlobalScreenUiForm() {
@@ -3799,207 +2100,11 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
     }
 
     function bindGlobalCutscenePanel() {
-        var panel = document.getElementById('globalTabPanelCutscenes');
-        if (!panel || panel.dataset.gCutsceneBound === '1') return;
-        panel.dataset.gCutsceneBound = '1';
-        if (refs.gIntroVideoFile) {
-            refs.gIntroVideoFile.addEventListener('change', async function () {
-                var file = refs.gIntroVideoFile.files && refs.gIntroVideoFile.files[0];
-                if (!file) return;
-                var lvl = getGlobalCutsceneTargetLevel();
-                try {
-                    setStatus('正在上传开场视频 ' + file.name + '…', 'idle');
-                    var up = await uploadVideoFile(file, lvl);
-                    var cutscenes = ensureCutscenesForLevel(lvl);
-                    if (!cutscenes) return;
-                    cutscenes.introVideo = { url: up.url };
-                    if (up.projectPath) cutscenes.introVideo.projectPath = up.projectPath;
-                    var gTitle = (refs.gIntroVideoTitle && refs.gIntroVideoTitle.value.trim()) || '';
-                    if (gTitle) cutscenes.introVideo.title = gTitle;
-                    else delete cutscenes.introVideo.title;
-                    refs.gIntroVideoFile.value = '';
-                    markDirty('已上传开场视频（全局过场页）');
-                    renderGlobalCutsceneEditor();
-                    renderGlobalCutsceneOverview();
-                    setStatus('开场视频已上传', 'idle');
-                } catch (err) {
-                    refs.gIntroVideoFile.value = '';
-                    setStatus('视频上传失败: ' + (err && err.message), 'error');
-                }
-            });
-        }
-        if (refs.gIntroVideoTitle) {
-            refs.gIntroVideoTitle.addEventListener('change', function () {
-                var lvl = getGlobalCutsceneTargetLevel();
-                var cutscenes = ensureCutscenesForLevel(lvl);
-                if (!cutscenes || !cutscenes.introVideo) return;
-                var t = refs.gIntroVideoTitle.value.trim();
-                if (t) cutscenes.introVideo.title = t;
-                else delete cutscenes.introVideo.title;
-                markDirty('已更新开场视频标题');
-            });
-        }
-        if (refs.gBtnClearIntroVideo) {
-            refs.gBtnClearIntroVideo.addEventListener('click', function () {
-                var lvl = getGlobalCutsceneTargetLevel();
-                var cutscenes = ensureCutscenesForLevel(lvl);
-                if (!cutscenes) return;
-                delete cutscenes.introVideo;
-                markDirty('已清除开场视频');
-                renderGlobalCutsceneEditor();
-                renderGlobalCutsceneOverview();
-            });
-        }
-        if (refs.gBtnOpenIntroVideoLocation && refs.gBtnOpenIntroVideoLocation.dataset.bound !== '1') {
-            refs.gBtnOpenIntroVideoLocation.dataset.bound = '1';
-            refs.gBtnOpenIntroVideoLocation.addEventListener('click', function () {
-                var lvl = getGlobalCutsceneTargetLevel();
-                var intro = lvl && lvl.map && lvl.map.cutscenes && lvl.map.cutscenes.introVideo;
-                var p = effectiveCutsceneVideoProjectPath(intro);
-                if (!p) {
-                    setStatus('无法定位项目内文件：请使用「上传开场视频」写入 public 目录', 'error');
-                    return;
-                }
-                void revealProjectPathInExplorer(p).catch(function (err) {
-                    setStatus((err && err.message) || '打开资源管理器失败', 'error');
-                });
-            });
-        }
-        if (refs.gBtnAddWaveVideo) {
-            refs.gBtnAddWaveVideo.addEventListener('click', function () {
-                var lvl = getGlobalCutsceneTargetLevel();
-                var cutscenes = ensureCutscenesForLevel(lvl);
-                if (!cutscenes) return;
-                if (!Array.isArray(cutscenes.waveVideos)) cutscenes.waveVideos = [];
-                var usedWaves = cutscenes.waveVideos.map(function (w) {
-                    return w.afterWave;
-                });
-                var nextWave = 1;
-                while (usedWaves.indexOf(nextWave) !== -1) nextWave++;
-                cutscenes.waveVideos.push({ afterWave: nextWave, url: '' });
-                markDirty('已新增波次视频槽（全局过场页）');
-                renderGlobalCutsceneEditor();
-                renderGlobalCutsceneOverview();
-            });
-        }
-        if (refs.gWaveVideoList) {
-            refs.gWaveVideoList.addEventListener('change', function (e) {
-                var target = e.target;
-                var idx = parseInt(target.getAttribute('data-wv-idx') || '', 10);
-                if (isNaN(idx)) return;
-                var lvl = getGlobalCutsceneTargetLevel();
-                var cutscenes = ensureCutscenesForLevel(lvl);
-                if (!cutscenes || !Array.isArray(cutscenes.waveVideos) || !cutscenes.waveVideos[idx]) return;
-                if (target.classList.contains('g-wv-wave-input')) {
-                    cutscenes.waveVideos[idx].afterWave = Math.max(1, parseInt(target.value, 10) || 1);
-                    markDirty('已更新波次');
-                } else if (target.classList.contains('g-wv-title-input')) {
-                    var t = target.value.trim();
-                    if (t) cutscenes.waveVideos[idx].title = t;
-                    else delete cutscenes.waveVideos[idx].title;
-                    markDirty('已更新波次视频标题');
-                } else if (target.classList.contains('g-wv-file-input') && target.files && target.files[0]) {
-                    var fileInner = target.files[0];
-                    var idxInner = parseInt(target.getAttribute('data-wv-idx') || '', 10);
-                    void (async function () {
-                        try {
-                            setStatus('正在上传波次视频 ' + fileInner.name + '…', 'idle');
-                            var up = await uploadVideoFile(fileInner, lvl);
-                            var cs = ensureCutscenesForLevel(getGlobalCutsceneTargetLevel());
-                            if (cs && Array.isArray(cs.waveVideos) && cs.waveVideos[idxInner]) {
-                                cs.waveVideos[idxInner].url = up.url;
-                                if (up.projectPath) cs.waveVideos[idxInner].projectPath = up.projectPath;
-                                else delete cs.waveVideos[idxInner].projectPath;
-                                markDirty('已上传波次视频');
-                                renderGlobalCutsceneEditor();
-                                renderGlobalCutsceneOverview();
-                                setStatus('波次视频已上传', 'idle');
-                            }
-                            target.value = '';
-                        } catch (err) {
-                            target.value = '';
-                            setStatus('波次视频上传失败: ' + (err && err.message), 'error');
-                        }
-                    })();
-                }
-            });
-            refs.gWaveVideoList.addEventListener('click', function (e) {
-                var btn = e.target.closest('.g-wv-remove-btn');
-                if (!btn) return;
-                var idx = parseInt(btn.getAttribute('data-wv-idx') || '', 10);
-                if (isNaN(idx)) return;
-                var lvl = getGlobalCutsceneTargetLevel();
-                var cutscenes = ensureCutscenesForLevel(lvl);
-                if (!cutscenes || !Array.isArray(cutscenes.waveVideos)) return;
-                cutscenes.waveVideos.splice(idx, 1);
-                if (cutscenes.waveVideos.length === 0) delete cutscenes.waveVideos;
-                markDirty('已删除波次视频');
-                renderGlobalCutsceneEditor();
-                renderGlobalCutsceneOverview();
-            });
-        }
+        _bindGlobalCutscenePanel(refs, globalSettingsEnv());
     }
 
     function bindGlobalSettingsChrome() {
-        if (refs.globalSettingsSubTabs && refs.globalSettingsSubTabs.dataset.bound !== '1') {
-            refs.globalSettingsSubTabs.dataset.bound = '1';
-            refs.globalSettingsSubTabs.addEventListener('click', function (e) {
-                var btn = e.target.closest('[data-global-tab]');
-                if (!btn) return;
-                setGlobalSettingsTab(btn.getAttribute('data-global-tab') || 'levels');
-                renderGlobalLevelsManageList();
-            });
-        }
-        if (refs.btnGlobalOpenCreateLevel && refs.btnGlobalOpenCreateLevel.dataset.bound !== '1') {
-            refs.btnGlobalOpenCreateLevel.dataset.bound = '1';
-            refs.btnGlobalOpenCreateLevel.addEventListener('click', function () {
-                createManualLevel();
-            });
-        }
-        if (refs.globalLevelsManageList && refs.globalLevelsManageList.dataset.bound !== '1') {
-            refs.globalLevelsManageList.dataset.bound = '1';
-            refs.globalLevelsManageList.addEventListener('click', function (e) {
-                var delBtn = e.target.closest('[data-level-delete]');
-                if (delBtn) {
-                    deleteLevelById(delBtn.getAttribute('data-level-delete') || '');
-                    return;
-                }
-                var openBtn = e.target.closest('[data-level-open]');
-                if (openBtn) {
-                    focusLevelInEditor(openBtn.getAttribute('data-level-open') || '');
-                }
-            });
-        }
-        if (refs.globalCutsceneLevelSelect && refs.globalCutsceneLevelSelect.dataset.bound !== '1') {
-            refs.globalCutsceneLevelSelect.dataset.bound = '1';
-            refs.globalCutsceneLevelSelect.addEventListener('change', function () {
-                globalCutsceneEditLevelId = refs.globalCutsceneLevelSelect.value || '';
-                renderGlobalCutsceneEditor();
-            });
-        }
-        if (refs.globalSettingsWorkbench && refs.globalSettingsWorkbench.dataset.cutsceneDelegateBound !== '1') {
-            refs.globalSettingsWorkbench.dataset.cutsceneDelegateBound = '1';
-            refs.globalSettingsWorkbench.addEventListener('click', function (e) {
-                var btn = e.target.closest('[data-cutscene-edit]');
-                if (!btn) return;
-                var id = btn.getAttribute('data-cutscene-edit') || '';
-                if (!id || !findLevelById(id)) return;
-                globalCutsceneEditLevelId = id;
-                activeGlobalSettingsTab = 'cutscenes';
-                if (activeWorkbench !== 'globalSettings') {
-                    activeWorkbench = 'globalSettings';
-                    renderAll();
-                } else {
-                    setGlobalSettingsTab('cutscenes');
-                }
-                if (refs.globalCutsceneLevelSelect) refs.globalCutsceneLevelSelect.value = id;
-                renderGlobalCutsceneEditor();
-                var sel = refs.globalCutsceneLevelSelect;
-                if (sel && typeof sel.scrollIntoView === 'function') {
-                    sel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-                }
-            });
-        }
+        _bindGlobalSettingsChrome(refs, globalSettingsEnv());
     }
 
     function renderWorkbenchShell() {
@@ -4070,10 +2175,6 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
         if (!gameplay) disposeGameplayAssetPreview();
         if (!model) disposeModelAssetPreview();
         if (globalSettings) refreshGlobalSettingsWorkbench();
-    }
-
-    function themeColorInput(hex) {
-        return normalizeEditorThemeColorHex(hex, '#5a7d82');
     }
 
     function swatchIdToInputRef(swatchForId) {
@@ -4201,43 +2302,6 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
         syncThemeColorSwatches();
         if (activeWorkbench === 'level') renderMap();
         if (previewApi && typeof previewApi.refresh === 'function') previewApi.refresh({ preserveView: true });
-    }
-
-    // ─── 过场视频编辑器 ────────────────────────────────────────────────────────
-
-    function projectPathFromVideoPublicUrl(url) {
-        var u = String(url || '').trim();
-        if (!u || u.indexOf('..') !== -1) return '';
-        if (u.charAt(0) !== '/') return '';
-        return 'public' + u;
-    }
-
-    function effectiveCutsceneVideoProjectPath(entry) {
-        if (!entry || typeof entry !== 'object') return '';
-        var p = String(entry.projectPath || '').trim();
-        if (p) return p;
-        return projectPathFromVideoPublicUrl(entry.url);
-    }
-
-    function formatIntroVideoStatusLines(intro) {
-        var introUrl = typeof intro.url === 'string' ? intro.url.trim() : '';
-        var introPath = effectiveCutsceneVideoProjectPath(intro);
-        var lines = [];
-        if (introUrl) {
-            lines.push('已设置开场视频：' + modelBindShortLabel(introUrl));
-            lines.push('引用地址：' + introUrl);
-            if (introPath) {
-                lines.push('项目内备份：' + introPath + '（可随仓库分享）');
-            } else {
-                lines.push('提示：未检测到项目 public 下的备份路径，若引用本机绝对路径，分享工程后他人可能无法播放。');
-            }
-        } else if (introPath) {
-            lines.push('已保存项目内视频文件：' + introPath);
-            lines.push('提示：缺少引用地址 URL，请重新上传开场视频或检查关卡 JSON 是否已保存。');
-        } else {
-            lines.push('未设置开场视频');
-        }
-        return { text: lines.join('\n'), openPath: introPath };
     }
 
     async function revealProjectPathInExplorer(projectPath) {
@@ -4903,10 +2967,6 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
         }
     }
 
-    function gameplayPlacementLabel(placement) {
-        return placement === 'road' ? '道路上' : placement === 'roadside' ? '道路两侧' : '部署位置未设置';
-    }
-
     function renderGameplayInspector(cityContext, config, entries) {
         var entry = getSelectedGameplayEntry(entries);
         var assetType = refs.gameplayAssetType ? refs.gameplayAssetType.value : GAMEPLAY_RESOURCE_CONFIG[activeGameplayTab].assetType;
@@ -5134,10 +3194,6 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
             entry[1].classList.toggle('active', entry[0] === mode);
         });
         if (previewApi && typeof previewApi.setTransformMode === 'function') previewApi.setTransformMode(mode);
-    }
-
-    function clampContentBrowserGeom(n, lo, hi) {
-        return Math.min(hi, Math.max(lo, n));
     }
 
     function isContentBrowserFloatOpen() {
@@ -5558,7 +3614,7 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
         refs.fieldTileSize.value = String(level.map.grid.tileSize);
         renderGeoFields(level);
         renderExploreGameplayPanels();
-        renderLevelAudioFields(level);
+        renderLevelAudioFields(refs, level);
         renderSelectionInspector();
     }
 
@@ -5599,233 +3655,8 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
         }).join('');
     }
 
-    function boardSpriteLayersHtml(level) {
-        var raw = Array.isArray(level.map.boardImageLayers) ? level.map.boardImageLayers : [];
-        if (!raw.length) return '';
-        var list = raw
-            .slice()
-            .sort(function (a, b) {
-                return (Number(a.order) || 0) - (Number(b.order) || 0);
-            });
-        return list
-            .map(function (layer) {
-                var sel =
-                    selectedObject &&
-                    selectedObject.kind === 'boardImage' &&
-                    selectedObject.id === layer.id
-                        ? ' map-board-image-sprite--selected'
-                        : '';
-                var op = Number(layer.opacity);
-                if (!Number.isFinite(op)) op = 1;
-                op = clamp(op, 0, 1);
-                var zi = Math.round(20 + Number(layer.order || 0));
-                var st =
-                    'left:' +
-                    escapeAttr(String(layer.centerX)) +
-                    '%;top:' +
-                    escapeAttr(String(layer.centerY)) +
-                    '%;width:' +
-                    escapeAttr(String(layer.widthPct)) +
-                    '%;opacity:' +
-                    escapeAttr(String(op)) +
-                    ';z-index:' +
-                    escapeAttr(String(zi));
-                var handlesHtml = sel
-                    ? '<div class="bil-handles" aria-hidden="true">' +
-                      ['nw', 'n', 'ne', 'w', 'e', 'sw', 's', 'se']
-                          .map(function (hk) {
-                              return (
-                                  '<button type="button" class="bil-handle bil-handle--' +
-                                  hk +
-                                  '" data-board-resize="' +
-                                  hk +
-                                  '" tabindex="-1" aria-label="缩放 ' +
-                                  hk +
-                                  '"></button>'
-                              );
-                          })
-                          .join('') +
-                      '</div>'
-                    : '';
-                return (
-                    '<div class="map-board-image-sprite' +
-                    sel +
-                    '" draggable="false" tabindex="-1" data-board-image-id="' +
-                    escapeAttr(layer.id) +
-                    '" style="' +
-                    st +
-                    '">' +
-                    handlesHtml +
-                    '<div class="bil-img-wrap"><img alt="" draggable="false" loading="lazy" src="' +
-                    escapeAttr(layer.src) +
-                    '"></div></div>'
-                );
-            })
-            .join('');
-    }
-
     function renderMap() {
-        var level = getLevel();
-        if (!level) {
-            refs.mapGrid.innerHTML = '';
-            refs.mapGrid.classList.remove('map-grid--jinan-texture');
-            eraserPreviewLastPointer = null;
-            clearEraserBrushPreview();
-            return;
-        }
-        var grid = level.map.grid;
-        var cellSize = clamp(Math.floor(720 / Math.max(grid.cols, grid.rows)), 16, 34);
-        refs.mapGrid.style.setProperty('--cell-size', cellSize + 'px');
-        refs.mapGrid.style.setProperty('--grid-texture-width', (grid.cols * cellSize + Math.max(0, grid.cols - 1)) + 'px');
-        refs.mapGrid.style.setProperty('--grid-texture-height', (grid.rows * cellSize + Math.max(0, grid.rows - 1)) + 'px');
-        refs.mapGrid.style.setProperty('--jinan-map-texture', 'url("' + JINAN_MAP_TEXTURE_URL + '")');
-        refs.mapGrid.style.gridTemplateColumns = '';
-        refs.mapGrid.style.gridTemplateRows = '';
-        refs.mapGrid.classList.toggle('map-grid--jinan-texture', isJinanLevel(level));
-
-        var floorHtml = [];
-        var pathOverlayHtml = [];
-        var markersHtml = [];
-        var defensePathKeys = activeEditorMode === 'defense' ? getDefenseEditorPathKeys(level) : null;
-        for (var row = 0; row < grid.rows; row += 1) {
-            for (var col = 0; col < grid.cols; col += 1) {
-                floorHtml.push(renderPlateCell(level, col, row));
-                pathOverlayHtml.push(renderPathOverlayCell(level, col, row, defensePathKeys));
-                markersHtml.push(renderMarkersOverlayCell(level, col, row));
-            }
-        }
-        var stackCls = 'map-grid-stack';
-        refs.mapGrid.innerHTML =
-            '<div class="' +
-            stackCls +
-            '">' +
-            '<div class="map-grid-cells map-grid-cells--floor">' +
-            floorHtml.join('') +
-            '</div>' +
-            '<div class="map-board-overlays-mount" aria-hidden="true">' +
-            boardSpriteLayersHtml(level) +
-            '</div>' +
-            '<div class="map-grid-cells map-grid-cells--path-overlay">' +
-            pathOverlayHtml.join('') +
-            '</div>' +
-            '<div class="map-grid-cells map-grid-cells--markers">' +
-            markersHtml.join('') +
-            '</div>' +
-            '</div>';
-        refs.mapGrid
-            .querySelectorAll('.map-grid-cells--floor, .map-grid-cells--path-overlay, .map-grid-cells--markers')
-            .forEach(function (bucket) {
-                bucket.style.display = 'grid';
-                bucket.style.gap = '1px';
-                bucket.style.gridTemplateColumns = 'repeat(' + grid.cols + ', var(--cell-size))';
-                bucket.style.gridTemplateRows = 'repeat(' + grid.rows + ', var(--cell-size))';
-            });
-        bindMarkerDrag();
-        refreshEraserPreviewIfActive();
-    }
-
-    function boardCellMatchesSelection(level, col, row) {
-        if (!selectedObject) return false;
-        var k = selectedObject.kind;
-        if (k === 'obstacleCell' || k === 'pathCell' || k === 'buildSlotCell' || k === 'safeZoneCell')
-            return Number(selectedObject.col) === col && Number(selectedObject.row) === row;
-        var obj = findSelectedObject(level);
-        if (obj && obj.item != null && Number(obj.item.col) === col && Number(obj.item.row) === row) return true;
-        return false;
-    }
-
-    function buildPlateCellClasses(level, col, row) {
-        var classes = ['map-cell'];
-        var exploreLayout = ensureExplorationLayout(level.map);
-        if (activeEditorMode === 'explore') {
-            /* 探索路径高光在配图之上的 path-overlay 层绘制 */
-            if (hasCell(exploreLayout.obstacles, col, row)) classes.push('obstacle');
-            if (Array.isArray(exploreLayout.safeZones) && hasCell(exploreLayout.safeZones, col, row)) classes.push('safe-zone');
-        } else {
-            if (hasCell(level.map.obstacles, col, row)) classes.push('obstacle');
-            if (hasCell(level.map.buildSlots, col, row)) classes.push('build-slot');
-        }
-        if (boardCellMatchesSelection(level, col, row)) classes.push('map-cell--lcb-selected');
-        return classes;
-    }
-
-    function buildCellMarkersFragments(level, col, row) {
-        var exploreLayout = ensureExplorationLayout(level.map);
-        var markers = [];
-        if (activeEditorMode === 'explore') {
-            if (exploreLayout.startPoint && exploreLayout.startPoint.col === col && exploreLayout.startPoint.row === row) {
-                markers.push(markerHtml('spawn', exploreLayout.startPoint.id, 'S', 'cell-marker spawn', selectedObject));
-            }
-            if (exploreLayout.exitPoint && exploreLayout.exitPoint.col === col && exploreLayout.exitPoint.row === row) {
-                markers.push(markerHtml('objective', exploreLayout.exitPoint.id, 'E', 'cell-marker objective', selectedObject));
-            }
-        } else {
-            level.map.spawnPoints.filter(atCell(col, row)).forEach(function (point) {
-                markers.push(markerHtml('spawn', point.id, 'S', 'cell-marker spawn', selectedObject));
-            });
-            if (level.map.objectivePoint && level.map.objectivePoint.col === col && level.map.objectivePoint.row === row) {
-                markers.push(markerHtml('objective', level.map.objectivePoint.id, 'O', 'cell-marker objective', selectedObject));
-            }
-        }
-        level.map.explorationPoints.filter(atCell(col, row)).forEach(function (point) {
-            markers.push(markerHtml('explorePoint', point.id, 'P', 'cell-marker explore', selectedObject));
-        });
-        level.map.actors.filter(atCell(col, row)).forEach(function (actor) {
-            markers.push(markerHtml('actor', actor.id, actor.icon || actor.name.charAt(0), 'actor-marker ' + actor.category, selectedObject));
-        });
-        return markers;
-    }
-
-    function renderPlateCell(level, col, row) {
-        var classes = buildPlateCellClasses(level, col, row);
-        return '<div class="' + classes.join(' ') + '" data-col="' + col + '" data-row="' + row + '"></div>';
-    }
-
-    /** 敌军/探索路径格：插在配图之上，避免被棋盘配图压住 */
-    function renderPathOverlayCell(level, col, row, defensePathKeys) {
-        var exploreLayout = ensureExplorationLayout(level.map);
-        var isPath = false;
-        if (activeEditorMode === 'explore') {
-            if (hasCell(exploreLayout.path, col, row)) isPath = true;
-        } else if (!hasCell(level.map.obstacles, col, row) && defensePathKeys && defensePathKeys.has(String(col) + ',' + String(row))) {
-            isPath = true;
-        }
-        var cls = ['map-cell', 'map-cell--path-overlay'];
-        if (isPath) cls.push('path');
-        return '<div class="' + cls.join(' ') + '" data-col="' + col + '" data-row="' + row + '"></div>';
-    }
-
-    function renderMarkersOverlayCell(level, col, row) {
-        var markers = buildCellMarkersFragments(level, col, row);
-        return (
-            '<div class="map-cell map-cell--markers-overlay" data-col="' +
-            col +
-            '" data-row="' +
-            row +
-            '">' +
-            markers.join('') +
-            '</div>'
-        );
-    }
-
-    function markerHtml(kind, id, label, className, selection) {
-        var selected = selection && selection.kind === kind && selection.id === id;
-        return '<span draggable="true" class="' + className + (selected ? ' selected' : '') + '" data-object-kind="' + escapeAttr(kind) + '" data-object-id="' + escapeAttr(id) + '">' + escapeHtml(label.slice(0, 2)) + '</span>';
-    }
-
-    function bindMarkerDrag() {
-        if (!refs.mapGrid) return;
-        var bucket = refs.mapGrid.querySelector('.map-grid-cells--markers');
-        var root = bucket || refs.mapGrid;
-        root.querySelectorAll('[data-object-kind]').forEach(function (marker) {
-            marker.addEventListener('dragstart', function (event) {
-                event.dataTransfer.setData('application/json', JSON.stringify({
-                    kind: marker.dataset.objectKind === 'actor' ? 'actor' : 'marker',
-                    markerKind: marker.dataset.objectKind,
-                    id: marker.dataset.objectId
-                }));
-            });
-        });
+        _renderMap(refs, mapRenderEnv());
     }
 
     function handleCellAction(col, row) {
@@ -5861,7 +3692,7 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
         }
         if (activeTool === 'explorePoint') addExplorePoint(col, row);
         if (activeTool === 'actor') placeActorFromTemplate(selectedTemplateId, col, row);
-        if (activeTool === 'erase') applyEraserBrush(col, row);
+        if (activeTool === 'erase') applyEraserBrush(col, row, getLevel, eraseCellAt);
         level.status = level.status === 'draft' ? 'needs-work' : level.status;
         markDirty('已更新地图');
         renderAll();
@@ -5912,15 +3743,6 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
         var id = uid('poi');
         level.map.explorationPoints.push({ id: id, name: '探索点 ' + (level.map.explorationPoints.length + 1), col: col, row: row, modelId: '', interaction: 'inspect', radius: 2 });
         selectedObject = { kind: 'explorePoint', id: id };
-    }
-
-    function ensureWorldOffset(actor) {
-        if (!actor.worldOffsetMeters || typeof actor.worldOffsetMeters !== 'object') {
-            actor.worldOffsetMeters = { x: 0, y: 0, z: 0 };
-        }
-        ['x', 'y', 'z'].forEach(function (k) {
-            if (!Number.isFinite(Number(actor.worldOffsetMeters[k]))) actor.worldOffsetMeters[k] = 0;
-        });
     }
 
     function applyWorldHitToActor(actor, wx, wy, wz) {
@@ -6279,21 +4101,6 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
         return base.join('');
     }
 
-    function boardLayerFieldHtml(label, key, val, step) {
-        var s = step != null ? ' step="' + step + '"' : '';
-        return (
-            '<label class="field-block"><span>' +
-            escapeHtml(label) +
-            '</span><input data-board-layer-field="' +
-            escapeAttr(key) +
-            '" type="number"' +
-            s +
-            ' value="' +
-            escapeAttr(val == null ? '' : val) +
-            '"></label>'
-        );
-    }
-
     function syncBoardLayerFieldFromInspector(input) {
         var level = getLevel();
         if (!level || !selectedObject || selectedObject.kind !== 'boardImage') return;
@@ -6310,16 +4117,8 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
         else if (key === 'order') lyr.order = Math.round(raw);
         markDirty('已更新棋盘配图');
         renderMap();
-        renderBoardImagesPanel();
+        renderBoardImagesPanel(refs, boardImagesEnv());
         schedulePreviewRefresh();
-    }
-
-    function fieldHtml(label, path, value, type, step) {
-        return '<label class="field-block"><span>' + escapeHtml(label) + '</span><input data-inspect-field="' + escapeAttr(path) + '" type="' + (type || 'text') + '"' + (step ? ' step="' + step + '"' : '') + ' value="' + escapeAttr(value == null ? '' : value) + '"></label>';
-    }
-
-    function selectHtml(label, path, options) {
-        return '<label class="field-block"><span>' + escapeHtml(label) + '</span><select data-inspect-field="' + escapeAttr(path) + '">' + options + '</select></label>';
     }
 
     function updateSelectedField(input) {
@@ -6558,7 +4357,7 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
     function createActorTemplateFromSelection() {
         var name = window.prompt('Actor 模板名称', '新 Actor 模板');
         if (!name) return;
-        var id = uniqueTemplateId(slugify(name) || 'custom-actor');
+        var id = uniqueTemplateId(state.actorTemplates, slugify(name) || 'custom-actor');
         state.actorTemplates.push({
             id: id,
             name: name,
@@ -6577,7 +4376,7 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
     function createActorTemplateFromModel(modelId) {
         var asset = getBrowsableModelAssets().find(function (item) { return item.id === modelId; });
         if (!asset) return;
-        var id = uniqueTemplateId('model-' + modelId);
+        var id = uniqueTemplateId(state.actorTemplates, 'model-' + modelId);
         state.actorTemplates.push({
             id: id,
             name: asset.name + ' Actor',
@@ -6669,19 +4468,6 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
         refs.createLevelModal.classList.remove('view-hidden');
         refs.createLevelModal.setAttribute('aria-hidden', 'false');
         setTimeout(function () { refs.newLevelName.focus(); }, 0);
-    }
-
-    function normalizePlaceSearchResult(item) {
-        var lon = Number(item && item.lon);
-        var lat = Number(item && item.lat);
-        if (!Number.isFinite(lon) || !Number.isFinite(lat)) return null;
-        return {
-            name: String(item.display_name || item.name || '未命名位置'),
-            longitude: lon.toFixed(6),
-            latitude: lat.toFixed(6),
-            type: String(item.type || item.category || ''),
-            importance: Number(item.importance) || 0
-        };
     }
 
     function setSelectedCreateLevelPlace(place, options) {
@@ -6802,7 +4588,7 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
         var lon = Number(refs.newLevelLon.value);
         var hasGeo = Number.isFinite(lat) && Number.isFinite(lon) && refs.newLevelLat.value !== '' && refs.newLevelLon.value !== '';
         
-        var id = uniqueLevelId('custom-level');
+        var id = uniqueLevelId(state.levels, 'custom-level');
         var level = createDraftLevel({
             id: id,
             name: name,
@@ -6989,107 +4775,12 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
                     return layer.id !== selectedObject.id;
                 });
             }
-            boardImagePointerDrag = null;
-            boardImageResize = null;
+            clearBoardImageInteractionState();
         }
         selectedObject = null;
         markDirty('已删除选中对象');
         renderAll();
         syncPreviewIfOpen();
-    }
-
-    function normalizeState(raw) {
-        var next = raw && typeof raw === 'object' ? raw : {};
-        next.version = ENGINE_VERSION;
-        next.savedAt = String(next.savedAt || '');
-        next.catalog = normalizeCatalog(next.catalog);
-        next.editorAssetsCatalog = normalizeEditorAssetsCatalog(next.editorAssetsCatalog);
-        next.cityGameplayConfigs = normalizeCityGameplayConfigs(next.cityGameplayConfigs);
-        next.gameAssetConfig = normalizeGameAssetConfig(next.gameAssetConfig);
-        next.actorTemplates = Array.isArray(next.actorTemplates) && next.actorTemplates.length
-            ? next.actorTemplates.map(normalizeActorTemplate)
-            : clone(DEFAULT_ACTOR_TEMPLATES);
-        next.levels = Array.isArray(next.levels) ? next.levels.map(normalizeLevel) : [];
-        sortLevels(next);
-        return next;
-    }
-
-    function normalizeCatalog(catalog) {
-        var source = catalog && typeof catalog === 'object' ? catalog : {};
-        var normalized = {};
-        [
-            'gameTypes',
-            'phaseTypes',
-            'resourceTypes',
-            'floorTextures',
-            'modelAssets',
-            'explorationModes',
-            'towerTypes',
-            'enemyTypes',
-            'creatureTypes',
-            'uiModules'
-        ].forEach(function (key) {
-            normalized[key] = Array.isArray(source[key]) ? source[key].map(normalizeCatalogItem) : [];
-        });
-        return normalized;
-    }
-
-    function normalizeCatalogItem(item) {
-        var next = item && typeof item === 'object' ? item : {};
-        return {
-            id: String(next.id || slugify(next.name || '') || uid('asset')),
-            name: String(next.name || next.id || '未命名资产'),
-            summary: String(next.summary || ''),
-            path: String(next.path || next.url || '')
-        };
-    }
-
-    function normalizeEditorAssetsCatalog(raw) {
-        return Array.isArray(raw) ? raw.map(function (item) {
-            var next = item && typeof item === 'object' ? item : {};
-            return {
-                id: String(next.id || uid('editor-asset')),
-                name: String(next.name || '未命名资源'),
-                assetType: String(next.assetType || 'Enemies'),
-                resourceKind: String(next.resourceKind || 'enemies'),
-                cityCode: String(next.cityCode || ''),
-                cityName: String(next.cityName || ''),
-                path: String(next.path || ''),
-                projectPath: String(next.projectPath || next.path || ''),
-                publicUrl: String(next.publicUrl || next.path || ''),
-                summary: String(next.summary || ''),
-                updatedAt: String(next.updatedAt || '')
-            };
-        }) : [];
-    }
-
-    function normalizeCityGameplayConfigs(raw) {
-        var source = raw && typeof raw === 'object' ? raw : {};
-        var normalized = {};
-        Object.keys(source).forEach(function (key) {
-            var item = source[key] && typeof source[key] === 'object' ? source[key] : {};
-            normalized[key] = {
-                cityCode: String(item.cityCode || key),
-                cityName: String(item.cityName || ''),
-                aliases: Array.isArray(item.aliases) ? item.aliases.map(String) : [],
-                enemies: normalizeGameplayEntries(item.enemies, 'enemies'),
-                characters: normalizeGameplayEntries(item.characters, 'characters'),
-                skills: normalizeGameplayEntries(item.skills, 'skills'),
-                towers: normalizeGameplayEntries(item.towers, 'towers'),
-                cards: normalizeGameplayEntries(item.cards, 'cards'),
-                updatedAt: String(item.updatedAt || '')
-            };
-            if (!normalized[key].towers.length) {
-                normalized[key].towers = buildDefaultTowerEntries(normalized[key]);
-            }
-            if (!normalized[key].cards.length) {
-                normalized[key].cards = buildDefaultCardEntries(normalized[key]);
-            }
-            if (!normalized[key].enemies.length) {
-                normalized[key].enemies = buildDefaultEnemyEntries(normalized[key]);
-            }
-        });
-        return normalized;
     }
 
     function mergeRuntimeCityGameplayConfigs(raw) {
@@ -7127,231 +4818,10 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
         return imported;
     }
 
-    function mergeGameplayEntryList(target, source) {
-        var added = 0;
-        source.forEach(function (entry) {
-            var existing = target.find(function (item) { return item.id === entry.id; });
-            if (!existing) {
-                target.push(clone(entry));
-                added += 1;
-                return;
-            }
-            if (!existing.summary) existing.summary = entry.summary;
-            if (!existing.rarity) existing.rarity = entry.rarity;
-            if (!existing.placement && entry.placement) existing.placement = entry.placement;
-            if (!existing.tags || !existing.tags.length) existing.tags = clone(entry.tags || []);
-            if (!existing.assetRefs || !Object.keys(existing.assetRefs).length) existing.assetRefs = clone(entry.assetRefs || {});
-            existing.stats = Object.assign({}, entry.stats || {}, existing.stats || {});
-        });
-        return added;
-    }
-
-    function mergeDistinctStrings() {
-        var bucket = [];
-        for (var i = 0; i < arguments.length; i += 1) {
-            var value = arguments[i];
-            if (Array.isArray(value)) {
-                value.forEach(function (item) {
-                    if (item && bucket.indexOf(String(item)) === -1) bucket.push(String(item));
-                });
-            } else if (value && bucket.indexOf(String(value)) === -1) {
-                bucket.push(String(value));
-            }
-        }
-        return bucket;
-    }
-
-    function normalizeGameplayEntries(raw, kind) {
-        return Array.isArray(raw) ? raw.map(function (item) {
-            var next = item && typeof item === 'object' ? item : {};
-            return {
-                id: String(next.id || uid(kind)),
-                name: String(next.name || GAMEPLAY_RESOURCE_CONFIG[kind].label + '条目'),
-                summary: String(next.summary || ''),
-                tags: Array.isArray(next.tags) ? next.tags.map(String) : [],
-                rarity: String(next.rarity || 'common'),
-                placement: kind === 'characters' ? normalizeGameplayPlacement(next.placement || next.deployPlacement || next.placementType) : '',
-                stats: next.stats && typeof next.stats === 'object' ? next.stats : {},
-                assetRefs: next.assetRefs && typeof next.assetRefs === 'object' ? next.assetRefs : {},
-                cityCode: String(next.cityCode || ''),
-                cityName: String(next.cityName || ''),
-                updatedAt: String(next.updatedAt || '')
-            };
-        }) : [];
-    }
-
     /**
      * 与 src/game/defense/defense-runtime.ts 中 createEnemyForWave 的兵种分支一致（EnemyType）。
      * 表中数值为波次 1 的近似基准；游戏中仍随波次动态增强。
      */
-    function wave1EnemyArchetypeStats(archId) {
-        var wave = 1;
-        var hp = 78 + wave * 22;
-        var speed = 2.0 + wave * 0.06;
-        var reward = 12 + wave * 2;
-        switch (archId) {
-            case 'scout':
-                hp *= 0.4;
-                speed *= 1.8;
-                break;
-            case 'hacker':
-                hp *= 1.2;
-                reward *= 1.5;
-                break;
-            case 'tank':
-                hp *= 3.5;
-                speed *= 0.5;
-                reward *= 2;
-                break;
-            case 'swarm':
-                hp *= 1.5;
-                reward *= 1.8;
-                break;
-            default:
-                break;
-        }
-        return {
-            hp: Math.max(1, Math.round(hp)),
-            speed: Math.round(speed * 100) / 100,
-            reward: Math.round(reward),
-            attack: 0
-        };
-    }
-
-    var DEFAULT_RUNTIME_ENEMY_ARCHETYPE_META = {
-        basic: {
-            name: '标准敌人 (basic)',
-            summary: '运行时塔防默认兵种；未换模时为球体占位。血量/速度/奖励会随波次上升。'
-        },
-        scout: {
-            name: '高速侦察 (scout)',
-            summary: '低血量、移速约×1.8；与默认 GLB monsterB.glb 对应（见 enemy-default-models）。'
-        },
-        hacker: {
-            name: '干扰型 (hacker)',
-            summary: '中等血量、奖励加成；中高波次随机出现。'
-        },
-        tank: {
-            name: '重装单位 (tank)',
-            summary: '高血量、慢移速、大体型；适合作为高威胁目标。'
-        },
-        swarm: {
-            name: '集群强化 (swarm)',
-            summary: '血量与奖励都较高，高波次低概率刷新。'
-        }
-    };
-
-    function buildDefaultEnemyEntries(config) {
-        var cityName = config && config.cityName ? config.cityName : '';
-        var cityCode = config && config.cityCode ? config.cityCode : '';
-        var seen = Object.create(null);
-        var list = [];
-        ['basic', 'scout', 'hacker', 'tank', 'swarm'].forEach(function (archId) {
-            var meta = DEFAULT_RUNTIME_ENEMY_ARCHETYPE_META[archId] || { name: archId, summary: '' };
-            var st = wave1EnemyArchetypeStats(archId);
-            seen[archId] = true;
-            list.push({
-                id: archId,
-                name: meta.name,
-                summary: meta.summary,
-                tags: mergeDistinctStrings(cityName || '通用', 'enemy', 'runtime', archId),
-                rarity: 'common',
-                placement: '',
-                stats: {
-                    hp: st.hp,
-                    attack: st.attack,
-                    speed: st.speed,
-                    reward: st.reward
-                },
-                assetRefs: {},
-                cityCode: cityCode,
-                cityName: cityName,
-                updatedAt: ''
-            });
-        });
-        DEFAULT_ACTOR_TEMPLATES.filter(function (tpl) {
-            return tpl && tpl.category === 'enemy';
-        }).forEach(function (tpl) {
-            var id = String(tpl.id || uid('enemy'));
-            if (seen[id]) {
-                return;
-            }
-            seen[id] = true;
-            var st = tpl.stats || {};
-            list.push({
-                id: id,
-                name: String(tpl.name || tpl.id || '敌人'),
-                summary: '来自 Actor 模板 / 关卡 JSON 的经典 ID，可与波次 enemyTypeId 共用；与上方 runtime 兵种可并存。',
-                tags: mergeDistinctStrings(cityName || '通用', 'enemy', 'legacy'),
-                rarity: 'common',
-                placement: '',
-                stats: {
-                    hp: Number(st.hp) || 100,
-                    attack: Number(st.attack) || 0,
-                    speed: Number(st.speed) > 0 ? Number(st.speed) : 1,
-                    reward: Number(st.reward) || 20
-                },
-                assetRefs: {},
-                cityCode: cityCode,
-                cityName: cityName,
-                updatedAt: ''
-            });
-        });
-        return list;
-    }
-
-    function buildDefaultTowerEntries(config) {
-        var cityName = config && config.cityName ? config.cityName : '';
-        var cityCode = config && config.cityCode ? config.cityCode : '';
-        return TOWER_MODEL_SPECS.map(function (spec) {
-            return {
-                id: spec.id,
-                name: spec.name,
-                summary: '当前关卡可用防御塔，可在这里覆盖费用、射程、攻速和伤害。',
-                tags: [cityName || '通用', spec.key].filter(Boolean),
-                rarity: spec.id === 'stellar' || spec.id === 'qinqiong' || spec.id === 'liqingzhao' || spec.id === 'bianque' ? 'S' : 'common',
-                placement: spec.id === 'mine' || spec.id === 'qinqiong' ? 'road' : 'roadside',
-                stats: Object.assign({}, DEFAULT_TOWER_GAMEPLAY_STATS[spec.id] || {}),
-                assetRefs: {},
-                cityCode: cityCode,
-                cityName: cityName,
-                updatedAt: ''
-            };
-        });
-    }
-
-    function buildDefaultCardEntries(config) {
-        var source = []
-            .concat(config.characters || [])
-            .concat(config.skills || []);
-        return source.map(function (entry) {
-            var stats = entry.stats || {};
-            return {
-                id: (entry.id || uid('card')) + '-card',
-                name: entry.name + ' 卡',
-                summary: entry.summary || '由角色/技能条目生成的关卡卡片。',
-                tags: mergeDistinctStrings(entry.tags || [], 'card'),
-                rarity: entry.rarity || 'common',
-                placement: entry.placement || '',
-                stats: {
-                    cost: Number(stats.cost) || 0,
-                    weight: entry.rarity === 'S' ? 1 : 5,
-                    cooldown: Number(stats.cooldown) || 0,
-                    unlockWave: 1,
-                    maxCopies: 1
-                },
-                assetRefs: Object.assign({}, entry.assetRefs || {}),
-                cityCode: entry.cityCode || config.cityCode || '',
-                cityName: entry.cityName || config.cityName || '',
-                updatedAt: ''
-            };
-        });
-    }
-
-    function normalizeGameplayPlacement(value) {
-        var placement = String(value || 'roadside').trim();
-        return placement === 'road' || placement === 'on-road' || placement === 'path' ? 'road' : 'roadside';
-    }
 
     function getGameplayCityContext() {
         var level = getLevel();
@@ -7364,14 +4834,6 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
             cityName: cityName || level.name || '未命名城市',
             key: cityCode || slugify(cityName || level.name || 'city')
         };
-    }
-
-    function normalizeCityIdentity(value) {
-        return String(value || '')
-            .trim()
-            .toLowerCase()
-            .replace(/[·\s]/g, '')
-            .replace(/市$/g, '');
     }
 
     function resolveCityGameplayConfigKey(cityContext, preferredKey) {
@@ -7423,14 +4885,6 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
             state.cityGameplayConfigs[resolvedKey].enemies = buildDefaultEnemyEntries(state.cityGameplayConfigs[resolvedKey]);
         }
         return state.cityGameplayConfigs[resolvedKey];
-    }
-
-    function pickPreferredGameplayTab(config, currentTab) {
-        if (!config) return currentTab;
-        if (Array.isArray(config[currentTab])) return currentTab;
-        return ['cards', 'towers', 'characters', 'skills', 'enemies'].find(function (tab) {
-            return Array.isArray(config[tab]) && config[tab].length;
-        }) || currentTab;
     }
 
     function createGameplayEntry() {
@@ -7681,16 +5135,6 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
         }
     }
 
-    function uniqueGameplayEntryId(list, baseId) {
-        var candidate = baseId;
-        var serial = 1;
-        while (list.some(function (item) { return item.id === candidate; })) {
-            candidate = baseId + '-' + String(serial);
-            serial += 1;
-        }
-        return candidate;
-    }
-
     function getCurrentCityGameplayConfig() {
         var cityContext = getGameplayCityContext();
         return cityContext ? ensureCityGameplayConfig(cityContext) : null;
@@ -7776,14 +5220,6 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
         return isImageAssetPath(entry.assetRefs.imagePath) ? entry.assetRefs.imagePath : '';
     }
 
-    function isImageAssetPath(value) {
-        return /\.(png|jpg|jpeg|webp|gif)$/i.test(String(value || ''));
-    }
-
-    function isModelAssetPath(value) {
-        return /\.(glb|gltf|obj|fbx|dae|stl)$/i.test(String(value || ''));
-    }
-
     function getSelectedGameplayAsset(entry, assets) {
         if (!entry && !selectedGameplayAssetId) return null;
         var list = Array.isArray(assets) ? assets : [];
@@ -7856,668 +5292,6 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
         }
     }
 
-    function normalizeLevel(level) {
-        var source = level && typeof level === 'object' ? level : {};
-        var location = normalizeLocation(source);
-        var map = normalizeMap(source.map, source);
-        var normalized = {
-            id: String(source.id || source.code || uniqueLevelId('level')),
-            folder: String(source.folder || source.id || source.code || 'custom-level'),
-            name: String(source.name || '未命名关卡'),
-            status: normalizeStatus(source.status, map),
-            difficulty: clamp(Number(source.difficulty) || 3, 1, 5),
-            description: String(source.description || source.desc || ''),
-            location: location,
-            environment: normalizeEnvironment(source.environment),
-            map: map,
-            actorTemplates: Array.isArray(source.actorTemplates) ? source.actorTemplates.map(normalizeActorTemplate) : undefined,
-            enemyTypes: normalizeEnemyTypes(source.enemyTypes, source),
-            waveRules: normalizeWaveRules(source.waveRules, source),
-            modeProfiles: normalizeModeProfiles(source.modeProfiles),
-            rosters: source.rosters && typeof source.rosters === 'object' ? source.rosters : {},
-            props: Array.isArray(source.props) ? source.props : [],
-            resources: Array.isArray(source.resources) ? source.resources : [],
-            uiModules: Array.isArray(source.uiModules) ? source.uiModules : [],
-            extensions: source.extensions && typeof source.extensions === 'object' ? source.extensions : {}
-        };
-        normalized.location.regionLabel = normalized.location.regionLabel || buildRegionLabel(normalized.location, source.region);
-        return normalized;
-    }
-
-    function normalizeLocation(source) {
-        var location = source.location && typeof source.location === 'object' ? source.location : {};
-        var legacyRegion = String(source.region || '');
-        var parts = splitRegion(legacyRegion);
-        return {
-            countryCode: String(location.countryCode || inferCountryCode(parts.country) || ''),
-            countryName: String(location.countryName || parts.country || legacyRegion || '未设置国家'),
-            cityCode: String(location.cityCode || ''),
-            cityName: String(location.cityName || parts.city || ''),
-            regionLabel: String(location.regionLabel || legacyRegion || ''),
-            source: String(location.source || 'legacy')
-        };
-    }
-
-    function normalizeEnvironment(environment) {
-        var source = environment && typeof environment === 'object' ? environment : {};
-        return {
-            floorTextureId: String(source.floorTextureId || ''),
-            sceneModelId: String(source.sceneModelId || ''),
-            lightingProfile: String(source.lightingProfile || 'default-lighting'),
-            entryScene: String(source.entryScene || ''),
-            notes: String(source.notes || '')
-        };
-    }
-
-    function normalizeBoardImageLayers(raw) {
-        if (!Array.isArray(raw)) return [];
-        var list = [];
-        for (var i = 0; i < raw.length; i += 1) {
-            var L = raw[i];
-            if (!L || typeof L !== 'object') continue;
-            var src = typeof L.src === 'string' ? L.src.trim() : '';
-            if (!src) continue;
-            function pPct(v, fb) {
-                var x = Number(v);
-                return Number.isFinite(x) ? Math.max(0, Math.min(100, x)) : fb;
-            }
-            function pWidth(v) {
-                var x = Number(v);
-                return Number.isFinite(x) ? Math.max(5, Math.min(500, x)) : 48;
-            }
-            function pOp(v) {
-                var x = Number(v);
-                return Number.isFinite(x) ? Math.max(0, Math.min(1, x)) : 1;
-            }
-            var ordRaw = Number(L.order);
-            var ord = Number.isFinite(ordRaw) ? Math.round(ordRaw) : list.length;
-            var bilEntry = {
-                id: String(L.id || uid('board-img')),
-                src: src,
-                centerX: pPct(L.centerX, 0),
-                centerY: pPct(L.centerY, 0),
-                widthPct: pWidth(L.widthPct),
-                opacity: pOp(L.opacity),
-                order: ord
-            };
-            var ar = Number(L.aspect);
-            if (Number.isFinite(ar) && ar > 0) bilEntry.aspect = Math.min(24, Math.max(0.04, ar));
-            list.push(bilEntry);
-        }
-        list.sort(function (a, b) {
-            return a.order - b.order;
-        });
-        return list;
-    }
-
-    function boardGridPaintMetrics(grid) {
-        if (!refs.mapGrid || !grid) return null;
-        var el = refs.mapGrid;
-        var rect = el.getBoundingClientRect();
-        var st = getComputedStyle(el);
-        var padL = parseFloat(st.paddingLeft) || 0;
-        var padT = parseFloat(st.paddingTop) || 0;
-        var cols = grid.cols;
-        var rows = grid.rows;
-        var csStr =
-            el.style.getPropertyValue('--cell-size') || getComputedStyle(el).getPropertyValue('--cell-size');
-        var cs = parseFloat(csStr) || 28;
-        var gap = parseFloat(st.rowGap || st.columnGap || st.gap) || 1;
-        var stride = cs + gap;
-        var innerW = cols * stride - gap;
-        var innerH = rows * stride - gap;
-        return { rect: rect, padL: padL, padT: padT, cs: cs, gap: gap, stride: stride, innerW: innerW, innerH: innerH, cols: cols, rows: rows };
-    }
-
-    function clientPointToBoardLayerPercents(clientX, clientY, grid) {
-        var m = boardGridPaintMetrics(grid);
-        if (!m || m.innerW <= 0 || m.innerH <= 0) return { lx: 0, ty: 0 };
-        var x = clientX - m.rect.left - m.padL;
-        var y = clientY - m.rect.top - m.padT;
-        return {
-            lx: Math.max(0, Math.min(100, (x / m.innerW) * 100)),
-            ty: Math.max(0, Math.min(100, (y / m.innerH) * 100))
-        };
-    }
-
-    function normalizeMap(map, seed) {
-        var source = map && typeof map === 'object' ? map : {};
-        var legacyTd = seed.modeProfiles && seed.modeProfiles.towerDefense || {};
-        var legacyExplore = seed.modeProfiles && seed.modeProfiles.exploration || {};
-        var normalized = createDefaultMap();
-        if (source.grid) {
-            normalized.grid.cols = clamp(Number(source.grid.cols) || DEFAULT_GRID_COLS, 8, 80);
-            normalized.grid.rows = clamp(Number(source.grid.rows) || DEFAULT_GRID_ROWS, 8, 80);
-            normalized.grid.tileSize = clamp(Number(source.grid.tileSize) || DEFAULT_TILE_SIZE, 1, 10);
-        }
-        normalized.geo = normalizeGeoConfig(source.geo);
-        normalized.theme = normalizeTheme(source.theme);
-        normalized.terrain = Array.isArray(source.terrain) ? source.terrain.map(normalizeCell) : [];
-        normalized.roads = normalizeCells(source.roads || source.path || []);
-        normalized.obstacles = normalizeCells(source.obstacles || []);
-        normalized.buildSlots = normalizeCells(source.buildSlots || []);
-        normalized.enemyPaths = normalizeEnemyPaths(source.enemyPaths, normalized.roads);
-        normalized.spawnPoints = normalizeSpawnPoints(source.spawnPoints || source.enemyExits || [], legacyTd);
-        normalized.enemyExits = normalized.spawnPoints;
-        normalized.objectivePoint = normalizePoint(source.objectivePoint) || defaultObjectivePoint(normalized.grid, legacyTd);
-        normalized.explorationPoints = normalizeExplorePoints(source.explorationPoints, legacyExplore);
-        normalized.explorationLayout = normalizeExplorationLayout(source.explorationLayout, normalized);
-        normalized.actors = normalizeActors(source.actors, seed);
-        normalized.boardImageLayers = normalizeBoardImageLayers(source.boardImageLayers);
-        normalized.levelAudio = normalizeLevelAudioSource(source.levelAudio);
-        trimMapToBounds(normalized);
-        return normalized;
-    }
-
-    function createDefaultMap() {
-        return {
-            grid: { cols: DEFAULT_GRID_COLS, rows: DEFAULT_GRID_ROWS, tileSize: DEFAULT_TILE_SIZE },
-            theme: {
-                ground: '#5a7d82',
-                groundAlt: '#4f7178',
-                road: '#6f9288',
-                obstacle: '#5d6870',
-                accent: '#8fb8ae',
-                fog: '#445c60'
-            },
-            terrain: [],
-            roads: [],
-            enemyPaths: [{ id: 'path-main', name: '主敌人路径', cells: [] }],
-            obstacles: [],
-            buildSlots: [],
-            spawnPoints: [],
-            enemyExits: [],
-            objectivePoint: { id: 'objective-main', name: '防守核心', col: 24, row: 9 },
-            explorationPoints: [],
-            explorationLayout: {
-                grid: { cols: DEFAULT_GRID_COLS, rows: DEFAULT_GRID_ROWS, tileSize: DEFAULT_TILE_SIZE },
-                theme: {
-                    ground: '#5a7d82',
-                    groundAlt: '#4f7178',
-                    road: '#6f9288',
-                    obstacle: '#5d6870',
-                    accent: '#8fb8ae',
-                    fog: '#445c60'
-                },
-                path: [],
-                obstacles: [],
-                startPoint: { id: 'explore-start', name: '探索起点', col: 0, row: 9 },
-                exitPoint: { id: 'explore-exit', name: '探索终点', col: 24, row: 9 }
-            },
-            geo: { enabled: false, provider: 'cesium-ion', assetId: DEFAULT_CESIUM_ION_3D_TILES_ASSET_ID, center: { lat: 0, lon: 0, heightMeters: 0 }, extentMeters: 1000, rotationDeg: 0, yOffsetMeters: 0, boardHeightMeters: 32 },
-            actors: [],
-            boardImageLayers: []
-        };
-    }
-
-    function normalizeGeoConfig(geo) {
-        var source = geo && typeof geo === 'object' ? geo : {};
-        var center = source.center && typeof source.center === 'object' ? source.center : {};
-        return {
-            enabled: !!source.enabled,
-            provider: String(source.provider || 'cesium-ion'),
-            assetId: String(source.assetId || DEFAULT_CESIUM_ION_3D_TILES_ASSET_ID),
-            center: {
-                lat: Number(center.lat) || 0,
-                lon: Number(center.lon) || 0,
-                heightMeters: Number(center.heightMeters) || 0
-            },
-            extentMeters: Number(source.extentMeters) || 1000,
-            rotationDeg: Number(source.rotationDeg) || 0,
-            yOffsetMeters: Number(source.yOffsetMeters) || 0,
-            boardHeightMeters: Number(source.boardHeightMeters) || 32,
-            scale: Number(source.scale) || 1
-        };
-    }
-
-    async function fetchCountryCapitalCoords() {
-        try {
-            var response = await fetch('https://restcountries.com/v3.1/all?fields=cca3,capitalInfo', { cache: 'force-cache' });
-            if (!response.ok) return {};
-            var rows = await response.json();
-            return (Array.isArray(rows) ? rows : []).reduce(function (acc, row) {
-                var code = String(row.cca3 || '').toUpperCase();
-                var latlng = row.capitalInfo && row.capitalInfo.latlng;
-                if (code && Array.isArray(latlng) && latlng.length >= 2) {
-                    acc[code] = { lat: Number(latlng[0]), lon: Number(latlng[1]) };
-                }
-                return acc;
-            }, {});
-        } catch (error) {
-            return {};
-        }
-    }
-
-    function countryGeoFromFeature(feature, code, remoteCapitals) {
-        var EG = typeof EarthGuardianCountryGeo !== 'undefined' ? EarthGuardianCountryGeo : null;
-        var k = String(code || '').toUpperCase();
-        var remote = remoteCapitals && remoteCapitals[k];
-        var resolved = EG ? EG.resolveCenterForEditor(k, remote) : null;
-        if (resolved && Number.isFinite(resolved.lat) && Number.isFinite(resolved.lon)) {
-            return makeGeoConfig(resolved.lat, resolved.lon, 2200);
-        }
-        var center = geometryCenter(feature && feature.geometry && feature.geometry.coordinates);
-        return center ? makeGeoConfig(center.lat, center.lon, 3200) : null;
-    }
-
-    function geoFromLonLatArray(center, extentMeters) {
-        if (!Array.isArray(center) || center.length < 2) return null;
-        var lon = Number(center[0]);
-        var lat = Number(center[1]);
-        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-        return makeGeoConfig(lat, lon, extentMeters || 1600);
-    }
-
-    function makeGeoConfig(lat, lon, extentMeters) {
-        return normalizeGeoConfig({
-            enabled: true,
-            provider: 'cesium-ion',
-            assetId: DEFAULT_CESIUM_ION_3D_TILES_ASSET_ID,
-            center: { lat: lat, lon: lon, heightMeters: 0 },
-            extentMeters: extentMeters,
-            rotationDeg: 0,
-            yOffsetMeters: 0,
-            boardHeightMeters: 32,
-            scale: 1
-        });
-    }
-
-    function geometryCenter(coordinates) {
-        var bounds = { minLon: Infinity, maxLon: -Infinity, minLat: Infinity, maxLat: -Infinity };
-        visitCoordinatePairs(coordinates, function (lon, lat) {
-            if (!Number.isFinite(lon) || !Number.isFinite(lat)) return;
-            bounds.minLon = Math.min(bounds.minLon, lon);
-            bounds.maxLon = Math.max(bounds.maxLon, lon);
-            bounds.minLat = Math.min(bounds.minLat, lat);
-            bounds.maxLat = Math.max(bounds.maxLat, lat);
-        });
-        if (!Number.isFinite(bounds.minLon) || !Number.isFinite(bounds.minLat)) return null;
-        return {
-            lon: (bounds.minLon + bounds.maxLon) / 2,
-            lat: (bounds.minLat + bounds.maxLat) / 2
-        };
-    }
-
-    function visitCoordinatePairs(value, visitor) {
-        if (!Array.isArray(value)) return;
-        if (typeof value[0] === 'number' && typeof value[1] === 'number') {
-            visitor(Number(value[0]), Number(value[1]));
-            return;
-        }
-        value.forEach(function (item) { visitCoordinatePairs(item, visitor); });
-    }
-
-    function normalizeEditorThemeColorHex(raw, fallbackHex) {
-        var fb =
-            typeof fallbackHex === 'string' && /^#[0-9a-fA-F]{6}$/.test(fallbackHex)
-                ? ('#' + fallbackHex.slice(1).toLowerCase())
-                : '#5a7d82';
-        if (raw === null || raw === undefined || raw === '') return fb;
-        if (typeof raw === 'number' && Number.isFinite(raw)) {
-            return '#' + ((Math.floor(raw) >>> 0) & 0xffffff).toString(16).padStart(6, '0');
-        }
-        var s = String(raw).trim();
-        if (/^#[0-9a-fA-F]{6}$/i.test(s)) return ('#' + s.slice(1).toLowerCase());
-        if (/^#[0-9a-fA-F]{3}$/i.test(s)) {
-            return ('#' + s[1] + s[1] + s[2] + s[2] + s[3] + s[3]).toLowerCase();
-        }
-        if (/^0x[0-9a-fA-F]{1,8}$/i.test(s)) {
-            var px = Number.parseInt(s.slice(2), 16);
-            if (Number.isFinite(px)) return '#' + ((px >>> 0) & 0xffffff).toString(16).padStart(6, '0');
-        }
-        var decDig = /^[0-9]+$/.test(s) ? Number(s) : NaN;
-        if (Number.isFinite(decDig) && decDig >= 0 && decDig <= 0xffffff) {
-            return '#' + ((Math.floor(decDig) >>> 0) & 0xffffff).toString(16).padStart(6, '0');
-        }
-        return fb;
-    }
-
-    function normalizeTheme(theme) {
-        var source = theme && typeof theme === 'object' ? theme : {};
-        function clamp01(val, def) {
-            var n = Number(val);
-            if (!Number.isFinite(n)) return def;
-            return Math.max(0, Math.min(1, n));
-        }
-        var ground = normalizeEditorThemeColorHex(source.ground, '#5a7d82');
-        var groundAlt = normalizeEditorThemeColorHex(
-            source.groundAlt != null ? source.groundAlt : source.ground,
-            '#4f7178'
-        );
-        var pathCol = normalizeEditorThemeColorHex(
-            source.path != null ? source.path : source.road,
-            '#6f9288'
-        );
-        return {
-            ground: ground,
-            groundAlt: groundAlt,
-            road: normalizeEditorThemeColorHex(
-                source.road != null ? source.road : source.path != null ? source.path : pathCol,
-                pathCol
-            ),
-            path: pathCol,
-            obstacle: normalizeEditorThemeColorHex(source.obstacle, '#5d6870'),
-            accent: normalizeEditorThemeColorHex(source.accent, '#8fb8ae'),
-            fog: normalizeEditorThemeColorHex(
-                source.fog != null ? source.fog : source.groundAlt != null ? source.groundAlt : source.ground,
-                '#445c60'
-            ),
-            boardTextureUrl: String(source.boardTextureUrl || '').trim(),
-            geoTileOpacity: clamp01(source.geoTileOpacity, 0.48),
-            geoPathOpacity: clamp01(source.geoPathOpacity, 0.92),
-            boardBaseOpacity: clamp01(source.boardBaseOpacity, 0.42),
-            gridLineOpacity: clamp01(source.gridLineOpacity, 0.42),
-            rimOpacity: clamp01(source.rimOpacity, 0.32),
-            pathGlowOpacity: clamp01(source.pathGlowOpacity, 0.46),
-            pathDetailOpacity: clamp01(source.pathDetailOpacity, 0.82),
-            hoverCellOpacity: clamp01(source.hoverCellOpacity, 0.42),
-            hoverColorOk: normalizeEditorThemeColorHex(source.hoverColorOk, '#6a988c'),
-            hoverColorBad: normalizeEditorThemeColorHex(source.hoverColorBad, '#d87880')
-        };
-    }
-
-    function normalizeEnemyPaths(paths, fallbackRoads) {
-        var roadsCopy = fallbackRoads && fallbackRoads.length ? normalizeCells(fallbackRoads) : [];
-        var list = Array.isArray(paths) && paths.length ? paths : [];
-        var mapped =
-            list.length === 0 && roadsCopy.length
-                ? [{ id: 'path-main', name: '主敌人路径', cells: roadsCopy.map(function (c) { return normalizeCell(c); }) }]
-                : list.map(function (path, index) {
-                      return {
-                          id: String(path.id || 'path-' + (index + 1)),
-                          name: String(path.name || path.label || '敌人路径 ' + (index + 1)),
-                          cells: normalizeCells(path.cells || path.path || [])
-                      };
-                  });
-        if (
-            mapped[0] &&
-            (!mapped[0].cells || !mapped[0].cells.length) &&
-            roadsCopy.length
-        ) {
-            mapped[0].cells = roadsCopy.slice();
-        }
-        return mapped.length
-            ? mapped
-            : [{ id: 'path-main', name: '主敌人路径', cells: [] }];
-    }
-
-    /** 与 src/main.ts 中 expandPath 一致：曼哈顿连接折线路径为多格带子 */
-    function expandPathWaypointPolyline(points) {
-        /** @type {Set<string>} */
-        var bucket = new Set();
-        if (!points || points.length < 2) {
-            points = points || [];
-            for (var k = 0; k < points.length; k += 1)
-                bucket.add(String(points[k].col) + ',' + String(points[k].row));
-            return bucket;
-        }
-        for (var idx = 0; idx < points.length - 1; idx += 1) {
-            var start = points[idx];
-            var endPt = points[idx + 1];
-            var cx = Number(start.col) || 0;
-            var cy = Number(start.row) || 0;
-            bucket.add(String(cx) + ',' + String(cy));
-
-            while (cx !== Number(endPt.col)) {
-                cx += Math.sign(Number(endPt.col) - cx);
-                bucket.add(String(cx) + ',' + String(cy));
-            }
-            while (cy !== Number(endPt.row)) {
-                cy += Math.sign(Number(endPt.row) - cy);
-                bucket.add(String(cx) + ',' + String(cy));
-            }
-        }
-        return bucket;
-    }
-
-    /** 对齐 src/main.ts `uniqueCells` */
-    function uniqueDefenseCells(cells, cols, rows) {
-        var seen = {};
-        /** @type {Array<{col:number,row:number}>} */
-        var result = [];
-        for (var i = 0; i < cells.length; i += 1) {
-            var cell = cells[i];
-            var normalized = {
-                col: clamp(Math.round(Number(cell.col) || 0), 0, cols - 1),
-                row: clamp(Math.round(Number(cell.row) || 0), 0, rows - 1)
-            };
-            var key = normalized.col + ',' + normalized.row;
-            if (seen[key]) continue;
-            seen[key] = true;
-            result.push(normalized);
-        }
-        return result;
-    }
-
-    function manhattanDefense(a, b) {
-        return Math.abs(a.col - b.col) + Math.abs(a.row - b.row);
-    }
-
-    function sameDefenseCell(a, b) {
-        return !!b && a.col === b.col && a.row === b.row;
-    }
-
-    /** 对齐 src/main.ts `orderEditorPathCells` — 从出生点贪心串联路格终点 */
-    function orderEditorPathCellsDefense(cells, start, end, cols, rows) {
-        var remaining = uniqueDefenseCells(cells, cols, rows).slice();
-        /** @type {Array<{col:number,row:number}>} */
-        var ordered = [];
-        var current = start;
-        if (!remaining.some(function (cell) { return sameDefenseCell(cell, start); }))
-            ordered.push({ col: start.col, row: start.row });
-        while (remaining.length > 0) {
-            var nextIndex = remaining.findIndex(function (cell) {
-                return manhattanDefense(cell, current) === 1;
-            });
-            if (nextIndex < 0) {
-                nextIndex = remaining.reduce(function (bestIndex, cell, index) {
-                    return manhattanDefense(cell, current) <
-                        manhattanDefense(remaining[bestIndex], current)
-                        ? index
-                        : bestIndex;
-                }, 0);
-            }
-            var next = remaining.splice(nextIndex, 1)[0];
-            ordered.push(next);
-            current = next;
-        }
-        if (!ordered.some(function (cell) { return sameDefenseCell(cell, end); })) ordered.push({ col: end.col, row: end.row });
-        return uniqueDefenseCells(ordered, cols, rows);
-    }
-
-    function projectGridCellDefense(cell, cols, rows) {
-        return {
-            col: clamp(Math.round(Number(cell.col) || 0), 0, cols - 1),
-            row: clamp(Math.round(Number(cell.row) || 0), 0, rows - 1)
-        };
-    }
-
-    /** 对齐 editorLevelToRuntimeMap：首条非空 enemyPaths.cells，否则 roads */
-    function defensePathSourceCells(map) {
-        if (map.enemyPaths) {
-            for (var pi = 0; pi < map.enemyPaths.length; pi += 1) {
-                var p = map.enemyPaths[pi];
-                if (p && p.cells && p.cells.length) return p.cells.slice();
-            }
-        }
-        return map.roads && map.roads.length ? map.roads.slice() : [];
-    }
-
-    /** 对齐 buildFallbackPath + uniqueCells — 拐角折线顶点列表 */
-    function buildDefenseFallbackVertexList(spawn, objective, cols, rows) {
-        var midA = {
-            col: clamp(Math.floor((spawn.col + objective.col) / 2), 0, cols - 1),
-            row: spawn.row
-        };
-        var midB = { col: midA.col, row: objective.row };
-        return uniqueDefenseCells([spawn, midA, midB, objective], cols, rows);
-    }
-
-    /**
-     * 塔防棋盘 / 行军带：与 editorLevelToRuntimeMap → expandPath 完全一致
-     * （路格排序 + Manhattan 铺开），不再只做 cells∪roads 的简单并集。
-     */
-    function getDefenseEditorPathKeys(level) {
-        var map = level.map;
-        if (!map || !map.grid)
-            /** @type {Set<string>} */ return new Set();
-        var cols = clamp(Math.floor(Number(map.grid.cols) || DEFAULT_GRID_COLS), 4, 80);
-        var rows = clamp(Math.floor(Number(map.grid.rows) || DEFAULT_GRID_ROWS), 4, 80);
-
-        var objectiveDefault = { col: cols - 1, row: Math.floor(rows / 2) };
-        var objective = map.objectivePoint
-            ? projectGridCellDefense(map.objectivePoint, cols, rows)
-            : objectiveDefault;
-        var spawn = Array.isArray(map.spawnPoints) && map.spawnPoints[0]
-            ? projectGridCellDefense(map.spawnPoints[0], cols, rows)
-            : { col: 0, row: objective.row };
-
-        var raw = defensePathSourceCells(map);
-        var projected = uniqueDefenseCells(
-            raw.map(function (c) {
-                return projectGridCellDefense(c, cols, rows);
-            }),
-            cols,
-            rows
-        );
-
-        var orderedPath = orderEditorPathCellsDefense(projected, spawn, objective, cols, rows);
-        var fallbackPath = buildDefenseFallbackVertexList(spawn, objective, cols, rows);
-        /** 与 main：`path = projectedPath.length >= 2 ? projectedPath : fallbackPath` */
-        var pathVerts = orderedPath.length >= 2 ? orderedPath : fallbackPath;
-        return expandPathWaypointPolyline(pathVerts);
-    }
-
-    function normalizeSpawnPoints(points, legacyTd) {
-        var list = Array.isArray(points) ? points : [];
-        if (!list.length && Array.isArray(legacyTd.spawnRoutes)) {
-            list = legacyTd.spawnRoutes.map(function (route, index) {
-                return { id: route.id || 'spawn-' + (index + 1), name: route.label || route.entry || '敌人出口 ' + (index + 1), col: 0, row: 2 + index * 3, pathId: 'path-main' };
-            });
-        }
-        return list.map(function (point, index) {
-            return {
-                id: String(point.id || 'spawn-' + (index + 1)),
-                name: String(point.name || point.label || '敌人出口 ' + (index + 1)),
-                col: clamp(Number(point.col) || 0, 0, 79),
-                row: clamp(Number(point.row) || (2 + index * 3), 0, 79),
-                pathId: String(point.pathId || 'path-main')
-            };
-        });
-    }
-
-    function normalizeExplorePoints(points, legacyExplore) {
-        var list = Array.isArray(points) ? points : Array.isArray(legacyExplore.points) ? legacyExplore.points : [];
-        return list.map(function (point, index) {
-            return {
-                id: String(point.id || 'poi-' + (index + 1)),
-                name: String(point.name || point.label || '探索点 ' + (index + 1)),
-                col: clamp(Number(point.col) || (4 + index * 2), 0, 79),
-                row: clamp(Number(point.row) || 4, 0, 79),
-                modelId: String(point.modelId || ''),
-                interaction: String(point.interaction || point.kind || 'inspect'),
-                radius: Math.max(0, Number(point.radius || 2))
-            };
-        });
-    }
-
-    /** 与运行时 explore-gameplay-settings 对齐的键列表 */
-    var EXPLORE_GAMEPLAY_STORE_KEYS = [
-        'moveSpeedWalk',
-        'moveSpeedRun',
-        'attackCooldownSec',
-        'skillECooldownSec',
-        'skillRCooldownSec',
-        'moneyDropRespawnIntervalSec',
-        'exploreEnemySpawnIntervalSec',
-        'enemyMaxConcurrent',
-        'enemyBaseHp',
-        'enemyHpPerLevel',
-        'enemyBaseSpeed',
-        'enemySpeedPerLevel',
-        'enemyBaseDamage',
-        'enemyDamagePerLevel',
-        'enemyAggroRange',
-        'enemyAttackCooldown'
-    ];
-
-    function normalizeExploreGameplayNormalized(raw) {
-        var src = raw && typeof raw === 'object' ? raw : {};
-        var out = {};
-        EXPLORE_GAMEPLAY_STORE_KEYS.forEach(function (key) {
-            var v = Number(src[key]);
-            if (!Number.isFinite(v)) return;
-            out[key] = key === 'enemyMaxConcurrent' ? Math.round(v) : v;
-        });
-        return out;
-    }
-
-    /** Inspector 展示的合并值（与 resolveExploreGameplay 一致） */
-    function mergeExploreGameplayDisplay(rawGp) {
-        var r = rawGp && typeof rawGp === 'object' ? rawGp : {};
-        function finiteOr(def, val) {
-            return typeof val === 'number' && Number.isFinite(val) ? val : def;
-        }
-        function clampPos(def, key, max) {
-            var n = finiteOr(def, Number(r[key]));
-            return Math.min(max, Math.max(1e-3, n));
-        }
-        function clampNonNeg(def, key, max) {
-            var v = finiteOr(def, Number(r[key]));
-            return Math.min(max, Math.max(0, v));
-        }
-        var B = {
-            moveSpeedWalk: 5.5,
-            moveSpeedRun: 10,
-            attackCooldownSec: 0.42,
-            skillECooldownSec: 10,
-            skillRCooldownSec: 20,
-            moneyDropRespawnIntervalSec: 5,
-            exploreEnemySpawnIntervalSec: 8,
-            enemyMaxConcurrent: 10,
-            enemyBaseHp: 55,
-            enemyHpPerLevel: 18,
-            enemyBaseSpeed: 2.2,
-            enemySpeedPerLevel: 0.15,
-            enemyBaseDamage: 7,
-            enemyDamagePerLevel: 2,
-            enemyAggroRange: 8,
-            enemyAttackCooldown: 1.5
-        };
-        return {
-            moveSpeedWalk: clampPos(B.moveSpeedWalk, 'moveSpeedWalk', 80),
-            moveSpeedRun: clampPos(B.moveSpeedRun, 'moveSpeedRun', 120),
-            attackCooldownSec: clampPos(B.attackCooldownSec, 'attackCooldownSec', 30),
-            skillECooldownSec: clampPos(B.skillECooldownSec, 'skillECooldownSec', 300),
-            skillRCooldownSec: clampPos(B.skillRCooldownSec, 'skillRCooldownSec', 600),
-            moneyDropRespawnIntervalSec: clampPos(B.moneyDropRespawnIntervalSec, 'moneyDropRespawnIntervalSec', 3600),
-            exploreEnemySpawnIntervalSec: clampPos(B.exploreEnemySpawnIntervalSec, 'exploreEnemySpawnIntervalSec', 3600),
-            enemyMaxConcurrent: Math.min(120, Math.max(1, Math.round(finiteOr(B.enemyMaxConcurrent, Number(r.enemyMaxConcurrent))))),
-            enemyBaseHp: clampPos(B.enemyBaseHp, 'enemyBaseHp', 1e9),
-            enemyHpPerLevel: clampPos(B.enemyHpPerLevel, 'enemyHpPerLevel', 1e9),
-            enemyBaseSpeed: clampPos(B.enemyBaseSpeed, 'enemyBaseSpeed', 50),
-            enemySpeedPerLevel: clampNonNeg(B.enemySpeedPerLevel, 'enemySpeedPerLevel', 50),
-            enemyBaseDamage: clampPos(B.enemyBaseDamage, 'enemyBaseDamage', 1e6),
-            enemyDamagePerLevel: clampNonNeg(B.enemyDamagePerLevel, 'enemyDamagePerLevel', 1e6),
-            enemyAggroRange: clampPos(B.enemyAggroRange, 'enemyAggroRange', 200),
-            enemyAttackCooldown: clampPos(B.enemyAttackCooldown, 'enemyAttackCooldown', 60)
-        };
-    }
-
-    function readExploreGameplayRawFromDomSection(sectionEl) {
-        var flat = {};
-        if (!sectionEl || !sectionEl.querySelectorAll) return {};
-        sectionEl.querySelectorAll('[data-explore-gp]').forEach(function (inp) {
-            var key = inp.getAttribute('data-explore-gp');
-            if (!key) return;
-            var raw = inp.value;
-            var n = key === 'enemyMaxConcurrent' ? parseInt(raw, 10) : parseFloat(raw);
-            if (!Number.isFinite(n)) return;
-            flat[key] = n;
-        });
-        return normalizeExploreGameplayNormalized(flat);
-    }
-
     function renderExploreGameplayPanels() {
         if (!refs.inspectorPanelBody) return;
         var level = getLevel();
@@ -8564,200 +5338,6 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
         tpl.dataset.mounted = '1';
         mLevel.appendChild(tpl.content.cloneNode(true));
         mGameplay.appendChild(tpl.content.cloneNode(true));
-    }
-
-    function normalizeExplorationLayout(layout, fallbackMap) {
-        var source = layout && typeof layout === 'object' ? layout : {};
-        var grid = source.grid && typeof source.grid === 'object' ? source.grid : fallbackMap.grid;
-        var normalized = {
-            grid: {
-                cols: clamp(Number(grid.cols) || fallbackMap.grid.cols || DEFAULT_GRID_COLS, 8, 80),
-                rows: clamp(Number(grid.rows) || fallbackMap.grid.rows || DEFAULT_GRID_ROWS, 8, 80),
-                tileSize: clamp(Number(grid.tileSize) || fallbackMap.grid.tileSize || DEFAULT_TILE_SIZE, 1, 10)
-            },
-            theme: normalizeTheme(source.theme || fallbackMap.theme),
-            path: normalizeCells(source.path || []),
-            obstacles: normalizeCells(source.obstacles || []),
-            safeZones: normalizeCells(source.safeZones || []),
-            startPoint: normalizePoint(source.startPoint) || { id: 'explore-start', name: '探索起点', col: 0, row: Math.floor((fallbackMap.grid.rows || DEFAULT_GRID_ROWS) / 2) },
-            exitPoint: normalizePoint(source.exitPoint) || { id: 'explore-exit', name: '探索终点', col: Math.max(0, (fallbackMap.grid.cols || DEFAULT_GRID_COLS) - 4), row: Math.floor((fallbackMap.grid.rows || DEFAULT_GRID_ROWS) / 2) },
-            gameplay: normalizeExploreGameplayNormalized(source.gameplay || {})
-        };
-        return normalized;
-    }
-
-    function normalizeActors(actors, seed) {
-        var list = Array.isArray(actors) ? actors : [];
-        if (!list.length && Array.isArray(seed.props)) {
-            list = seed.props.map(function (prop, index) {
-                return {
-                    id: prop.id || 'actor-' + (index + 1),
-                    templateId: 'explore-item',
-                    name: prop.label || '模型 Actor',
-                    category: 'model',
-                    icon: 'M',
-                    modelId: prop.assetId || '',
-                    col: 6 + index,
-                    row: 6,
-                    rotation: 0,
-                    scale: 1,
-                    team: 'neutral',
-                    stats: { hp: 1, attack: 0, range: 1, fireRate: 0, cost: 0, cooldown: 0 }
-                };
-            });
-        }
-        return list.map(function (actor, index) {
-            var source = actor && typeof actor === 'object' ? actor : {};
-            var wx = source.worldOffsetMeters && typeof source.worldOffsetMeters === 'object' ? source.worldOffsetMeters : {};
-            return {
-                id: String(source.id || 'actor-' + (index + 1)),
-                templateId: String(source.templateId || ''),
-                name: String(source.name || source.label || 'Actor ' + (index + 1)),
-                category: String(source.category || 'model'),
-                icon: String(source.icon || (source.name || 'A').charAt(0)).slice(0, 2),
-                modelId: String(source.modelId || source.assetId || ''),
-                col: clamp(Number(source.col) || 0, 0, 79),
-                row: clamp(Number(source.row) || 0, 0, 79),
-                rotation: Number.isFinite(Number(source.rotation)) ? Number(source.rotation) : 0,
-                scale: Number.isFinite(Number(source.scale)) && Number(source.scale) > 0 ? Number(source.scale) : 1,
-                worldOffsetMeters: {
-                    x: Number(wx.x) || 0,
-                    y: Number(wx.y) || 0,
-                    z: Number(wx.z) || 0
-                },
-                modelPath: String(source.modelPath || ''),
-                team: String(source.team || 'neutral'),
-                stats: normalizeStats(source.stats)
-            };
-        });
-    }
-
-    function normalizeActorTemplate(template) {
-        var source = template && typeof template === 'object' ? template : {};
-        var ms = Number(source.templateModelScale);
-        return {
-            id: String(source.id || uid('template')),
-            name: String(source.name || 'Actor 模板'),
-            category: String(source.category || 'model'),
-            modelId: String(source.modelId || ''),
-            modelPath: String(source.modelPath || ''),
-            icon: String(source.icon || (source.name || 'A').charAt(0)).slice(0, 2),
-            templateModelScale:
-                Number.isFinite(ms) && ms > 0 ? Math.min(Math.max(ms, 0.1), 8) : 1,
-            stats: normalizeStats(source.stats)
-        };
-    }
-
-    function normalizeStats(stats) {
-        var source = stats && typeof stats === 'object' ? stats : {};
-        return {
-            hp: Number(source.hp) || 1,
-            attack: Number(source.attack) || 0,
-            range: Number(source.range) || 0,
-            fireRate: Number(source.fireRate) || 0,
-            cost: Number(source.cost) || 0,
-            cooldown: Number(source.cooldown) || 0,
-            speed: Number(source.speed) || 0,
-            reward: Number(source.reward) || 0,
-            targeting: String(source.targeting || 'nearest'),
-            projectileModelId: String(source.projectileModelId || '')
-        };
-    }
-
-    function normalizeEnemyTypes(enemyTypes, seed) {
-        var list = Array.isArray(enemyTypes) ? enemyTypes : [];
-        if (!list.length && seed.rosters && Array.isArray(seed.rosters.enemyTypes)) {
-            list = seed.rosters.enemyTypes.map(function (id) {
-                return { id: id, name: id, hp: 100, speed: 1, reward: 20, modelId: '' };
-            });
-        }
-        if (!list.length) {
-            list = [{ id: 'enemy-drone', name: '侦察无人机', hp: 80, speed: 1.25, reward: 20, modelId: '' }];
-        }
-        return list.map(function (enemy) {
-            var esc = Number(enemy.modelScale);
-            return {
-                id: String(enemy.id || slugify(enemy.name) || uid('enemy')),
-                name: String(enemy.name || enemy.id || '敌人'),
-                modelId: String(enemy.modelId || ''),
-                modelPath: String(enemy.modelPath || ''),
-                modelScale: Number.isFinite(esc) && esc > 0 ? Math.min(Math.max(esc, 0.1), 8) : 1,
-                hp: Number(enemy.hp) || 100,
-                speed: Number(enemy.speed) || 1,
-                reward: Number(enemy.reward) || 20
-            };
-        });
-    }
-
-    function normalizeWaveRules(waveRules, seed) {
-        var list = Array.isArray(waveRules) ? waveRules : [];
-        var legacyWaves = seed.modeProfiles && seed.modeProfiles.towerDefense && seed.modeProfiles.towerDefense.waves;
-        if (!list.length && Array.isArray(legacyWaves)) {
-            list = legacyWaves.map(function (wave) {
-                return {
-                    id: uid('wave'),
-                    waveNumber: wave.waveNumber,
-                    enemyTypeId: Array.isArray(wave.enemyPool) ? wave.enemyPool[0] : '',
-                    count: wave.count,
-                    interval: 1,
-                    spawnPointId: '',
-                    pathId: 'path-main',
-                    reward: wave.reward
-                };
-            });
-        }
-        return list.map(function (wave, index) {
-            var ovs = Number(wave.overrideModelScale);
-            return {
-                id: String(wave.id || 'wave-' + (index + 1)),
-                waveNumber: Math.max(1, Number(wave.waveNumber) || index + 1),
-                enemyTypeId: String(wave.enemyTypeId || ''),
-                count: Math.max(1, Number(wave.count) || 10),
-                interval: Math.max(0.1, Number(wave.interval) || 1),
-                spawnPointId: String(wave.spawnPointId || ''),
-                pathId: String(wave.pathId || 'path-main'),
-                reward: Math.max(0, Number(wave.reward) || 50),
-                overrideModelPath: String(wave.overrideModelPath || ''),
-                overrideModelScale:
-                    Number.isFinite(ovs) && ovs > 0 ? Math.min(Math.max(ovs, 0.1), 8) : 1
-            };
-        });
-    }
-
-    function normalizeModeProfiles(modeProfiles) {
-        var source = modeProfiles && typeof modeProfiles === 'object' ? modeProfiles : {};
-        return {
-            towerDefense: source.towerDefense && typeof source.towerDefense === 'object' ? source.towerDefense : { enabled: true },
-            exploration: source.exploration && typeof source.exploration === 'object' ? source.exploration : { enabled: true }
-        };
-    }
-
-    function normalizeCell(cell) {
-        return { col: Number(cell.col) || 0, row: Number(cell.row) || 0 };
-    }
-
-    function normalizeCells(cells) {
-        return Array.isArray(cells) ? cells.map(normalizeCell) : [];
-    }
-
-    function normalizePoint(point) {
-        if (!point || typeof point !== 'object') return null;
-        return {
-            id: String(point.id || 'point'),
-            name: String(point.name || point.label || '点位'),
-            col: Number(point.col) || 0,
-            row: Number(point.row) || 0
-        };
-    }
-
-    function defaultObjectivePoint(grid) {
-        return { id: 'objective-main', name: '防守核心', col: Math.max(0, grid.cols - 4), row: Math.floor(grid.rows / 2) };
-    }
-
-    function normalizeStatus(status, map) {
-        if (status === 'designed' || status === 'needs-work' || status === 'draft') return status;
-        var hasWork = map && (map.actors.length || map.roads.length || map.spawnPoints.length || map.explorationPoints.length);
-        return hasWork ? 'needs-work' : 'draft';
     }
 
     function createEnemyTypeFromTemplates(level) {
@@ -8812,7 +5392,7 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
 
     function markDirty(message) {
         isDirty = true;
-        persistLocalBackup();
+        _persistLocalBackup(state);
         setStatus(message || '已有未保存修改', 'dirty');
     }
 
@@ -8822,31 +5402,121 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
         refs.statusBadge.className = 'status-badge ' + (mode || 'idle');
     }
 
-    function persistLocalBackup() {
-        try {
-            localStorage.setItem(LOCAL_BACKUP_KEY, JSON.stringify(state));
-        } catch (error) {}
+    function activateBoardImageTool() {
+        activeTool = 'boardImage';
+        document.querySelectorAll('[data-tool]').forEach(function (item) {
+            item.classList.toggle('active', item.getAttribute('data-tool') === 'boardImage');
+        });
+        if (refs.activeToolLabel) refs.activeToolLabel.textContent = '当前工具：' + TOOL_LABELS.boardImage;
+        updateEraserToolPanelVisibility(refs, activeWorkbench, activeTool);
+        updateStageHintText();
     }
 
-    function readLocalBackup() {
-        try {
-            return JSON.parse(localStorage.getItem(LOCAL_BACKUP_KEY) || localStorage.getItem(LEGACY_BACKUP_KEY) || 'null');
-        } catch (error) {
-            return null;
-        }
-    }
-
-    function readDragPayload(event) {
-        try {
-            return JSON.parse(event.dataTransfer.getData('application/json'));
-        } catch (error) {
-            try {
-                var raw = event.dataTransfer.getData('text/plain');
-                return raw ? JSON.parse(raw) : null;
-            } catch (error2) {
-                return null;
+    function boardImagesEnv() {
+        return {
+            getLevel: getLevel,
+            getActiveWorkbench: function () {
+                return activeWorkbench;
+            },
+            getViewportViewMode: function () {
+                return viewportViewMode;
+            },
+            getSelectedObject: function () {
+                return selectedObject;
+            },
+            setSelectedObject: function (next) {
+                selectedObject = next;
+            },
+            markDirty: markDirty,
+            renderSelectionInspector: renderSelectionInspector,
+            renderMap: renderMap,
+            schedulePreviewRefresh: schedulePreviewRefresh,
+            renderAll: renderAll,
+            activateBoardImageTool: activateBoardImageTool,
+            getActiveTool: function () {
+                return activeTool;
             }
-        }
+        };
+    }
+
+    function globalSettingsEnv() {
+        return {
+            getState: function () {
+                return state;
+            },
+            getLevel: getLevel,
+            getActiveWorkbench: function () {
+                return activeWorkbench;
+            },
+            setActiveWorkbench: function (value) {
+                activeWorkbench = value;
+            },
+            getActiveGlobalSettingsTab: function () {
+                return activeGlobalSettingsTab;
+            },
+            setActiveGlobalSettingsTab: function (value) {
+                activeGlobalSettingsTab = value;
+            },
+            getGlobalCutsceneEditLevelId: function () {
+                return globalCutsceneEditLevelId;
+            },
+            setGlobalCutsceneEditLevelId: function (value) {
+                globalCutsceneEditLevelId = value || '';
+            },
+            renderAll: renderAll,
+            renderGlobalAudioPanel: renderGlobalAudioPanel,
+            renderGlobalScreenUiForm: renderGlobalScreenUiForm,
+            createManualLevel: createManualLevel,
+            deleteLevelById: deleteLevelById,
+            focusLevelInEditor: focusLevelInEditor,
+            markDirty: markDirty,
+            setStatus: setStatus,
+            uploadVideoFile: uploadVideoFile,
+            revealProjectPathInExplorer: revealProjectPathInExplorer
+        };
+    }
+
+    function mapRenderEnv() {
+        return {
+            getLevel: getLevel,
+            getActiveEditorMode: function () {
+                return activeEditorMode;
+            },
+            getSelectedObject: function () {
+                return selectedObject;
+            },
+            findSelectedObject: findSelectedObject,
+            resetEraserPreviewAfterMapRebuild: resetEraserPreviewAfterMapRebuild,
+            refreshEraserPreviewIfActive: function (refsArg) {
+                refreshEraserPreviewIfActive(refsArg, eraserPreviewEnv());
+            }
+        };
+    }
+
+    function audioEnv() {
+        return {
+            getLevel: getLevel,
+            getState: function () {
+                return state;
+            },
+            markDirty: markDirty,
+            setStatus: setStatus,
+            uploadFileToProjectUrl: uploadFileToProjectUrl
+        };
+    }
+
+    /** 供 eraser-tool：用 getter 读取当前工作台/工具，避免闭包捕获过期值 */
+    function eraserPreviewEnv() {
+        return {
+            getLevel: getLevel,
+            get activeWorkbench() {
+                return activeWorkbench;
+            },
+            get activeTool() {
+                return activeTool;
+            },
+            mapGridPickCellFromClientPoint: mapGridPickCellFromClientPoint
+        };
     }
 
     /**
@@ -8877,155 +5547,6 @@ import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, sl
         wrap.setAttribute('data-col', String(col));
         wrap.setAttribute('data-row', String(row));
         return wrap;
-    }
-
-    function fileToBase64(file) {
-        return new Promise(function (resolve, reject) {
-            var reader = new FileReader();
-            reader.onload = function () {
-                resolve(String(reader.result || '').split(',')[1] || '');
-            };
-            reader.onerror = reject;
-            reader.readAsDataURL(file);
-        });
-    }
-
-    function trimMapToBounds(map) {
-        var cols = map.grid.cols;
-        var rows = map.grid.rows;
-        map.roads = map.roads.filter(inBounds(cols, rows));
-        map.obstacles = map.obstacles.filter(inBounds(cols, rows));
-        map.buildSlots = map.buildSlots.filter(inBounds(cols, rows));
-        map.enemyPaths.forEach(function (path) { path.cells = path.cells.filter(inBounds(cols, rows)); });
-        map.spawnPoints = map.spawnPoints.filter(inBounds(cols, rows));
-        map.explorationPoints = map.explorationPoints.filter(inBounds(cols, rows));
-        map.actors = map.actors.filter(inBounds(cols, rows));
-        if (map.objectivePoint && !inBounds(cols, rows)(map.objectivePoint)) map.objectivePoint = defaultObjectivePoint(map.grid);
-        if (map.explorationLayout) {
-            map.explorationLayout.path = map.explorationLayout.path.filter(inBounds(cols, rows));
-            map.explorationLayout.obstacles = map.explorationLayout.obstacles.filter(inBounds(cols, rows));
-            if (Array.isArray(map.explorationLayout.safeZones)) {
-                map.explorationLayout.safeZones = map.explorationLayout.safeZones.filter(inBounds(cols, rows));
-            }
-            if (map.explorationLayout.startPoint && !inBounds(cols, rows)(map.explorationLayout.startPoint)) map.explorationLayout.startPoint = { id: 'explore-start', name: '探索起点', col: 0, row: Math.floor(rows / 2) };
-            if (map.explorationLayout.exitPoint && !inBounds(cols, rows)(map.explorationLayout.exitPoint)) map.explorationLayout.exitPoint = { id: 'explore-exit', name: '探索终点', col: Math.max(0, cols - 4), row: Math.floor(rows / 2) };
-        }
-        map.enemyExits = map.spawnPoints;
-    }
-
-    function pickLevelId(preferredId) {
-        if (!state || !state.levels.length) return '';
-        return state.levels.some(function (level) { return level.id === preferredId; }) ? preferredId : state.levels[0].id;
-    }
-
-    function groupLevels(levels) {
-        return levels.reduce(function (groups, level) {
-            var key = level.location.countryName || '未设置国家';
-            if (level.location.cityName) key = key + ' / 城市';
-            if (!groups[key]) groups[key] = [];
-            groups[key].push(level);
-            return groups;
-        }, {});
-    }
-
-    function sortLevels(targetState) {
-        var target = targetState || state;
-        if (!target || !Array.isArray(target.levels)) return;
-        target.levels.sort(function (left, right) {
-            var a = (left.location.countryName + left.location.cityName + left.name).toLowerCase();
-            var b = (right.location.countryName + right.location.cityName + right.name).toLowerCase();
-            return a.localeCompare(b, 'zh-Hans-CN');
-        });
-    }
-
-    function compareRegionKeys(left, right) {
-        if (left === '中国 / 城市') return -1;
-        if (right === '中国 / 城市') return 1;
-        return left.localeCompare(right, 'zh-Hans-CN');
-    }
-
-    function statusLabel(status) {
-        if (status === 'designed') return '已设计';
-        if (status === 'needs-work') return '需完善';
-        return '未设计';
-    }
-
-    function actorCategoryLabel(category) {
-        if (category === 'tower') return '防御塔';
-        if (category === 'enemy') return '敌人';
-        if (category === 'objective') return '防守核心';
-        if (category === 'npc') return 'NPC';
-        return '模型';
-    }
-
-    function summaryStats(stats) {
-        return 'HP ' + (stats.hp || 0) + ' / 攻击 ' + (stats.attack || 0) + ' / 射程 ' + (stats.range || 0);
-    }
-
-    function splitRegion(region) {
-        var parts = String(region || '').split(/[·・\-\/]/).map(function (part) { return part.trim(); }).filter(Boolean);
-        return { country: parts[0] || region || '', city: parts[1] || '' };
-    }
-
-    function buildRegionLabel(location, fallback) {
-        if (location.countryName && location.cityName) return location.countryName + ' · ' + location.cityName;
-        return fallback || location.countryName || '未设置地区';
-    }
-
-    function inferCountryCode(countryName) {
-        if (countryName === '中国') return 'CN';
-        if (countryName === '美国') return 'US';
-        if (countryName === '日本') return 'JP';
-        if (countryName === '法国') return 'FR';
-        return '';
-    }
-
-    function uniqueLevelId(seed) {
-        var base = slugify(seed) || 'level';
-        var candidate = base;
-        var index = 2;
-        while (state && state.levels.some(function (level) { return level.id === candidate; })) {
-            candidate = base + '-' + index;
-            index += 1;
-        }
-        return candidate;
-    }
-
-    function uniqueTemplateId(seed) {
-        var base = slugify(seed) || 'actor-template';
-        var candidate = base;
-        var index = 2;
-        while (state.actorTemplates.some(function (template) { return template.id === candidate; })) {
-            candidate = base + '-' + index;
-            index += 1;
-        }
-        return candidate;
-    }
-
-    function uniqueCatalogId(items, seed) {
-        var base = slugify(seed) || 'asset';
-        var candidate = base;
-        var index = 2;
-        while (items.some(function (item) { return item.id === candidate; })) {
-            candidate = base + '-' + index;
-            index += 1;
-        }
-        return candidate;
-    }
-
-    function ensureExplorationLayout(map) {
-        if (!map.explorationLayout) {
-            map.explorationLayout = normalizeExplorationLayout(null, map);
-        }
-        map.explorationLayout.path = Array.isArray(map.explorationLayout.path) ? map.explorationLayout.path : [];
-        map.explorationLayout.obstacles = Array.isArray(map.explorationLayout.obstacles) ? map.explorationLayout.obstacles : [];
-        if (!Array.isArray(map.explorationLayout.safeZones)) map.explorationLayout.safeZones = [];
-        if (!map.explorationLayout.gameplay || typeof map.explorationLayout.gameplay !== 'object') map.explorationLayout.gameplay = {};
-        return map.explorationLayout;
-    }
-
-    function cloneGeoConfig(geo) {
-        return normalizeGeoConfig(clone(geo));
     }
 
     document.addEventListener('DOMContentLoaded', init);
