@@ -144,6 +144,9 @@ function normalizeGeoConfig(geo?: GeoMapConfig): RequiredGeoMapConfig | null {
   if (!geo?.enabled || !Number.isFinite(geo.center?.lat) || !Number.isFinite(geo.center?.lon)) {
     return null;
   }
+  if (geo.center.lat === 0 && geo.center.lon === 0) {
+    return null;
+  }
 
   return {
     ...geo,

@@ -14,7 +14,7 @@ const publicDir = path.resolve(process.cwd(), "public");
 const artsDir = path.resolve(publicDir, "Arts");
 const gameModelsDir = path.resolve(publicDir, "GameModels");
 const editorConfigFile = path.resolve(__dirname, "Web", "data", "level-editor-state.json");
-const runtimeSourceFile = path.resolve(__dirname, "src", "game", "content.ts");
+const runtimeSourceFile = path.resolve(__dirname, "src", "game", "data", "content.ts");
 
 function readJsonBody(request) {
   return new Promise((resolve, reject) => {
@@ -96,8 +96,20 @@ function extractObjectLiteral(source, marker) {
   return "";
 }
 
-function evaluateObjectLiteral(literal) {
-  return literal ? runInNewContext(`(${literal})`, Object.create(null)) : {};
+function createRuntimeContentEvalContext() {
+  const geoConfigStub = new Proxy(Object.create(null), {
+    get() {
+      return {};
+    },
+  });
+  return {
+    DEFAULT_CESIUM_ION_3D_TILES_ASSET_ID: "",
+    CITY_GEO_CONFIG: geoConfigStub,
+  };
+}
+
+function evaluateObjectLiteral(literal, context = Object.create(null)) {
+  return literal ? runInNewContext(`(${literal})`, context) : {};
 }
 
 function inferCityCode(aliases) {
@@ -105,9 +117,10 @@ function inferCityCode(aliases) {
 }
 
 function buildRuntimeCityGameplaySeeds(source) {
-  const buildSpecs = evaluateObjectLiteral(extractObjectLiteral(source, "const BUILD_SPECS"));
-  const cityAliases = evaluateObjectLiteral(extractObjectLiteral(source, "const CITY_EDITOR_ALIASES"));
-  const cityMap = evaluateObjectLiteral(extractObjectLiteral(source, "const CITY_MAP"));
+  const evalContext = createRuntimeContentEvalContext();
+  const buildSpecs = evaluateObjectLiteral(extractObjectLiteral(source, "const BUILD_SPECS"), evalContext);
+  const cityAliases = evaluateObjectLiteral(extractObjectLiteral(source, "const CITY_EDITOR_ALIASES"), evalContext);
+  const cityMap = evaluateObjectLiteral(extractObjectLiteral(source, "const CITY_MAP"), evalContext);
   const seeds = {};
 
   Object.values(buildSpecs).forEach((spec) => {

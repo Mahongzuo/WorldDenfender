@@ -276,7 +276,7 @@ export function editorLevelToRuntimeMap(level: EditorLevel, mode: GameMode): Map
   const boardImageLayers = sanitizeBoardImageLayers(editorMap.boardImageLayers);
   const levelAudio = sanitizeLevelMapAudioFromEditor(editorMap.levelAudio);
 
-  const presetGeo = resolvePresetGeoForLevel(level);
+  const levelGeo = resolveEditorLevelGeo(level);
 
   const boardUrlRaw = typeof theme.boardTextureUrl === "string" ? theme.boardTextureUrl.trim() : "";
   const boardTextureUrl = boardUrlRaw ? boardUrlRaw : undefined;
@@ -287,7 +287,7 @@ export function editorLevelToRuntimeMap(level: EditorLevel, mode: GameMode): Map
     description: level.description || "由关卡编辑器同步生成的运行时地图。",
     cols: sourceCols,
     rows: sourceRows,
-    geo: level.map?.geo ?? presetGeo ?? resolveEditorLevelGeo(level),
+    geo: levelGeo,
     theme: {
       ground: parseEditorColor(theme.ground, mode === "explore" ? 0x4e7578 : 0x5a7d82),
       groundAlt: parseEditorColor(theme.groundAlt, mode === "explore" ? 0x44686c : 0x4f7178),

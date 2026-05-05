@@ -909,7 +909,6 @@ export function createPreview(options) {
               polygonOffset: true,
               polygonOffsetFactor: -1.35,
               polygonOffsetUnits: -1.35,
-              clipping: true,
               clippingPlanes: clipPlanes,
               clipIntersection: false,
             }),

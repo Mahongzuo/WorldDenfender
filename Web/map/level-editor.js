@@ -403,7 +403,41 @@ import { renderMap as _renderMap } from './editor/map-render.js';
         bumpShellLayoutDependentUi();
     }
 
+    function prefetchCesiumIonTokenForEditor() {
+        try {
+            if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_CESIUM_ION_TOKEN) {
+                var injected = String(import.meta.env.VITE_CESIUM_ION_TOKEN).trim();
+                if (injected) {
+                    window.CESIUM_ION_TOKEN = injected;
+                    return;
+                }
+            }
+        } catch (_err) {}
+        var cached = String(
+            window.CESIUM_ION_TOKEN || window.localStorage.getItem('earth-guardian.cesiumIonToken') || ''
+        ).trim();
+        if (cached) {
+            window.CESIUM_ION_TOKEN = cached;
+            return;
+        }
+        fetch('/api/app-config', { cache: 'no-store' })
+            .then(function (res) {
+                return res && res.ok ? res.json() : null;
+            })
+            .then(function (cfg) {
+                var token = cfg && cfg.cesiumIonToken ? String(cfg.cesiumIonToken).trim() : '';
+                if (token) {
+                    window.CESIUM_ION_TOKEN = token;
+                    try {
+                        window.localStorage.setItem('earth-guardian.cesiumIonToken', token);
+                    } catch (_ignore) {}
+                }
+            })
+            .catch(function () {});
+    }
+
     function init() {
+        prefetchCesiumIonTokenForEditor();
         initGeoMappingToggle();
         readShellCollapsedPrefsFromStorage();
         bindEvents();
@@ -1615,9 +1649,15 @@ import { renderMap as _renderMap } from './editor/map-render.js';
             if (cityByName && cityByName.geo) return cityByName.geo;
         }
         var countryCode = String(level.location && level.location.countryCode || '').replace(/^country-/i, '').toUpperCase();
+        var levelCountryCode = String(level.id || '').replace(/^country-/i, '').toUpperCase();
         var countryName = String(level.location && (level.location.countryName || level.location.regionLabel) || level.name || '').replace(/ · .+$/, '');
         var country = regionSources.countries.find(function (item) {
-            return String(item.code || '').toUpperCase() === countryCode || String(item.name || '').toLowerCase() === countryName.toLowerCase();
+            var code = String(item.code || '').toUpperCase();
+            return (
+                code === countryCode ||
+                code === levelCountryCode ||
+                String(item.name || '').toLowerCase() === countryName.toLowerCase()
+            );
         });
         return country && country.geo ? country.geo : null;
     }

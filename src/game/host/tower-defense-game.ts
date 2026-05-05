@@ -680,14 +680,14 @@ export class TowerDefenseGame {
   }
 
   private resolveCurrentEditorLevelId(): string {
-    if (this.requestedLevelId) {
-      return this.requestedLevelId;
-    }
-
     const mapId = this.currentMap().id;
     const stripped = mapId.replace(/-(defense|explore)$/u, "");
     if (stripped !== mapId) {
       return stripped;
+    }
+
+    if (this.requestedLevelId) {
+      return this.requestedLevelId;
     }
 
     if (this.currentCity === "beijing") {
