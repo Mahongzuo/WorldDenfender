@@ -3,18 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <!-- Three.js addons 内部使用 import … from 'three'，必须用 import map 解析裸模块名 -->
+    <!-- Three / 3d-tiles-renderer：走 /eg-vendor/（Vite 从 node_modules 提供，与 package.json 一致），避免 CDN 断开导致预览无法加载 -->
     <script type="importmap">
     {
       "imports": {
-        "three": "https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.module.js",
-        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/",
-        "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/",
-        "3d-tiles-renderer": "https://cdn.jsdelivr.net/npm/3d-tiles-renderer@0.4.24/build/index.js",
-        "3d-tiles-renderer/core": "https://cdn.jsdelivr.net/npm/3d-tiles-renderer@0.4.24/build/index.core.js",
-        "3d-tiles-renderer/core/plugins": "https://cdn.jsdelivr.net/npm/3d-tiles-renderer@0.4.24/build/index.core-plugins.js",
-        "3d-tiles-renderer/three": "https://cdn.jsdelivr.net/npm/3d-tiles-renderer@0.4.24/build/index.three.js",
-        "3d-tiles-renderer/three/plugins": "https://cdn.jsdelivr.net/npm/3d-tiles-renderer@0.4.24/build/index.three-plugins.js"
+        "three": "/eg-vendor/three/build/three.module.js",
+        "three/addons/": "/eg-vendor/three/examples/jsm/",
+        "three/examples/jsm/": "/eg-vendor/three/examples/jsm/",
+        "3d-tiles-renderer": "/eg-vendor/3d-tiles-renderer/build/index.js",
+        "3d-tiles-renderer/core": "/eg-vendor/3d-tiles-renderer/build/index.core.js",
+        "3d-tiles-renderer/core/plugins": "/eg-vendor/3d-tiles-renderer/build/index.core-plugins.js",
+        "3d-tiles-renderer/three": "/eg-vendor/3d-tiles-renderer/build/index.three.js",
+        "3d-tiles-renderer/three/plugins": "/eg-vendor/3d-tiles-renderer/build/index.three-plugins.js"
       }
     }
     </script>

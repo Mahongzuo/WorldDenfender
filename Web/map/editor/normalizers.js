@@ -73,7 +73,7 @@ export function normalizeLocation(source) {
     var location = source.location && typeof source.location === 'object' ? source.location : {};
     var legacyRegion = String(source.region || '');
     var parts = splitRegion(legacyRegion);
-    return {
+    var out = {
         countryCode: String(location.countryCode || inferCountryCode(parts.country) || ''),
         countryName: String(location.countryName || parts.country || legacyRegion || '未设置国家'),
         cityCode: String(location.cityCode || ''),
@@ -81,6 +81,10 @@ export function normalizeLocation(source) {
         regionLabel: String(location.regionLabel || legacyRegion || ''),
         source: String(location.source || 'legacy')
     };
+    if (location.geo && typeof location.geo === 'object') {
+        out.geo = normalizeGeoConfig(location.geo);
+    }
+    return out;
 }
 
 export function normalizeEnvironment(environment) {
@@ -1074,7 +1078,18 @@ export function normalizeMap(map, seed) {
         normalized.grid.rows = clamp(Number(source.grid.rows) || DEFAULT_GRID_ROWS, 8, 80);
         normalized.grid.tileSize = clamp(Number(source.grid.tileSize) || DEFAULT_TILE_SIZE, 1, 10);
     }
-    normalized.geo = normalizeGeoConfig(source.geo);
+    var geoFromMap = normalizeGeoConfig(source.geo);
+    var mapGeoUsable =
+        geoFromMap.enabled &&
+        Number.isFinite(geoFromMap.center.lat) &&
+        Number.isFinite(geoFromMap.center.lon) &&
+        !(geoFromMap.center.lat === 0 && geoFromMap.center.lon === 0);
+    var rawLocGeo = seed && seed.location && seed.location.geo;
+    if (!mapGeoUsable && rawLocGeo && typeof rawLocGeo === 'object') {
+        normalized.geo = normalizeGeoConfig(rawLocGeo);
+    } else {
+        normalized.geo = geoFromMap;
+    }
     normalized.theme = normalizeTheme(source.theme);
     normalized.terrain = Array.isArray(source.terrain) ? source.terrain.map(normalizeCell) : [];
     normalized.roads = normalizeCells(source.roads || source.path || []);

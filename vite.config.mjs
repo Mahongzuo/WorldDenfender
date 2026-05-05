@@ -236,6 +236,78 @@ async function collectGameModelEntries(absRoot, publicFolder) {
   return out;
 }
 
+const threePackageRoot = path.resolve(__dirname, "node_modules", "three");
+const tilesRendererBuildRoot = path.resolve(__dirname, "node_modules", "3d-tiles-renderer", "build");
+
+function contentTypeForVendorFile(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === ".js" || ext === ".mjs") return "application/javascript; charset=utf-8";
+  if (ext === ".json" || ext === ".map") return "application/json; charset=utf-8";
+  if (ext === ".wasm") return "application/wasm";
+  return "application/octet-stream";
+}
+
+/** 关卡编辑器预览：从 node_modules 提供 3D 依赖，避免 import map 走 CDN 时被断开/拦截 */
+function editorPreviewVendorPlugin() {
+  return {
+    name: "editor-preview-vendor",
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        try {
+          const pathname = (req.url || "").split("?")[0];
+          let absPath = "";
+          if (pathname.startsWith("/eg-vendor/three/build/")) {
+            const rel = pathname.slice("/eg-vendor/three/build/".length);
+            if (rel.includes("..")) return next();
+            absPath = path.join(threePackageRoot, "build", decodeURIComponent(rel));
+          } else if (pathname.startsWith("/eg-vendor/three/examples/jsm/")) {
+            const rel = pathname.slice("/eg-vendor/three/examples/jsm/".length);
+            if (rel.includes("..")) return next();
+            absPath = path.join(threePackageRoot, "examples", "jsm", decodeURIComponent(rel));
+          } else if (pathname.startsWith("/eg-vendor/3d-tiles-renderer/build/")) {
+            const rel = pathname.slice("/eg-vendor/3d-tiles-renderer/build/".length);
+            if (rel.includes("..")) return next();
+            absPath = path.join(tilesRendererBuildRoot, decodeURIComponent(rel));
+          } else {
+            return next();
+          }
+          let st;
+          try {
+            st = statSync(absPath);
+          } catch {
+            return next();
+          }
+          if (!st.isFile()) return next();
+          res.statusCode = 200;
+          res.setHeader("Content-Type", contentTypeForVendorFile(absPath));
+          res.setHeader("Cache-Control", "public, max-age=86400");
+          const stream = createReadStream(absPath);
+          stream.on("error", () => {
+            if (!res.writableEnded) next();
+          });
+          stream.pipe(res);
+        } catch {
+          next();
+        }
+      });
+    },
+    async closeBundle() {
+      const distRoot = path.resolve(__dirname, "dist");
+      if (!existsSync(distRoot)) return;
+      if (!existsSync(threePackageRoot) || !existsSync(tilesRendererBuildRoot)) return;
+      const destThreeBuild = path.join(distRoot, "eg-vendor", "three", "build");
+      const destThreeJsm = path.join(distRoot, "eg-vendor", "three", "examples", "jsm");
+      const destTiles = path.join(distRoot, "eg-vendor", "3d-tiles-renderer", "build");
+      await mkdir(destThreeBuild, { recursive: true });
+      await cp(path.join(threePackageRoot, "build"), destThreeBuild, { recursive: true });
+      await mkdir(path.dirname(destThreeJsm), { recursive: true });
+      await cp(path.join(threePackageRoot, "examples", "jsm"), destThreeJsm, { recursive: true });
+      await mkdir(path.dirname(destTiles), { recursive: true });
+      await cp(tilesRendererBuildRoot, destTiles, { recursive: true });
+    },
+  };
+}
+
 export default defineConfig({
   /** Windows Hyper-V/WSL 等常为 TCP 预留 5097–5196，在此期间默认 5173 会 EACCES */
   server: {
@@ -243,6 +315,7 @@ export default defineConfig({
     port: 5200,
   },
   plugins: [
+    editorPreviewVendorPlugin(),
     {
       name: "redirect-root",
       configureServer(server) {

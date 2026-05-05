@@ -1,5 +1,5 @@
 /**
- * Three.js · 关卡场景预览 — 需在 level-editor.html 中配置 import map，addons 内含 `from "three"` 裸引用。
+ * Three.js · 关卡场景预览 — level-editor.html 的 import map 将 `three` / `3d-tiles-renderer` 指向 /eg-vendor/（Vite 从 node_modules 提供）。
  */
 import * as THREE from 'three';
 import { TilesRenderer } from '3d-tiles-renderer/three';
@@ -162,13 +162,13 @@ export function createPreview(options) {
   rootGroup.add(geoGroup, terrainGroup, actorsHolder);
   scene.add(rootGroup);
 
-  placementHud = document.createElement('div');
+  var placementHud = document.createElement('div');
   placementHud.className = 'preview-placement-hud panel-surface';
   placementHud.style.display = 'none';
   placementHud.setAttribute('aria-hidden', 'true');
   host.appendChild(placementHud);
 
-  placementGhost = new THREE.Mesh(
+  var placementGhost = new THREE.Mesh(
     new THREE.BoxGeometry(1, 1, 1),
     new THREE.MeshBasicMaterial({
       color: 0x5a9088,
@@ -181,7 +181,7 @@ export function createPreview(options) {
   placementGhost.renderOrder = 50;
   scene.add(placementGhost);
 
-  onWindowDragEndForPreview = function () {
+  var onWindowDragEndForPreview = function () {
     hidePlacementPreview();
     if (typeof window !== 'undefined') window.__egCatalogDragMeta = null;
   };
@@ -202,10 +202,6 @@ export function createPreview(options) {
 
   /** @type {string|null} */
   var selectionId = null;
-
-  var placementHud = null;
-  var placementGhost = null;
-  var onWindowDragEndForPreview = null;
 
   /** @type {THREE.WebGLRenderer & { __raf?: number }} */
   var rafHook = renderer;

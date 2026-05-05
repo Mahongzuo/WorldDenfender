@@ -3620,7 +3620,14 @@ import { renderMap as _renderMap } from './editor/map-render.js';
 
     function renderGeoFields(level) {
         if (!refs.fieldGeoEnabled) return;
-        var geo = normalizeGeoConfig(level.map.geo);
+        var mapGeo = normalizeGeoConfig(level.map.geo);
+        var locGeo = level.location && level.location.geo ? normalizeGeoConfig(level.location.geo) : null;
+        var mapUsable =
+            mapGeo.enabled &&
+            Number.isFinite(mapGeo.center.lat) &&
+            Number.isFinite(mapGeo.center.lon) &&
+            !(mapGeo.center.lat === 0 && mapGeo.center.lon === 0);
+        var geo = mapUsable ? mapGeo : locGeo || mapGeo;
         refs.fieldGeoEnabled.value = geo.enabled ? 'true' : 'false';
         refs.fieldGeoLat.value = String(geo.center.lat || '');
         refs.fieldGeoLon.value = String(geo.center.lon || '');
