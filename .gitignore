@@ -4,3 +4,6 @@
 
 dist/
 node_modules/
+
+# 本地 IDE 配置，不进入版本库
+.cursor/
