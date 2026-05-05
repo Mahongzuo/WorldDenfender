@@ -5,7 +5,17 @@ import { clone as skeletonClone } from "three/examples/jsm/utils/SkeletonUtils.j
 
 import { arrayBufferToBase64 } from "../core/browser-utils";
 import { clamp } from "../core/runtime-grid";
-import type { BuildId, BuildSpec, GameAssetConfig, ModelTarget, PlayerExploreTransform } from "../core/types";
+import type {
+  BuildId,
+  BuildSpec,
+  GameAssetConfig,
+  GlobalGameAudioConfig,
+  GlobalScreenUiConfig,
+  ModelTarget,
+  PlayerExploreTransform,
+} from "../core/types";
+
+import { sanitizeGlobalGameAudioFromEditor } from "../audio/game-audio";
 
 export interface AssetLoaderDependencies {
   gltfLoader: GLTFLoader;
@@ -23,6 +33,8 @@ export interface LoadedAssetConfig {
   customPlayerModel: THREE.Group | null;
   customAnimations: Record<string, THREE.AnimationClip>;
   playerExploreTransform: PlayerExploreTransform;
+  globalAudio: GlobalGameAudioConfig;
+  globalScreenUi: GlobalScreenUiConfig;
 }
 
 export interface LoadedCustomModel {
@@ -65,7 +77,24 @@ export async function loadPersistedGameAssetConfig(
     customPlayerModel: customPlayerModelUrl ? await loadModelFromUrl(dependencies, customPlayerModelUrl) : null,
     customAnimations: await loadCustomAnimationsFromEditorUrls(dependencies, customAnimationUrls),
     playerExploreTransform: mergePlayerExploreTransform(cfg.playerExploreTransform),
+    globalAudio: sanitizeGlobalGameAudioFromEditor(cfg.globalAudio) ?? {},
+    globalScreenUi: sanitizeGlobalScreenUiFromEditor(cfg.globalScreenUi) ?? {},
   };
+}
+
+function sanitizeGlobalScreenUiFromEditor(raw: unknown): GlobalScreenUiConfig | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const src = raw as Record<string, unknown>;
+  const out: GlobalScreenUiConfig = {};
+  const su = String(src.startScreenBackgroundUrl ?? "").trim();
+  const lu = String(src.levelSelectBackgroundUrl ?? "").trim();
+  const lbg = String(src.levelSelectBackgroundColor ?? "").trim();
+  const lac = String(src.levelSelectAccentColor ?? "").trim();
+  if (su) out.startScreenBackgroundUrl = su;
+  if (lu) out.levelSelectBackgroundUrl = lu;
+  if (lbg) out.levelSelectBackgroundColor = lbg;
+  if (lac) out.levelSelectAccentColor = lac;
+  return Object.keys(out).length ? out : undefined;
 }
 
 export function createDefaultModelScales(buildSpecs: Record<BuildId, BuildSpec>): Partial<Record<ModelTarget, number>> {

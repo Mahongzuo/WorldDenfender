@@ -97,7 +97,8 @@ textarea:focus {
     z-index: 1;
     display: grid;
     --shell-sidebar-rail: 52px;
-    grid-template-columns: minmax(260px, 320px) minmax(560px, 1fr) minmax(320px, 390px);
+    --shell-inspector-w: 380px;
+    grid-template-columns: minmax(260px, 320px) minmax(480px, 1fr) var(--shell-inspector-w);
     grid-template-rows: auto minmax(0, 1fr);
     gap: 16px;
     height: 100vh;
@@ -106,7 +107,7 @@ textarea:focus {
 }
 
 .engine-shell.shell-left-collapsed {
-    grid-template-columns: var(--shell-sidebar-rail) minmax(560px, 1fr) minmax(320px, 390px);
+    grid-template-columns: var(--shell-sidebar-rail) minmax(480px, 1fr) var(--shell-inspector-w);
 }
 
 .engine-shell.shell-right-collapsed {
@@ -278,7 +279,7 @@ textarea:focus {
     column-gap: 18px;
     row-gap: 12px;
     padding: 18px 20px;
-    /* 高于侧栏/主栏 panel-surface（含 backdrop-filter）的层叠上下文，避免顶栏下拉菜单被挡住 */
+    /* ????/?? panel-surface?? backdrop-filter??????????????????? */
     position: relative;
     z-index: 120;
 }
@@ -624,7 +625,7 @@ textarea:focus {
     background: rgba(255, 255, 255, 0.085);
 }
 
-/* 顶栏「保存」：与 .action-button 同权重但写在其后，避免灰底覆盖；配色同下拉强调项 */
+/* ???????? .action-button ???????????????????????? */
 .action-button.topbar-save-button {
     min-height: 34px;
     padding: 0 16px;
@@ -708,7 +709,7 @@ textarea:focus {
     min-height: 100%;
 }
 
-/* 关卡主区域：中间栏需可纵向分配高度，避免预览+项目模型被挤出视口且无法滚动 */
+/* ??????????????????????+?????????????? */
 #levelWorkbench.workbench-surface {
     display: flex;
     flex-direction: column;
@@ -726,11 +727,210 @@ textarea:focus {
     gap: 14px;
 }
 
+#globalSettingsWorkbench.global-settings-workbench {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-height: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
+}
+
+.global-settings-workbench__header {
+    flex-shrink: 0;
+}
+
+.global-settings-workbench__body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    padding: 16px 18px 24px;
+}
+
+.global-settings-workbench__body .form-grid.two {
+    max-width: 1100px;
+}
+
+.global-settings-workbench__body .global-cutscene-table {
+    max-width: 1200px;
+}
+
+.global-settings-subtabs {
+    margin-bottom: 12px;
+}
+
+.global-settings-subtabs .mode-ribbon-inner {
+    flex-wrap: wrap;
+}
+
+.global-settings-tab-panel {
+    min-height: 120px;
+}
+
+/* ????????????? + ? Tab?????????? */
+#themeWorkbench.theme-workbench {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-height: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
+}
+
+.theme-workbench__header {
+    flex-shrink: 0;
+}
+
+.theme-workbench__body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    padding: 16px 18px 24px;
+}
+
+.theme-settings-tab-panel {
+    min-height: 120px;
+}
+
+.theme-color-row {
+    display: flex;
+    align-items: stretch;
+    gap: 10px;
+    margin-top: 6px;
+}
+
+.theme-color-swatch {
+    flex: 0 0 44px;
+    width: 44px;
+    min-height: 36px;
+    border-radius: 8px;
+    border: 2px solid var(--border, #354);
+    padding: 0;
+    cursor: pointer;
+    background: #333;
+    box-sizing: border-box;
+}
+
+.theme-color-swatch:focus-visible {
+    outline: 2px solid var(--accent, #8fb8ae);
+    outline-offset: 2px;
+}
+
+.theme-color-input-native {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 36px;
+    padding: 0;
+    border: 1px solid var(--border, #354);
+    border-radius: 6px;
+    background: transparent;
+    cursor: pointer;
+}
+
+.global-level-manage-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    border-radius: 8px;
+}
+
+.global-level-manage-row__main {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.global-level-manage-row__actions {
+    display: flex;
+    flex-shrink: 0;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.global-cutscene-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.global-cutscene-table th,
+.global-cutscene-table td {
+    border: 1px solid var(--border, #354);
+    padding: 8px 10px;
+    text-align: left;
+}
+
+.global-cutscene-table th {
+    opacity: 0.85;
+    font-weight: 600;
+}
+
 .viewport-panel {
     display: flex;
     flex-direction: column;
     gap: 12px;
     overflow: hidden;
+    position: relative;
+}
+
+body.editor-shell--resizing {
+    cursor: col-resize;
+    user-select: none;
+}
+
+.viewport-panel__resize-grip {
+    display: none;
+    position: absolute;
+    top: 0;
+    right: 0;
+    z-index: 40;
+    width: 10px;
+    margin-right: -5px;
+    height: 100%;
+    cursor: col-resize;
+    border-radius: 6px;
+    background: transparent;
+    touch-action: none;
+}
+
+.viewport-panel__resize-grip:hover,
+.viewport-panel__resize-grip.is-dragging {
+    background: rgba(143, 184, 174, 0.22);
+}
+
+@media (min-width: 1181px) {
+    .viewport-panel__resize-grip {
+        display: block;
+    }
+
+    .engine-shell.shell-right-collapsed .viewport-panel__resize-grip {
+        display: none !important;
+    }
+}
+
+.audio-vol-field .audio-vol-field__label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.audio-vol-value {
+    font-variant-numeric: tabular-nums;
+    color: var(--editor-accent);
+    font-size: 12px;
+}
+
+input[type="range"].audio-volume-slider {
+    width: 100%;
+    height: 6px;
+    margin: 4px 0 0;
+    accent-color: var(--editor-accent);
+    cursor: pointer;
 }
 
 .panel-head,
@@ -878,7 +1078,7 @@ textarea:focus {
     overscroll-behavior: contain;
 }
 
-/* 关卡预览：整块舞台不纵向滚动；仅底部「项目模型」纵向滚动（滚轮缩放主视口不致带动布局） */
+/* ??????????????????????????????????????????? */
 .map-stage-wrap.map-stage-wrap--level-preview {
     overflow-y: hidden;
     overscroll-behavior-y: contain;
@@ -1001,7 +1201,7 @@ textarea:focus {
 
 .preview-split {
     /*
-     * 横向：左侧 WebGL，右侧「关卡内容浏览器」；项目模型在浮动面板中。
+     * ????? WebGL????????????????????????
      */
     position: relative;
     display: flex;
@@ -1388,7 +1588,7 @@ textarea:focus {
     text-overflow: ellipsis;
 }
 
-/* ── 浮动：项目模型内容浏览器（可拖拽移动、右下角缩放） ── */
+/* ?? ????????????????????????? ?? */
 .content-browser-float {
     position: fixed;
     z-index: 960;
@@ -1675,14 +1875,14 @@ textarea:focus {
     gap: 1px;
 }
 
-/* 底板层独占文档流高度，整块棋盘以此为尺寸基准 */
+/* ?????????????????????? */
 .map-grid-cells--floor {
     position: relative;
     z-index: 1;
 }
 
 /*
- * 必须与配图层一样脱离文档流铺满 stack，否则会排在底板下方，导致标记全部掉到棋盘外面。
+ * ??????????????? stack????????????????????????
  */
 .map-grid-cells--markers {
     position: absolute;
@@ -1691,7 +1891,7 @@ textarea:focus {
     pointer-events: none;
 }
 
-/* 塔防敌军路线 / 探索路线：铺在配图之上、标记手柄之下 */
+/* ?????? / ?????????????????? */
 .map-grid-cells--path-overlay {
     position: absolute;
     inset: 0;
@@ -1823,7 +2023,7 @@ textarea:focus {
     outline: 1px solid rgba(34, 200, 100, 0.6);
 }
 
-/* 济南实景棋盘底图上默认 cell 背景会盖住安全区色，提高对比便于即时看到落点 */
+/* ??????????? cell ?????????????????????? */
 .map-grid--jinan-texture .map-cell.safe-zone {
     background: rgba(34, 255, 140, 0.45);
     box-shadow:
@@ -1963,7 +2163,7 @@ textarea:focus {
     min-width: min(320px, 100%);
 }
 
-/* 玩法分类：五个标签同一行，避免「技能」单独换行 */
+/* ??????????????????????? */
 .gameplay-ribbon .mode-ribbon-inner:first-child {
     flex-wrap: nowrap;
     justify-content: flex-start;
@@ -1979,7 +2179,7 @@ textarea:focus {
     white-space: nowrap;
 }
 
-/* 模型分类：六个标签同一行（窄屏横向滚动） */
+/* ???????????????????? */
 .model-ribbon .mode-ribbon-inner:first-child {
     flex-wrap: nowrap;
     justify-content: flex-start;
@@ -2002,7 +2202,7 @@ textarea:focus {
     color: var(--editor-muted);
 }
 
-/* 玩法库顶栏：五个统计同一行，字号缩小 */
+/* ?????????????????? */
 .gameplay-strip .overview-stats {
     flex: 0 1 auto;
     min-width: 0;
@@ -2034,7 +2234,7 @@ textarea:focus {
     line-height: 1.25;
 }
 
-/* 关卡编辑器顶栏统计：与玩法库同风格的紧凑单行 */
+/* ?????????????????????? */
 #overviewStats.overview-stats {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -2060,7 +2260,7 @@ textarea:focus {
     line-height: 1.25;
 }
 
-/* 模型库顶栏：6 类统计同一行（窄屏横向滚动） */
+/* ??????6 ?????????????? */
 .model-strip .overview-stats {
     flex: 0 1 auto;
     min-width: 0;
@@ -2092,7 +2292,7 @@ textarea:focus {
     line-height: 1.25;
 }
 
-/* 玩法侧栏：资源数量一行展示 */
+/* ????????????? */
 .gameplay-inspector-counts {
     display: flex;
     flex-wrap: nowrap;
@@ -2142,7 +2342,7 @@ textarea:focus {
     min-height: 0;
 }
 
-/* 棋盘主题工作台只有一列表单，勿占用「列表窄栏」网格槽，应铺满中间主栏 */
+/* ?????????????????????????????????? */
 #themeWorkbench .gameplay-layout {
     grid-template-columns: minmax(0, 1fr);
 }
@@ -2151,12 +2351,12 @@ textarea:focus {
     max-width: none;
 }
 
-#themeWorkbench.workbench-surface {
+#themeWorkbench.workbench-surface:not(.theme-workbench) {
     min-height: 0;
     overflow: auto;
 }
 
-/* 模型编辑器：空分类下列表与预览区保留高度，减少切换分类时整页跳动 */
+/* ???????????????????????????????? */
 #modelWorkbench .gameplay-column-list .compact-list {
     min-height: 220px;
 }
@@ -3149,4 +3349,22 @@ label.game-asset-upload {
     .create-level-footer {
         flex-direction: column-reverse;
     }
+}
+
+/* ?????? ??????????? ???????????????????????????????????????????????????????????????????????????????????????????????????????????????????? */
+.wave-video-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    margin-top: 4px;
+}
+
+.wave-video-item {
+    position: relative;
+}
+
+.wv-upload-btn {
+    position: relative;
+    overflow: hidden;
+    cursor: pointer;
 }

@@ -1,4 +1,5 @@
 import { Buffer } from "node:buffer";
+import { exec, spawn } from "node:child_process";
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { cp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -344,6 +345,69 @@ export default defineConfig({
           }
         });
 
+        /** 在系统文件管理器中定位 public 下的文件（开发机本地体验） */
+        server.middlewares.use("/api/reveal-project-path", async (request, response) => {
+          if (request.method !== "POST") {
+            sendJson(response, 405, { error: "Method not allowed" });
+            return;
+          }
+          try {
+            const body = await readJsonBody(request);
+            const raw = String(body.projectPath ?? "")
+              .trim()
+              .replace(/\\/g, "/");
+            if (!raw || raw.includes("..")) {
+              sendJson(response, 400, { error: "Invalid path" });
+              return;
+            }
+            const cwd = process.cwd();
+            const publicRoot = path.resolve(cwd, "public");
+            const rel = raw.replace(/^\/+/, "");
+            if (!/^public\//i.test(rel)) {
+              sendJson(response, 400, { error: "Path must be under public/" });
+              return;
+            }
+            const relNorm = rel.split("/").join(path.sep);
+            const abs = path.normalize(path.resolve(cwd, relNorm));
+            const relFromPublic = path.relative(publicRoot, abs);
+            if (relFromPublic.startsWith("..") || path.isAbsolute(relFromPublic)) {
+              sendJson(response, 400, { error: "Path outside public/" });
+              return;
+            }
+            if (!existsSync(abs)) {
+              sendJson(response, 404, {
+                error: "File not found",
+                absolutePath: abs,
+              });
+              return;
+            }
+            const platform = process.platform;
+
+            /** Windows：explorer /select 必须写成 “/select,\"路径\””，且不宜用 execFile 等待退出（易判为失败） */
+            if (platform === "win32") {
+              const forCmd = abs.replace(/"/g, '""');
+              exec(`explorer.exe /select,"${forCmd}"`, { windowsHide: true }, () => {});
+            } else if (platform === "darwin") {
+              spawn("open", ["-R", abs], {
+                detached: true,
+                stdio: "ignore",
+                windowsHide: true,
+              }).unref();
+            } else {
+              spawn("xdg-open", [path.dirname(abs)], {
+                detached: true,
+                stdio: "ignore",
+                windowsHide: true,
+              }).unref();
+            }
+            sendJson(response, 200, { ok: true, absolutePath: abs });
+          } catch (error) {
+            sendJson(response, 500, {
+              error: error instanceof Error ? error.message : "reveal failed",
+            });
+          }
+        });
+
         server.middlewares.use("/api/game-models/catalog", async (request, response) => {
           if (request.method !== "GET") {
             sendJson(response, 405, { error: "Method not allowed" });
@@ -466,6 +530,32 @@ export default defineConfig({
           } catch (error) {
             sendJson(response, 500, {
               error: error instanceof Error ? error.message : "failed to save level editor config",
+            });
+          }
+        });
+
+        /** 通用视频上传：存到 public/uploads/videos/，返回 { url } */
+        server.middlewares.use("/api/upload-video", async (request, response) => {
+          if (request.method !== "POST") {
+            sendJson(response, 405, { error: "Method not allowed" });
+            return;
+          }
+          try {
+            const body = await readJsonBody(request);
+            const originalName = sanitizeName(String(body.name ?? "video.mp4"));
+            const extension = path.extname(originalName) || ".mp4";
+            const basename = path.basename(originalName, extension);
+            const videoDir = path.join(uploadDir, "videos");
+            await mkdir(videoDir, { recursive: true });
+            const fileName = ensureUniqueFilename(videoDir, basename, extension.toLowerCase());
+            const writtenPath = path.join(videoDir, fileName);
+            await writeFile(writtenPath, Buffer.from(String(body.content ?? ""), "base64"));
+            const relPosix = path.relative(publicDir, writtenPath).split(path.sep).join("/");
+            const projectPath = `public/${relPosix}`;
+            sendJson(response, 200, { url: `/uploads/videos/${fileName}`, projectPath });
+          } catch (error) {
+            sendJson(response, 500, {
+              error: error instanceof Error ? error.message : "video upload failed",
             });
           }
         });

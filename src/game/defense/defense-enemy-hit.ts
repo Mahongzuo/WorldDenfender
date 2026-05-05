@@ -14,6 +14,7 @@ export interface DefenseEnemyDamagePipelineContext {
   addExplosion(center: THREE.Vector3, radius: number, color: number): void;
   showToast(message: string, critical?: boolean): void;
   visuals: EnemyDefenseVisuals;
+  onEnemyKilled?(enemy: Enemy): void;
 }
 
 export function applyDefenseEnemyDamage(ctx: DefenseEnemyDamagePipelineContext, enemy: Enemy, damage: number): void {
@@ -30,6 +31,8 @@ export function applyDefenseEnemyDamage(ctx: DefenseEnemyDamagePipelineContext, 
   if (enemy.hp > 0) {
     return;
   }
+
+  ctx.onEnemyKilled?.(enemy);
 
   if (enemy.blockedBy) {
     enemy.blockedBy.blockingEnemies = enemy.blockedBy.blockingEnemies.filter((e) => e !== enemy);

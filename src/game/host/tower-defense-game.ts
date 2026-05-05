@@ -11,6 +11,18 @@ import {
   prepareUploadedModel as normalizeUploadedModel,
   uploadModelFile as uploadPersistedModelFile,
 } from "../assets/asset-loading";
+import {
+  playDefenseEnemyKilled,
+  playExploreBasicAttack,
+  playExploreEnemyKilled,
+  playExplorePlayerHit,
+  playTowerBuild,
+  playTowerFire,
+  refreshBgmForMode,
+  setGameSessionActive,
+  setGlobalGameAudio,
+  setLevelAudioMaps,
+} from "../audio/game-audio";
 import { BuildingDefenseHud } from "../defense/building-defense-hud";
 import { EnemyDefenseVisuals } from "../defense/enemy-defense-visuals";
 import { BUILD_SPECS, CITY_MAP, GACHA_POOLS } from "../data/content";
@@ -81,6 +93,7 @@ import {
 } from "../rendering/scene-runtime";
 import { PlayerExploreAnimator } from "../explore/player-explore-animator";
 import { renderGameUiShell } from "../ui/ui-shell";
+import { playCutsceneIfPresent } from "../ui/cutscene-player";
 import { tickTowerDefenseCombat } from "../defense/tower-defense-combat";
 import { ToastController } from "../ui/toast-controller";
 import {
@@ -256,6 +269,8 @@ export class TowerDefenseGame {
   private spawnRemaining = 0;
   private spawnCooldown = 0;
   private waveActive = false;
+  /** true 时游戏逻辑暂停，等待过场视频播完或跳过 */
+  private cutsceneActive = false;
   private selectedBuilding: Building | null = null;
   private dropTimer = resolveExploreGameplay(undefined).moneyDropRespawnIntervalSec;
   private elapsed = 0;
@@ -636,7 +651,9 @@ export class TowerDefenseGame {
         this.defenseMapIndex = cityInfo.defenseIndex;
         this.exploreMapIndex = cityInfo.exploreIndex;
       }
+      setGameSessionActive(true);
       this.loadDefenseMap(this.defenseMapIndex, true);
+      await this.playIntroVideoCutsceneIfPresent();
       this.saveGame(false);
       this.showToast("\u65b0\u6e38\u620f\u5df2\u5f00\u59cb", true);
     } catch (error) {
@@ -757,6 +774,7 @@ export class TowerDefenseGame {
       } else {
         await this.loadDefaultPlayer();
       }
+      setGameSessionActive(true);
       this.loadDefenseMap(data.defenseMapIndex ?? 0, true);
       this.baseHp = data.baseHp ?? INITIAL_BASE_HP;
       this.wave = data.wave ?? 1;
@@ -822,6 +840,7 @@ export class TowerDefenseGame {
 
       this.modelCustomization.assignFromLoadedEditorBundle(loaded);
       this.playerExploreTransform = loaded.playerExploreTransform;
+      setGlobalGameAudio(loaded.globalAudio);
     } catch (error) {
       console.warn("[GameAssetConfig]", error);
     }
@@ -1074,10 +1093,15 @@ export class TowerDefenseGame {
       },
       showToast: (text, important) => this.showToast(text, important),
       damageExplorePlayer: (amount) => this.applyExplorePlayerDamage(amount),
+      onExploreBasicAttackFired: () => playExploreBasicAttack(),
+      onExploreEnemyKilled: () => playExploreEnemyKilled(),
     };
   }
 
   private applyExplorePlayerDamage(amount: number): void {
+    if (amount > 0) {
+      playExplorePlayerHit();
+    }
     this.exploreProgress.hp = Math.max(0, this.exploreProgress.hp - amount);
     if (this.exploreProgress.hp <= 0) {
       this.triggerGameOver("explore");
@@ -1411,6 +1435,13 @@ export class TowerDefenseGame {
     }
   }
 
+  private syncLevelAudioFromMaps(): void {
+    const defMap = MAPS[this.defenseMapIndex];
+    const expMap = EXPLORE_MAPS[this.exploreMapIndex];
+    setLevelAudioMaps({ defense: defMap?.levelAudio, explore: expMap?.levelAudio });
+    refreshBgmForMode(this.mode);
+  }
+
   private loadMap(index: number): void {
     if (this.mode === "explore") {
       this.loadExploreMap(index, true);
@@ -1451,6 +1482,7 @@ export class TowerDefenseGame {
     }
     this.showToast(`\u5df2\u52a0\u8f7d\u5730\u56fe\uff1a${map.name}`);
     this.updateUi();
+    this.syncLevelAudioFromMaps();
   }
 
   private resolveCurrentExploreGameplay(): ResolvedExploreGameplay {
@@ -1503,6 +1535,7 @@ export class TowerDefenseGame {
       this.showToast(`\u5df2\u8fdb\u5165\u63a2\u7d22\u5730\u56fe\uff1a${map.name}`);
     }
     this.updateUi();
+    this.syncLevelAudioFromMaps();
   }
 
   private showDefenseView(): void {
@@ -1774,6 +1807,7 @@ export class TowerDefenseGame {
     this.showToast(
       this.mode === "explore" ? "\u81ea\u7531\u63a2\u7d22\uff1a\u6218\u7ebf\u5728\u540e\u53f0\u7ee7\u7eed\u63a8\u8fdb" : "\u5854\u9632\u6a21\u5f0f\uff1a\u56de\u5230\u5b9e\u65f6\u6218\u7ebf",
     );
+    refreshBgmForMode(this.mode);
   }
 
   private toggleCameraMode(): void {
@@ -1826,6 +1860,7 @@ export class TowerDefenseGame {
     building.mesh.position.set(position.x, 0, position.z);
     this.buildings.push(building);
     this.buildGroup.add(building.mesh);
+    playTowerBuild();
     this.showToast(`\u5efa\u9020\u5b8c\u6210\uff1a${spec.name}`);
     this.updateHover();
   }
@@ -1906,7 +1941,7 @@ export class TowerDefenseGame {
     this.lastFrameTime = now;
     this.elapsed += dt;
 
-    if (this.gameStarted && !this.paused && !this.gameOverActive) {
+    if (this.gameStarted && !this.paused && !this.gameOverActive && !this.cutsceneActive) {
       this.updateDefense(dt);
       /** 对战进行中探索与塔防并行模拟（切视图也不断探索侧计时/战斗） */
       this.updateExplore(dt);
@@ -1965,12 +2000,38 @@ export class TowerDefenseGame {
         this.economy.addMoney(fx.amount);
       } else if (fx.kind === "toastWaveClearReward") {
         this.showToast(`\u6ce2\u6b21\u6e05\u7406\u5b8c\u6bd5\uff0c\u5956\u52b1 $${fx.reward}`);
+        this.scheduleWaveCutscene(fx.completedWave);
       } else if (fx.kind === "toastWaveBegins") {
         this.showToast(`\u7b2c ${fx.wave} \u6ce2\u5df2\u5f00\u59cb`, true);
       } else if (fx.kind === "spawnEnemy") {
         this.spawnEnemy();
       }
     }
+  }
+
+  /** 播放关卡开场视频（如已配置），期间 cutsceneActive=true 冻结游戏逻辑 */
+  private async playIntroVideoCutsceneIfPresent(): Promise<void> {
+    const cutscene = this.currentMap().cutscenes?.introVideo;
+    if (!cutscene?.url) return;
+    this.cutsceneActive = true;
+    try {
+      await playCutsceneIfPresent(cutscene);
+    } finally {
+      this.cutsceneActive = false;
+    }
+  }
+
+  /** 检查并播放指定波次结束后的过场视频 */
+  private scheduleWaveCutscene(completedWave: number): void {
+    if (this.cutsceneActive) return;
+    const waveVideos = this.currentMap().cutscenes?.waveVideos;
+    if (!waveVideos?.length) return;
+    const entry = waveVideos.find((wv) => wv.afterWave === completedWave);
+    if (!entry?.url) return;
+    this.cutsceneActive = true;
+    void playCutsceneIfPresent(entry).then(() => {
+      this.cutsceneActive = false;
+    });
   }
 
   private spawnEnemy(): void {
@@ -2020,6 +2081,7 @@ export class TowerDefenseGame {
       aimWorldCenter: (e) => this.enemyDefenseVisuals.aimWorldCenter(e),
       damageEnemy: (e, d) => this.damageEnemy(e, d),
       addBeam: (from, to, color) => this.addBeam(from, to, color),
+      onTowerFired: (b) => playTowerFire(b.spec.id, "defense"),
     });
   }
 
@@ -2030,6 +2092,7 @@ export class TowerDefenseGame {
       buildGroup: this.buildGroup,
       addExplosion: (c, r, col) => this.addExplosion(c, r, col),
       damageEnemy: (e, d) => this.damageEnemy(e, d),
+      onMineExploded: (m) => playTowerFire(m.spec.id, "defense"),
     });
   }
 
@@ -2062,6 +2125,7 @@ export class TowerDefenseGame {
         addExplosion: (center, radius, color) => this.addExplosion(center, radius, color),
         showToast: (message, critical) => this.showToast(message, critical),
         visuals: this.enemyDefenseVisuals,
+        onEnemyKilled: () => playDefenseEnemyKilled(),
       },
       enemy,
       damage,

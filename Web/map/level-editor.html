@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -46,6 +46,7 @@
                 <button class="workspace-button" data-workbench="gameplay">卡片/玩法编辑器</button>
                 <button class="workspace-button" data-workbench="model">模型编辑器</button>
                 <button class="workspace-button" data-workbench="theme">棋盘主题</button>
+                <button class="workspace-button" data-workbench="globalSettings">全局设置</button>
             </div>
 
             <div class="topbar-actions">
@@ -91,6 +92,7 @@
         </aside>
 
         <main class="viewport-panel panel-surface">
+            <div class="viewport-panel__resize-grip" id="viewportInspectorSplitter" title="拖动调整中间编辑区与右侧属性栏宽度" aria-hidden="true"></div>
             <section id="levelWorkbench" class="workbench-surface">
             <section class="level-strip level-strip--editor-toolbar">
                 <div class="level-strip-lead">
@@ -361,16 +363,23 @@
                 </section>
             </section>
 
-            <section id="themeWorkbench" class="workbench-surface view-hidden" aria-hidden="true">
-                <section class="level-strip model-strip">
+            <section id="themeWorkbench" class="workbench-surface theme-workbench view-hidden" aria-hidden="true">
+                <section class="level-strip model-strip theme-workbench__header">
                     <div>
                         <div class="eyebrow">Board Theme</div>
                         <h2 id="themeWorkbenchTitle">棋盘主题</h2>
-                        <p id="themeWorkbenchMeta">与主游戏 `map.theme` 同步：颜色、整块贴图、地理底板下半透明与悬停格参数均可编辑。</p>
+                        <p id="themeWorkbenchMeta">与主游戏 <code>map.theme</code> 同步。下方分「主题配色」与「过场视频」；过场与全局设置里为同一 <code>map.cutscenes</code> 数据。</p>
                     </div>
                 </section>
-                <section class="gameplay-layout">
-                    <div class="gameplay-column gameplay-column-editor panel-surface">
+                <div class="theme-workbench__body panel-surface">
+                    <div class="global-settings-subtabs mode-ribbon mode-ribbon--split" role="tablist" aria-label="棋盘主题分区" id="themeWorkbenchSubTabs">
+                        <div class="mode-ribbon-inner">
+                            <button type="button" class="mode-button secondary active" data-theme-workbench-tab="colors" role="tab" aria-selected="true">主题配色</button>
+                            <button type="button" class="mode-button secondary" data-theme-workbench-tab="cutscenes" role="tab" aria-selected="false">过场视频</button>
+                        </div>
+                    </div>
+
+                    <div id="themeTabPanelColors" class="theme-settings-tab-panel" data-theme-panel="colors">
                         <div class="panel-head panel-head-tight">
                             <div>
                                 <div class="eyebrow">Scope</div>
@@ -392,23 +401,72 @@
                         </div>
                         <form id="themeEditorForm" class="gameplay-form">
                             <div class="section-title-row"><h3>颜色</h3></div>
+                            <p class="section-hint">色块为当前颜色预览，点击色块打开系统调色板；右侧细条对接原生颜色控件。</p>
                             <div class="form-grid three">
-                                <label class="field-block"><span>主地面 ground</span><input id="themeGround" type="color" value="#5a7d82"></label>
-                                <label class="field-block"><span>交错格 groundAlt</span><input id="themeGroundAlt" type="color" value="#4f7178"></label>
-                                <label class="field-block"><span>路径 path / road</span><input id="themePath" type="color" value="#6f9288"></label>
-                                <label class="field-block"><span>障碍 obstacle</span><input id="themeObstacle" type="color" value="#5d6870"></label>
-                                <label class="field-block"><span>强调色 accent</span><input id="themeAccent" type="color" value="#8fb8ae"></label>
-                                <label class="field-block"><span>雾色 / 天空底色 fog</span><input id="themeFog" type="color" value="#445c60"></label>
-                                <label class="field-block"><span>悬停：可建造 hoverColorOk</span><input id="themeHoverOk" type="color" value="#6a988c"></label>
-                                <label class="field-block"><span>悬停：不可建 hoverColorBad</span><input id="themeHoverBad" type="color" value="#d87880"></label>
+                                <div class="field-block theme-color-field">
+                                    <span>主地面 ground</span>
+                                    <div class="theme-color-row">
+                                        <button type="button" class="theme-color-swatch" data-theme-swatch-for="themeGround" title="点击选择颜色" aria-label="主地面颜色"></button>
+                                        <input id="themeGround" class="theme-color-input-native" type="color" value="#5a7d82" aria-label="主地面 ground 原生选择器">
+                                    </div>
+                                </div>
+                                <div class="field-block theme-color-field">
+                                    <span>交错格 groundAlt</span>
+                                    <div class="theme-color-row">
+                                        <button type="button" class="theme-color-swatch" data-theme-swatch-for="themeGroundAlt" title="点击选择颜色" aria-label="交错格颜色"></button>
+                                        <input id="themeGroundAlt" class="theme-color-input-native" type="color" value="#4f7178" aria-label="交错格 groundAlt">
+                                    </div>
+                                </div>
+                                <div class="field-block theme-color-field">
+                                    <span>路径 path / road</span>
+                                    <div class="theme-color-row">
+                                        <button type="button" class="theme-color-swatch" data-theme-swatch-for="themePath" title="点击选择颜色" aria-label="路径颜色"></button>
+                                        <input id="themePath" class="theme-color-input-native" type="color" value="#6f9288" aria-label="路径 path">
+                                    </div>
+                                </div>
+                                <div class="field-block theme-color-field">
+                                    <span>障碍 obstacle</span>
+                                    <div class="theme-color-row">
+                                        <button type="button" class="theme-color-swatch" data-theme-swatch-for="themeObstacle" title="点击选择颜色" aria-label="障碍颜色"></button>
+                                        <input id="themeObstacle" class="theme-color-input-native" type="color" value="#5d6870" aria-label="障碍 obstacle">
+                                    </div>
+                                </div>
+                                <div class="field-block theme-color-field">
+                                    <span>强调色 accent</span>
+                                    <div class="theme-color-row">
+                                        <button type="button" class="theme-color-swatch" data-theme-swatch-for="themeAccent" title="点击选择颜色" aria-label="强调色"></button>
+                                        <input id="themeAccent" class="theme-color-input-native" type="color" value="#8fb8ae" aria-label="强调色 accent">
+                                    </div>
+                                </div>
+                                <div class="field-block theme-color-field">
+                                    <span>雾色 / 天空底色 fog</span>
+                                    <div class="theme-color-row">
+                                        <button type="button" class="theme-color-swatch" data-theme-swatch-for="themeFog" title="点击选择颜色" aria-label="雾色 fog"></button>
+                                        <input id="themeFog" class="theme-color-input-native" type="color" value="#445c60" aria-label="雾色 fog">
+                                    </div>
+                                </div>
+                                <div class="field-block theme-color-field">
+                                    <span>悬停：可建造 hoverColorOk</span>
+                                    <div class="theme-color-row">
+                                        <button type="button" class="theme-color-swatch" data-theme-swatch-for="themeHoverOk" title="点击选择颜色" aria-label="悬停可建颜色"></button>
+                                        <input id="themeHoverOk" class="theme-color-input-native" type="color" value="#6a988c" aria-label="悬停可建造">
+                                    </div>
+                                </div>
+                                <div class="field-block theme-color-field">
+                                    <span>悬停：不可建 hoverColorBad</span>
+                                    <div class="theme-color-row">
+                                        <button type="button" class="theme-color-swatch" data-theme-swatch-for="themeHoverBad" title="点击选择颜色" aria-label="悬停不可建颜色"></button>
+                                        <input id="themeHoverBad" class="theme-color-input-native" type="color" value="#d87880" aria-label="悬停不可建造">
+                                    </div>
+                                </div>
                             </div>
                             <label class="field-block">
                                 <span>整块棋盘贴图 URL（可选）</span>
                                 <input id="themeBoardTextureUrl" type="text" placeholder="留空=程序性格子；填如 /Arts/Maps/jinan_full_map.png">
                             </label>
-                            <p class="section-hint">设置贴图后使用与济南关卡相同的平面底板 + 路径高亮；未开启地理底板时生效。</p>
+                            <p class="section-hint">设置贴图后使用与默认城市关卡相同的平面底板 + 路径高亮；未开启地理底板时生效。</p>
                             <div class="section-title-row"><h3>透明度与地理底板</h3></div>
-                            <p class="section-hint">以下数值 0～1，对应 `map-runtime` 中半透明瓦片、承托板、网格线、路径光晕与塔防指针格子。</p>
+                            <p class="section-hint">以下数值 0～1，对应运行时半透明瓦片、承托板、网格线、路径光晕与塔防指针格子。</p>
                             <div class="form-grid three">
                                 <label class="field-block"><span>地理模式：格子瓦片 geoTileOpacity</span><input id="themeGeoTileOpacity" type="number" min="0" max="1" step="0.02" value="0.48"></label>
                                 <label class="field-block"><span>地理模式：路径格 geoPathOpacity</span><input id="themeGeoPathOpacity" type="number" min="0" max="1" step="0.02" value="0.92"></label>
@@ -421,7 +479,241 @@
                             </div>
                         </form>
                     </div>
+
+                    <div id="themeTabPanelCutscenes" class="theme-settings-tab-panel view-hidden" data-theme-panel="cutscenes" aria-hidden="true">
+                    <div class="theme-cutscene-stack" id="cutsceneEditorPanel">
+                        <div class="panel-head panel-head-tight">
+                            <div>
+                                <div class="eyebrow">Cutscenes</div>
+                                <h2>过场视频</h2>
+                            </div>
+                        </div>
+
+                        <div class="section-title-row"><h3>开场视频</h3></div>
+                        <p class="section-hint">关卡开始前全屏播放，右上角有跳过按钮；未上传则自动跳过。仅塔防模式生效。上传会把文件复制到本项目的 <code>public</code> 目录并写入可分享的 URL。</p>
+                        <div class="form-grid three" style="align-items:end;margin-bottom:8px;">
+                            <label class="game-asset-upload" style="flex:1;">
+                                上传开场视频
+                                <input type="file" id="introVideoFile" accept="video/mp4,video/webm,video/ogg,video/*">
+                            </label>
+                            <button type="button" class="mini-button" id="btnOpenIntroVideoLocation" disabled title="上传并保存到项目后可定位文件">打开视频保存位置</button>
+                            <button type="button" class="mini-button" id="btnClearIntroVideo" style="align-self:end;">清除</button>
+                        </div>
+                        <div id="introVideoInfo" class="section-hint" style="word-break:break-all;min-height:1.4em;"></div>
+                        <div class="form-grid one" style="margin-bottom:8px;">
+                            <label class="field-block">
+                                <span>开场视频标题（可选字幕）</span>
+                                <input type="text" id="introVideoTitle" placeholder="留空则不显示字幕">
+                            </label>
+                        </div>
+
+                        <div class="section-title-row">
+                            <h3>波次过场视频</h3>
+                            <button type="button" class="mini-button" id="btnAddWaveVideo">＋ 添加</button>
+                        </div>
+                        <p class="section-hint">设置在某波次结束后播放的视频；如未上传或波次无对应视频则自动跳过。</p>
+                        <div id="waveVideoList" class="wave-video-list"></div>
+                    </div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="globalSettingsWorkbench" class="workbench-surface global-settings-workbench view-hidden" aria-hidden="true">
+                <section class="level-strip model-strip global-settings-workbench__header">
+                    <div>
+                        <div class="eyebrow">Global Settings</div>
+                        <h2 id="globalSettingsHeroTitle">全局设置</h2>
+                        <p id="globalSettingsHeroDetail">使用下方主区域切换子模块并编辑；数据写入项目 JSON。可收起右侧 Inspector 栏以扩大工作区。</p>
+                    </div>
                 </section>
+                <div class="global-settings-workbench__body panel-surface">
+                <div class="global-settings-subtabs mode-ribbon mode-ribbon--split" role="tablist" aria-label="全局设置分区" id="globalSettingsSubTabs">
+                    <div class="mode-ribbon-inner">
+                        <button type="button" class="mode-button secondary active" data-global-tab="levels" role="tab" aria-selected="true">关卡管理</button>
+                        <button type="button" class="mode-button secondary" data-global-tab="cutscenes" role="tab" aria-selected="false">过场动画</button>
+                        <button type="button" class="mode-button secondary" data-global-tab="audio" role="tab" aria-selected="false">全局音效</button>
+                        <button type="button" class="mode-button secondary" data-global-tab="backgrounds" role="tab" aria-selected="false">背景图片</button>
+                    </div>
+                </div>
+
+                <div id="globalTabPanelLevels" class="global-settings-tab-panel" data-global-panel="levels">
+                    <section class="inspector-section">
+                        <h3>关卡管理</h3>
+                        <p class="section-hint">增删关卡写入项目 <code>levels</code>，与左侧关卡树一致。删除不可恢复，请先导出备份。</p>
+                        <button type="button" class="mini-button accent" id="btnGlobalOpenCreateLevel">新建关卡…</button>
+                        <div id="globalLevelsManageList" class="global-levels-manage-list"></div>
+                    </section>
+                </div>
+
+                <div id="globalTabPanelCutscenes" class="global-settings-tab-panel view-hidden" data-global-panel="cutscenes" aria-hidden="true">
+                    <section class="inspector-section">
+                        <h3>过场动画总览</h3>
+                        <p class="section-hint">与「棋盘主题」内各关的 <code>map.cutscenes</code> 为同一数据；此处汇总查看并在下方编辑任意关卡。</p>
+                        <div id="globalCutsceneOverview" class="global-cutscene-overview compact-list"></div>
+                    </section>
+                    <section class="inspector-section">
+                        <h3>编辑关卡过场</h3>
+                        <label class="field-block">
+                            <span>选择关卡</span>
+                            <select id="globalCutsceneLevelSelect" aria-label="要编辑过场视频的关卡"></select>
+                        </label>
+                        <div class="section-title-row"><h4>开场视频</h4></div>
+                        <p class="section-hint">关卡开始前全屏播放（塔防）；逻辑与主题工作台过场模块一致。</p>
+                        <div class="form-grid three" style="align-items:end;margin-bottom:8px;">
+                            <label class="game-asset-upload" style="flex:1;">
+                                上传开场视频
+                                <input type="file" id="gIntroVideoFile" accept="video/mp4,video/webm,video/ogg,video/*">
+                            </label>
+                            <button type="button" class="mini-button" id="gBtnOpenIntroVideoLocation" disabled title="上传并保存到项目后可定位文件">打开视频保存位置</button>
+                            <button type="button" class="mini-button" id="gBtnClearIntroVideo" style="align-self:end;">清除</button>
+                        </div>
+                        <div id="gIntroVideoInfo" class="section-hint" style="word-break:break-all;min-height:1.4em;"></div>
+                        <label class="field-block">
+                            <span>开场视频标题（可选字幕）</span>
+                            <input type="text" id="gIntroVideoTitle" placeholder="留空则不显示字幕">
+                        </label>
+                        <div class="section-title-row">
+                            <h4>波次过场视频</h4>
+                            <button type="button" class="mini-button" id="gBtnAddWaveVideo">＋ 添加</button>
+                        </div>
+                        <p class="section-hint">在某波次结束后播放；未上传则跳过。</p>
+                        <div id="gWaveVideoList" class="wave-video-list"></div>
+                    </section>
+                </div>
+
+                <div id="globalTabPanelAudio" class="global-settings-tab-panel view-hidden" data-global-panel="audio" aria-hidden="true">
+                <div id="globalAudioBindRoot">
+                <section class="inspector-section">
+                    <h3>全局音效</h3>
+                    <p class="section-hint">写入项目 <code>gameAssetConfig.globalAudio</code>，全关卡共享。进入关卡前的 BGM 在玩家尚未开场内会话时播放；开战后由当前关卡的 <code>levelAudio</code> 接棒（若未配置 BGM 则停止循环）。</p>
+                    <div class="form-grid two">
+                        <label class="field-block">
+                            <span>进入关卡前菜单 BGM（URL）</span>
+                            <input id="gaGlobalMenuBgmUrl" type="text" placeholder="/GameModels/Audio/menu.mp3">
+                        </label>
+                        <label class="field-block game-asset-upload tight">
+                            上传菜单 BGM
+                            <input id="gaGlobalMenuBgmFile" type="file" accept=".mp3,.wav,.ogg,.m4a,audio/*" />
+                        </label>
+                        <label class="field-block audio-vol-field">
+                            <span class="audio-vol-field__label">菜单 BGM 音量 <span class="audio-vol-value" id="gaGlobalMenuBgmVolDisp">55%</span></span>
+                            <input type="range" id="gaGlobalMenuBgmVol" class="audio-volume-slider" min="0" max="100" value="55" aria-label="菜单 BGM 音量" />
+                        </label>
+                        <label class="field-block">
+                            <span>防御塔建造音效（URL）</span>
+                            <input id="gaGlobalTowerBuildUrl" type="text" />
+                        </label>
+                        <label class="field-block game-asset-upload tight">
+                            上传建造音效
+                            <input id="gaGlobalTowerBuildFile" type="file" accept=".mp3,.wav,.ogg,.m4a,audio/*" />
+                        </label>
+                        <label class="field-block audio-vol-field">
+                            <span class="audio-vol-field__label">建造音效音量 <span class="audio-vol-value" id="gaGlobalTowerBuildVolDisp">55%</span></span>
+                            <input type="range" id="gaGlobalTowerBuildVol" class="audio-volume-slider" min="0" max="100" value="55" aria-label="建造音效音量" />
+                        </label>
+                        <label class="field-block">
+                            <span>塔防开火默认音效（URL）</span>
+                            <input id="gaGlobalTowerAttackDefaultUrl" type="text" />
+                        </label>
+                        <label class="field-block game-asset-upload tight">
+                            上传默认开火
+                            <input id="gaGlobalTowerAttackDefaultFile" type="file" accept=".mp3,.wav,.ogg,.m4a,audio/*" />
+                        </label>
+                        <label class="field-block audio-vol-field">
+                            <span class="audio-vol-field__label">塔开火默认音量 <span class="audio-vol-value" id="gaGlobalTowerAttackVolDisp">62%</span></span>
+                            <input type="range" id="gaGlobalTowerAttackVol" class="audio-volume-slider" min="0" max="100" value="62" aria-label="塔开火默认音量" />
+                        </label>
+                        <label class="field-block">
+                            <span>塔防敌人被击杀（URL）</span>
+                            <input id="gaGlobalDefenseKillUrl" type="text" />
+                        </label>
+                        <label class="field-block game-asset-upload tight">
+                            上传击杀音效
+                            <input id="gaGlobalDefenseKillFile" type="file" accept=".mp3,.wav,.ogg,.m4a,audio/*" />
+                        </label>
+                        <label class="field-block audio-vol-field">
+                            <span class="audio-vol-field__label">塔防敌击杀音量 <span class="audio-vol-value" id="gaGlobalDefenseKillVolDisp">50%</span></span>
+                            <input type="range" id="gaGlobalDefenseKillVol" class="audio-volume-slider" min="0" max="100" value="50" aria-label="塔防敌击杀音量" />
+                        </label>
+                        <label class="field-block">
+                            <span>探索普攻发射（URL）</span>
+                            <input id="gaGlobalExploreAttackUrl" type="text" />
+                        </label>
+                        <label class="field-block game-asset-upload tight">
+                            上传探索普攻
+                            <input id="gaGlobalExploreAttackFile" type="file" accept=".mp3,.wav,.ogg,.m4a,audio/*" />
+                        </label>
+                        <label class="field-block audio-vol-field">
+                            <span class="audio-vol-field__label">探索普攻音量 <span class="audio-vol-value" id="gaGlobalExploreAttackVolDisp">45%</span></span>
+                            <input type="range" id="gaGlobalExploreAttackVol" class="audio-volume-slider" min="0" max="100" value="45" aria-label="探索普攻音量" />
+                        </label>
+                        <label class="field-block">
+                            <span>探索敌人被击杀（URL）</span>
+                            <input id="gaGlobalExploreEnemyDeathUrl" type="text" />
+                        </label>
+                        <label class="field-block game-asset-upload tight">
+                            上传探索敌杀
+                            <input id="gaGlobalExploreEnemyDeathFile" type="file" accept=".mp3,.wav,.ogg,.m4a,audio/*" />
+                        </label>
+                        <label class="field-block audio-vol-field">
+                            <span class="audio-vol-field__label">探索敌杀音量 <span class="audio-vol-value" id="gaGlobalExploreEnemyDeathVolDisp">50%</span></span>
+                            <input type="range" id="gaGlobalExploreEnemyDeathVol" class="audio-volume-slider" min="0" max="100" value="50" aria-label="探索敌杀音量" />
+                        </label>
+                        <label class="field-block">
+                            <span>探索玩家受击 / RPG（URL）</span>
+                            <input id="gaGlobalExplorePlayerHitUrl" type="text" />
+                        </label>
+                        <label class="field-block game-asset-upload tight">
+                            上传受击音效
+                            <input id="gaGlobalExplorePlayerHitFile" type="file" accept=".mp3,.wav,.ogg,.m4a,audio/*" />
+                        </label>
+                        <label class="field-block audio-vol-field">
+                            <span class="audio-vol-field__label">探索受击音量 <span class="audio-vol-value" id="gaGlobalExplorePlayerHitVolDisp">55%</span></span>
+                            <input type="range" id="gaGlobalExplorePlayerHitVol" class="audio-volume-slider" min="0" max="100" value="55" aria-label="探索受击音量" />
+                        </label>
+                    </div>
+                    <div class="section-title-row"><h4>全局 · 按塔型开火覆盖</h4></div>
+                    <p class="section-hint">与关卡内「按塔型」表相同逻辑；当关卡未覆盖时使用此处 URL。</p>
+                    <div id="gaGlobalTowerAttackRows" class="level-audio-tower-rows"></div>
+                </section>
+                </div>
+                </div>
+
+                <div id="globalTabPanelBackgrounds" class="global-settings-tab-panel view-hidden" data-global-panel="backgrounds" aria-hidden="true">
+                    <div id="globalScreenUiBindRoot">
+                    <section class="inspector-section">
+                        <h3>背景图片与颜色</h3>
+                        <p class="section-hint">写入 <code>gameAssetConfig.globalScreenUi</code>，供开始页、城市选关页等使用（保存后由主游戏随配置加载）。</p>
+                        <div class="form-grid two">
+                            <label class="field-block">
+                                <span>开始游戏页背景图（URL）</span>
+                                <input id="gsStartScreenBgUrl" type="text" placeholder="/GameModels/UI/start-bg.png">
+                            </label>
+                            <label class="field-block game-asset-upload tight">
+                                上传图片
+                                <input id="gsStartScreenBgFile" type="file" accept="image/png,image/jpeg,image/webp,image/*">
+                            </label>
+                            <label class="field-block">
+                                <span>城市选关页背景图（URL）</span>
+                                <input id="gsLevelSelectBgUrl" type="text" placeholder="/GameModels/UI/map-bg.jpg">
+                            </label>
+                            <label class="field-block game-asset-upload tight">
+                                上传选关底图
+                                <input id="gsLevelSelectBgFile" type="file" accept="image/png,image/jpeg,image/webp,image/*">
+                            </label>
+                            <label class="field-block">
+                                <span>选关页背景底色</span>
+                                <input id="gsLevelSelectBgColor" type="color" value="#0d1418">
+                            </label>
+                            <label class="field-block">
+                                <span>选关页强调色</span>
+                                <input id="gsLevelSelectAccentColor" type="color" value="#8fb8ae">
+                            </label>
+                        </div>
+                    </section>
+                    </div>
+                </div>
+                </div>
             </section>
         </main>
 
@@ -470,6 +762,42 @@
                     <span>简介</span>
                     <textarea id="fieldDescription" rows="3"></textarea>
                 </label>
+            </section>
+
+            <section class="inspector-section" id="levelAudioSection" aria-label="关卡配乐与音效">
+                <h3>关卡配乐与塔防开火</h3>
+                <p class="section-hint">写入 <code>map.levelAudio</code>，与主游戏 <code>MapDefinition.levelAudio</code> 同步。探索/塔防 BGM 在进入对应模式时切换；各塔开火音效仅在塔防战斗触发，优先级为<strong>本关覆盖</strong> &gt; 全局默认 &gt; 全局按塔型。</p>
+                <div class="form-grid two">
+                    <label class="field-block">
+                        <span>塔防循环 BGM（URL）</span>
+                        <input id="levelAudioDefenseBgmUrl" type="text" placeholder="/GameModels/Audio/xxx.mp3">
+                    </label>
+                    <label class="field-block game-asset-upload tight">
+                        上传塔防 BGM
+                        <input id="levelAudioDefenseBgmFile" type="file" accept=".mp3,.wav,.ogg,.m4a,audio/*" />
+                    </label>
+                    <label class="field-block audio-vol-field">
+                        <span class="audio-vol-field__label">塔防 BGM 音量 <span class="audio-vol-value" id="levelAudioDefenseBgmVolDisp">55%</span></span>
+                        <input type="range" id="levelAudioDefenseBgmVol" class="audio-volume-slider" min="0" max="100" value="55" aria-label="塔防 BGM 音量" />
+                    </label>
+                    <label class="field-block">
+                        <span>探索循环 BGM（URL）</span>
+                        <input id="levelAudioExploreBgmUrl" type="text" placeholder="可留空则塔防/探索共用塔防 BGM">
+                    </label>
+                    <label class="field-block game-asset-upload tight">
+                        上传探索 BGM
+                        <input id="levelAudioExploreBgmFile" type="file" accept=".mp3,.wav,.ogg,.m4a,audio/*" />
+                    </label>
+                    <label class="field-block audio-vol-field">
+                        <span class="audio-vol-field__label">探索 BGM 音量 <span class="audio-vol-value" id="levelAudioExploreBgmVolDisp">55%</span></span>
+                        <input type="range" id="levelAudioExploreBgmVol" class="audio-volume-slider" min="0" max="100" value="55" aria-label="探索 BGM 音量" />
+                    </label>
+                </div>
+                <label class="field-block audio-vol-field">
+                    <span class="audio-vol-field__label">本关塔开火音效音量 <span class="audio-vol-value" id="levelAudioTowerVolDisp">62%</span></span>
+                    <input type="range" id="levelAudioTowerVol" class="audio-volume-slider" min="0" max="100" value="62" aria-label="本关塔开火音量" />
+                </label>
+                <div id="levelAudioTowerRows" class="level-audio-tower-rows"></div>
             </section>
 
             <section class="inspector-section game-asset-section" id="gameAssetSection" aria-label="游戏运行时模型">
@@ -687,6 +1015,13 @@
                     <p class="section-hint">主题保存在关卡 JSON 的 <code>map.theme</code> 与 <code>map.explorationLayout.theme</code>，主游戏通过编辑器同步读取。</p>
                 </section>
             </div>
+
+            <div id="globalSettingsInspectorWorkspace" class="view-hidden" aria-hidden="true">
+                <section class="inspector-section">
+                    <h3>布局提示</h3>
+                    <p class="section-hint">全局设置已在<strong>中间主区域</strong>编辑。可收起本栏以扩大中间画布区域。</p>
+                </section>
+            </div>
             </div>
         </aside>
     </div>
@@ -834,6 +1169,6 @@
     </div>
 
     <script src="../common/js/country-geo-presets.js"></script>
-    <script src="level-editor.js"></script>
+    <script type="module" src="level-editor.js"></script>
 </body>
 </html>

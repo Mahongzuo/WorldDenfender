@@ -61,6 +61,7 @@ export function runtimeMapToEditorMap(map: MapDefinition, current: EditorLevelMa
     obstacles: cloneCells(map.obstacles),
     spawnPoints: [{ id: "spawn-main", name: "敌人入口", ...path[0] }],
     objectivePoint: { id: "objective-main", name: "防守核心", ...path[path.length - 1] },
+    ...(map.levelAudio ? { levelAudio: map.levelAudio } : {}),
   };
 }
 

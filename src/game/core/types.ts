@@ -14,6 +14,53 @@ export interface PlayerExploreTransform {
   rotationDeg: { x: number; y: number; z: number };
 }
 
+/** 全局音效（写入 level-editor-state.json → gameAssetConfig.globalAudio） */
+export interface GlobalGameAudioConfig {
+  /** 进入关卡前主界面 / 选关循环 BGM */
+  menuBgmUrl?: string;
+  /** 0–1，默认约 0.55 */
+  menuBgmVolume?: number;
+  towerBuildSfxUrl?: string;
+  towerBuildSfxVolume?: number;
+  /** 未按塔型指定时使用 */
+  towerAttackDefaultSfxUrl?: string;
+  towerAttackSfxVolume?: number;
+  towerAttackSfxByBuildId?: Partial<Record<BuildId, string>>;
+  /** 塔防模式敌人被击杀 */
+  defenseEnemyDeathSfxUrl?: string;
+  defenseEnemyDeathSfxVolume?: number;
+  exploreBasicAttackSfxUrl?: string;
+  exploreBasicAttackSfxVolume?: number;
+  exploreEnemyDeathSfxUrl?: string;
+  exploreEnemyDeathSfxVolume?: number;
+  /** 探索模式玩家受击 */
+  explorePlayerHitSfxUrl?: string;
+  explorePlayerHitSfxVolume?: number;
+}
+
+/** 单关卡配乐与塔型开火覆盖（写入 map.levelAudio，同步到运行时 MapDefinition） */
+export interface LevelMapAudioConfig {
+  defenseBgmUrl?: string;
+  defenseBgmVolume?: number;
+  exploreBgmUrl?: string;
+  exploreBgmVolume?: number;
+  /** 本关塔开火音量系数（0–1），探索/塔防共用 */
+  towerAttackSfxVolume?: number;
+  towerAttackSfxByBuildId?: Partial<Record<BuildId, string>>;
+}
+
+/** 全项目 UI 背景（首页 / 选关等），写入 gameAssetConfig.globalScreenUi */
+export interface GlobalScreenUiConfig {
+  /** 开始游戏 / 主菜单页背景图 URL */
+  startScreenBackgroundUrl?: string;
+  /** 城市选关页背景图 URL */
+  levelSelectBackgroundUrl?: string;
+  /** 选关页兜底底色（含透明时请配合背景图） */
+  levelSelectBackgroundColor?: string;
+  /** 选关页强调色（标题、高亮等，可选） */
+  levelSelectAccentColor?: string;
+}
+
 export interface GameAssetConfig {
   customModelUrls: Partial<Record<BuildId, string>>;
   customDropModelUrl: string;
@@ -21,6 +68,8 @@ export interface GameAssetConfig {
   customAnimationUrls: Partial<Record<string, string>>;
   modelScales: Partial<Record<ModelTarget, number>>;
   playerExploreTransform?: PlayerExploreTransform;
+  globalAudio?: GlobalGameAudioConfig;
+  globalScreenUi?: GlobalScreenUiConfig;
 }
 
 export interface SaveData {
@@ -120,6 +169,34 @@ export interface MapBoardImageLayer {
   order?: number;
 }
 
+/** 单条过场视频（开场或波次间） */
+export interface LevelCutscene {
+  /** 视频公共 URL，如 /uploads/videos/intro.mp4 */
+  url: string;
+  /** 可选字幕标题 */
+  title?: string;
+  /** 编辑器专用：仓库内相对路径（如 public/Arts/...），便于在资源管理器中打开；运行时忽略 */
+  projectPath?: string;
+}
+
+/** 某个波次结束后播放的过场视频 */
+export interface WaveCutscene {
+  /** 在第几波结束后播放（1-based） */
+  afterWave: number;
+  url: string;
+  title?: string;
+  /** 编辑器专用：见 LevelCutscene.projectPath */
+  projectPath?: string;
+}
+
+/** 关卡过场视频配置（存于 EditorLevelMap，同步到 MapDefinition） */
+export interface LevelCutsceneConfig {
+  /** 关卡开始前播放的开场视频 */
+  introVideo?: LevelCutscene;
+  /** 各波次结束后播放的视频；按 afterWave 排列 */
+  waveVideos?: WaveCutscene[];
+}
+
 export interface MapDefinition {
   id: string;
   name: string;
@@ -136,6 +213,10 @@ export interface MapDefinition {
   boardImageLayers?: MapBoardImageLayer[];
   /** 由 explorationLayout.gameplay 同步；探索模式运行时读取 */
   exploreGameplay?: ExploreGameplaySettings;
+  /** 过场视频配置（由编辑器同步） */
+  cutscenes?: LevelCutsceneConfig;
+  /** 关卡配乐与按塔型覆盖的攻击音效（编辑器 map.levelAudio） */
+  levelAudio?: LevelMapAudioConfig;
 }
 
 export interface EditorCell {
@@ -178,6 +259,10 @@ export interface EditorLevelMap {
   explorationPoints?: Array<EditorCell & { id?: string; name?: string }>;
   explorationLayout?: EditorExplorationLayout;
   boardImageLayers?: MapBoardImageLayer[];
+  /** 过场视频配置 */
+  cutscenes?: LevelCutsceneConfig;
+  /** 关卡配乐与塔型攻击音效覆盖 */
+  levelAudio?: LevelMapAudioConfig;
 }
 
 export interface EditorExplorationLayout {

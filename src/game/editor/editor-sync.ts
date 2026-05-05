@@ -1,4 +1,5 @@
 import { hasEditorDefenseLayout, hasEditorExploreLayout, parseEditorColor, parseEditorOpacity, runtimeMapToEditorExplorationLayout, runtimeMapToEditorMap } from "./editor-runtime";
+import { sanitizeLevelMapAudioFromEditor } from "../audio/game-audio";
 import { CITY_GEO_CONFIG } from "../data/content";
 import { clamp, orderEditorPathCells, sameCell, uniqueCells, GRID_COLS, GRID_ROWS } from "../core/runtime-grid";
 import type {
@@ -9,6 +10,7 @@ import type {
   GameMode,
   GeoMapConfig,
   GridCell,
+  LevelCutsceneConfig,
   MapActorDef,
   MapBoardImageLayer,
   MapDefinition,
@@ -55,6 +57,37 @@ function sanitizeBoardImageLayers(raw: unknown): MapBoardImageLayer[] | undefine
     });
   }
   return out.length ? out.sort((a, b) => (a.order ?? 0) - (b.order ?? 0)) : undefined;
+}
+
+function sanitizeLevelCutscenes(raw: unknown): LevelCutsceneConfig | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const r = raw as Record<string, unknown>;
+
+  const introRaw = r.introVideo;
+  let introVideo: LevelCutsceneConfig["introVideo"];
+  if (introRaw && typeof introRaw === "object") {
+    const iv = introRaw as Record<string, unknown>;
+    const url = typeof iv.url === "string" ? iv.url.trim() : "";
+    if (url) {
+      introVideo = { url, ...(typeof iv.title === "string" && iv.title ? { title: iv.title } : {}) };
+    }
+  }
+
+  let waveVideos: LevelCutsceneConfig["waveVideos"];
+  if (Array.isArray(r.waveVideos)) {
+    const parsed = r.waveVideos.flatMap((item: unknown) => {
+      if (!item || typeof item !== "object") return [];
+      const wv = item as Record<string, unknown>;
+      const afterWave = Math.round(Number(wv.afterWave));
+      const url = typeof wv.url === "string" ? wv.url.trim() : "";
+      if (!Number.isFinite(afterWave) || afterWave < 1 || !url) return [];
+      return [{ afterWave, url, ...(typeof wv.title === "string" && wv.title ? { title: wv.title } : {}) }];
+    });
+    if (parsed.length) waveVideos = parsed;
+  }
+
+  if (!introVideo && !waveVideos) return undefined;
+  return { ...(introVideo ? { introVideo } : {}), ...(waveVideos ? { waveVideos } : {}) };
 }
 
 export interface CityRuntimeMapInfo {
@@ -241,6 +274,7 @@ export function editorLevelToRuntimeMap(level: EditorLevel, mode: GameMode): Map
   const obstacles = uniqueCells(obstacleSource.map(project), sourceCols, sourceRows).filter((cell) => !path.some((pathCell) => sameCell(pathCell, cell)));
   const theme = exploreLayout?.theme ?? editorMap.theme ?? {};
   const boardImageLayers = sanitizeBoardImageLayers(editorMap.boardImageLayers);
+  const levelAudio = sanitizeLevelMapAudioFromEditor(editorMap.levelAudio);
 
   const presetGeo = resolvePresetGeoForLevel(level);
 
@@ -284,6 +318,10 @@ export function editorLevelToRuntimeMap(level: EditorLevel, mode: GameMode): Map
           exploreGameplay: { ...(exploreLayout?.gameplay ?? {}) } as ExploreGameplaySettings,
         }
       : {}),
+    ...(mode === "defense"
+      ? { cutscenes: sanitizeLevelCutscenes(editorMap.cutscenes) }
+      : {}),
+    ...(levelAudio ? { levelAudio } : {}),
   };
 }
 

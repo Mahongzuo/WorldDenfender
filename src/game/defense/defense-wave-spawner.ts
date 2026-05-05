@@ -18,7 +18,7 @@ export interface DefenseSpawnWaveTimers {
 
 export type DefenseSpawnSideEffect =
   | { kind: "economyGrant"; amount: number }
-  | { kind: "toastWaveClearReward"; reward: number }
+  | { kind: "toastWaveClearReward"; reward: number; completedWave: number }
   | { kind: "toastWaveBegins"; wave: number }
   | { kind: "spawnEnemy" };
 
@@ -40,8 +40,9 @@ export function advanceDefenseSpawnState(input: DefenseSpawnStepInput): DefenseS
 
   if (t.waveActive && t.spawnRemaining === 0 && enemiesLength === 0) {
     const reward = 70 + t.wave * 12;
+    const completedWave = t.wave;
     effects.push({ kind: "economyGrant", amount: reward });
-    effects.push({ kind: "toastWaveClearReward", reward });
+    effects.push({ kind: "toastWaveClearReward", reward, completedWave });
     t.wave += 1;
     t.nextWaveDelay = 5;
     t.waveActive = false;

@@ -9,6 +9,7 @@ export interface DefenseMinesTickDeps {
   buildGroup: THREE.Group;
   addExplosion(center: THREE.Vector3, radius: number, color: number): void;
   damageEnemy(enemy: Enemy, damage: number): void;
+  onMineExploded?(mine: Building): void;
 }
 
 /** 每帧检测已武装地雷与敌人距离，触发爆炸、伤害与移除建筑 */
@@ -28,6 +29,7 @@ export function tickDefenseMines(deps: DefenseMinesTickDeps): void {
     mine.armed = false;
     const splash = (mine.spec.splash ?? 1.3) * TILE_SIZE;
     deps.addExplosion(minePosition, splash, mine.spec.color);
+    deps.onMineExploded?.(mine);
     for (const enemy of [...deps.enemies]) {
       if (distanceXZ(minePosition, enemy.mesh.position) <= splash) {
         deps.damageEnemy(enemy, mine.spec.damage ?? 0);

@@ -27,6 +27,7 @@ export interface TowerDefenseCombatTickDeps {
   aimWorldCenter: (enemy: Enemy) => THREE.Vector3;
   damageEnemy(enemy: Enemy, damage: number): void;
   addBeam(from: THREE.Vector3, to: THREE.Vector3, color: number): void;
+  onTowerFired?(building: Building): void;
 }
 
 function towerProjectileMuzzleWorld(building: Building): THREE.Vector3 {
@@ -70,6 +71,7 @@ function fireAt(deps: TowerDefenseCombatTickDeps, building: Building, target: En
     splashRadiusWorld,
   );
 
+  deps.onTowerFired?.(building);
   if (splashRadiusWorld) {
     const anchor = target.mesh.position;
     for (const enemy of [...deps.enemies]) {
@@ -95,8 +97,13 @@ export function tickTowerDefenseCombat(dt: number, deps: TowerDefenseCombatTickD
       building.cooldown -= dt;
       if (building.cooldown <= 0 && building.blockingEnemies.length > 0) {
         building.blockingEnemies = building.blockingEnemies.filter((e) => e.hp > 0);
+        let dealt = false;
         for (const e of building.blockingEnemies) {
           deps.damageEnemy(e, building.spec.damage ?? 0);
+          dealt = true;
+        }
+        if (dealt) {
+          deps.onTowerFired?.(building);
         }
         building.cooldown = 1 / (building.spec.fireRate ?? 1);
       }

@@ -1,5 +1,6 @@
-(function () {
-    'use strict';
+﻿import { CITY_GEO_CONFIGS, DEFAULT_CESIUM_ION_3D_TILES_ASSET_ID, JINAN_MAP_TEXTURE_URL } from './editor/city-geo-configs.js';
+import { BUILT_IN_CITY_LAYOUTS, matchBuiltInCity } from './editor/built-in-layouts.js';
+import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, slugify, updatePath, cellsRect, toggleCell, removeCell, hasCell, cloneCells, atCell, notAtCell, inBounds, byId } from './editor/utils.js';
 
     var API_URL = '/api/level-editor-config';
     var LOCAL_BACKUP_KEY = 'earth-guardian.level-engine.backup.v2';
@@ -8,74 +9,6 @@
     var DEFAULT_GRID_COLS = 28;
     var DEFAULT_GRID_ROWS = 18;
     var DEFAULT_TILE_SIZE = 2;
-    var JINAN_MAP_TEXTURE_URL = '/Arts/Maps/jinan_full_map.png';
-    var DEFAULT_CESIUM_ION_3D_TILES_ASSET_ID = '2275207';
-    var CITY_GEO_CONFIGS = {
-        beijing: {
-            enabled: true,
-            provider: 'cesium-ion',
-            assetId: DEFAULT_CESIUM_ION_3D_TILES_ASSET_ID,
-            center: { lat: 39.9163447, lon: 116.3971555, heightMeters: 45 },
-            extentMeters: 1400,
-            rotationDeg: 0,
-            boardHeightMeters: 32
-        },
-        shanghai: {
-            enabled: true,
-            provider: 'cesium-ion',
-            assetId: DEFAULT_CESIUM_ION_3D_TILES_ASSET_ID,
-            center: { lat: 31.2401, lon: 121.4908, heightMeters: 8 },
-            extentMeters: 1400,
-            rotationDeg: 0,
-            boardHeightMeters: 32
-        },
-        guangzhou: {
-            enabled: true,
-            provider: 'cesium-ion',
-            assetId: DEFAULT_CESIUM_ION_3D_TILES_ASSET_ID,
-            center: { lat: 23.1064, lon: 113.3245, heightMeters: 12 },
-            extentMeters: 1400,
-            rotationDeg: 0,
-            boardHeightMeters: 34
-        },
-        shenzhen: {
-            enabled: true,
-            provider: 'cesium-ion',
-            assetId: DEFAULT_CESIUM_ION_3D_TILES_ASSET_ID,
-            center: { lat: 22.5409, lon: 113.9507, heightMeters: 20 },
-            extentMeters: 1400,
-            rotationDeg: 0,
-            boardHeightMeters: 34
-        },
-        jinan: {
-            enabled: true,
-            provider: 'cesium-ion',
-            assetId: DEFAULT_CESIUM_ION_3D_TILES_ASSET_ID,
-            center: { lat: 36.6616, lon: 117.0204, heightMeters: 32 },
-            extentMeters: 1200,
-            rotationDeg: 0,
-            boardHeightMeters: 62
-        },
-        jinanOlympic: {
-            enabled: true,
-            provider: 'cesium-ion',
-            assetId: DEFAULT_CESIUM_ION_3D_TILES_ASSET_ID,
-            center: { lat: 36.655, lon: 117.118, heightMeters: 35 },
-            extentMeters: 1200,
-            rotationDeg: 0,
-            boardHeightMeters: 42
-        },
-        paris: {
-            enabled: true,
-            provider: 'cesium-ion',
-            assetId: DEFAULT_CESIUM_ION_3D_TILES_ASSET_ID,
-            center: { lat: 48.8583736, lon: 2.2944813, heightMeters: 40 },
-            extentMeters: 2000,
-            rotationDeg: 0,
-            boardHeightMeters: 80,
-            scale: 1
-        }
-    };
     var state = null;
     var selectedLevelId = new URLSearchParams(window.location.search).get('levelId') || '';
     var selectedObject = null;
@@ -83,7 +16,11 @@
     var activeTool = 'select';
     var activeStatusFilter = 'all';
     var activeWorkbench = 'level';
+    var activeGlobalSettingsTab = 'levels';
+    var globalCutsceneEditLevelId = '';
     var activeThemeScope = 'defense';
+    /** @type {'colors'|'cutscenes'} */
+    var activeThemeWorkbenchTab = 'colors';
     var themeEditorCacheKey = '';
     var themeBoardUrlDebounce = 0;
     var ERASER_RADIUS_STORAGE_KEY = 'earth-guardian.level-editor.eraserBrushRadius';
@@ -114,6 +51,9 @@
     var shellRightCollapsedPref = false;
     var SHELL_LEFT_COLLAPSE_KEY = 'earth-guardian.level-editor.shellLeftCollapsed';
     var SHELL_RIGHT_COLLAPSE_KEY = 'earth-guardian.level-editor.shellRightCollapsed';
+    var SHELL_INSPECTOR_WIDTH_KEY = 'earth-guardian.level-editor.shellInspectorWidthPx';
+    var inspectorSplitPointerStartX = 0;
+    var inspectorSplitStartWidthPx = 380;
     var CONTENT_BROWSER_FLOAT_GEOM_KEY = 'earth-guardian.level-editor.contentBrowserFloat.geometry';
     var geoMappingEnabled = true;
     var isDirty = false;
@@ -262,6 +202,23 @@
         themeWorkbench: document.getElementById('themeWorkbench'),
         themeWorkbenchTitle: document.getElementById('themeWorkbenchTitle'),
         themeWorkbenchMeta: document.getElementById('themeWorkbenchMeta'),
+        globalSettingsWorkbench: document.getElementById('globalSettingsWorkbench'),
+        globalSettingsInspectorWorkspace: document.getElementById('globalSettingsInspectorWorkspace'),
+        globalSettingsSubTabs: document.getElementById('globalSettingsSubTabs'),
+        globalSettingsHeroTitle: document.getElementById('globalSettingsHeroTitle'),
+        globalSettingsHeroDetail: document.getElementById('globalSettingsHeroDetail'),
+        globalLevelsManageList: document.getElementById('globalLevelsManageList'),
+        btnGlobalOpenCreateLevel: document.getElementById('btnGlobalOpenCreateLevel'),
+        globalCutsceneOverview: document.getElementById('globalCutsceneOverview'),
+        globalCutsceneLevelSelect: document.getElementById('globalCutsceneLevelSelect'),
+        gIntroVideoFile: document.getElementById('gIntroVideoFile'),
+        gIntroVideoInfo: document.getElementById('gIntroVideoInfo'),
+        gIntroVideoTitle: document.getElementById('gIntroVideoTitle'),
+        gBtnClearIntroVideo: document.getElementById('gBtnClearIntroVideo'),
+        gBtnOpenIntroVideoLocation: document.getElementById('gBtnOpenIntroVideoLocation'),
+        gBtnAddWaveVideo: document.getElementById('gBtnAddWaveVideo'),
+        gWaveVideoList: document.getElementById('gWaveVideoList'),
+        levelAudioTowerRows: document.getElementById('levelAudioTowerRows'),
         themeInspectorWorkspace: document.getElementById('themeInspectorWorkspace'),
         themeScopeSelect: document.getElementById('themeScopeSelect'),
         themeEditorForm: document.getElementById('themeEditorForm'),
@@ -284,6 +241,15 @@
         themeHoverCellOpacity: document.getElementById('themeHoverCellOpacity'),
         btnThemeCopyToExplore: document.getElementById('btnThemeCopyToExplore'),
         btnThemeCopyToDefense: document.getElementById('btnThemeCopyToDefense'),
+        // 过场视频
+        cutsceneEditorPanel: document.getElementById('cutsceneEditorPanel'),
+        introVideoFile: document.getElementById('introVideoFile'),
+        introVideoInfo: document.getElementById('introVideoInfo'),
+        introVideoTitle: document.getElementById('introVideoTitle'),
+        btnClearIntroVideo: document.getElementById('btnClearIntroVideo'),
+        btnOpenIntroVideoLocation: document.getElementById('btnOpenIntroVideoLocation'),
+        btnAddWaveVideo: document.getElementById('btnAddWaveVideo'),
+        waveVideoList: document.getElementById('waveVideoList'),
         createLevelModal: document.getElementById('createLevelModal'),
         btnCancelCreateLevel: document.getElementById('btnCancelCreateLevel'),
         newLevelName: document.getElementById('newLevelName'),
@@ -311,8 +277,43 @@
         inspectorPanel: document.getElementById('inspectorPanel'),
         inspectorPanelBody: document.getElementById('inspectorPanelBody'),
         collapseInspectorPanel: document.getElementById('collapseInspectorPanel'),
-        railExpandInspectorPanel: document.getElementById('railExpandInspectorPanel')
+        railExpandInspectorPanel: document.getElementById('railExpandInspectorPanel'),
+        viewportInspectorSplitter: document.getElementById('viewportInspectorSplitter')
     };
+
+    function editorVol01(raw) {
+        var n = Number(raw);
+        if (!Number.isFinite(n)) return undefined;
+        return Math.max(0, Math.min(1, n));
+    }
+
+    function editorPctFromVol01(v, fallbackPct) {
+        var x = editorVol01(v);
+        if (x === undefined) return fallbackPct;
+        return Math.round(x * 100);
+    }
+
+    function applyVolSliderDisp(sliderId, dispId, vol01, fallbackPct) {
+        var s = document.getElementById(sliderId);
+        var d = document.getElementById(dispId);
+        var pct = editorPctFromVol01(vol01, fallbackPct);
+        if (s) s.value = String(pct);
+        if (d) d.textContent = pct + '%';
+    }
+
+    function bindAudioVolumeSlider(sliderId, dispId, readTarget, applyVol, dirtyLabel) {
+        var s = document.getElementById(sliderId);
+        if (!s) return;
+        s.addEventListener('input', function () {
+            var pct = Math.max(0, Math.min(100, Math.round(Number(s.value)) || 0));
+            var d = document.getElementById(dispId);
+            if (d) d.textContent = pct + '%';
+            var target = readTarget();
+            if (!target) return;
+            applyVol(target, pct / 100);
+            markDirty(dirtyLabel);
+        });
+    }
 
     var TOOL_LABELS = {
         select: '选择/拖拽',
@@ -501,6 +502,94 @@
         }
     };
 
+    function defaultGlobalAudio() {
+        return {
+            menuBgmUrl: '',
+            towerBuildSfxUrl: '',
+            towerAttackDefaultSfxUrl: '',
+            defenseEnemyDeathSfxUrl: '',
+            exploreBasicAttackSfxUrl: '',
+            exploreEnemyDeathSfxUrl: '',
+            explorePlayerHitSfxUrl: '',
+            towerAttackSfxByBuildId: {}
+        };
+    }
+
+    function normalizeGlobalAudio(raw) {
+        var d = defaultGlobalAudio();
+        var src = raw && typeof raw === 'object' ? raw : {};
+        d.menuBgmUrl = String(src.menuBgmUrl || '').trim();
+        d.towerBuildSfxUrl = String(src.towerBuildSfxUrl || '').trim();
+        d.towerAttackDefaultSfxUrl = String(src.towerAttackDefaultSfxUrl || '').trim();
+        d.defenseEnemyDeathSfxUrl = String(src.defenseEnemyDeathSfxUrl || '').trim();
+        d.exploreBasicAttackSfxUrl = String(src.exploreBasicAttackSfxUrl || '').trim();
+        d.exploreEnemyDeathSfxUrl = String(src.exploreEnemyDeathSfxUrl || '').trim();
+        d.explorePlayerHitSfxUrl = String(src.explorePlayerHitSfxUrl || '').trim();
+        var mv = editorVol01(src.menuBgmVolume);
+        var bv = editorVol01(src.towerBuildSfxVolume);
+        var av = editorVol01(src.towerAttackSfxVolume);
+        var dv = editorVol01(src.defenseEnemyDeathSfxVolume);
+        var eav = editorVol01(src.exploreBasicAttackSfxVolume);
+        var edv = editorVol01(src.exploreEnemyDeathSfxVolume);
+        var phv = editorVol01(src.explorePlayerHitSfxVolume);
+        if (mv !== undefined) d.menuBgmVolume = mv;
+        if (bv !== undefined) d.towerBuildSfxVolume = bv;
+        if (av !== undefined) d.towerAttackSfxVolume = av;
+        if (dv !== undefined) d.defenseEnemyDeathSfxVolume = dv;
+        if (eav !== undefined) d.exploreBasicAttackSfxVolume = eav;
+        if (edv !== undefined) d.exploreEnemyDeathSfxVolume = edv;
+        if (phv !== undefined) d.explorePlayerHitSfxVolume = phv;
+        d.towerAttackSfxByBuildId = {};
+        if (src.towerAttackSfxByBuildId && typeof src.towerAttackSfxByBuildId === 'object') {
+            TOWER_MODEL_SPECS.forEach(function (spec) {
+                var u = String(src.towerAttackSfxByBuildId[spec.id] || '').trim();
+                if (u) d.towerAttackSfxByBuildId[spec.id] = u;
+            });
+        }
+        return d;
+    }
+
+    function normalizeLevelAudioSource(raw) {
+        var out = { defenseBgmUrl: '', exploreBgmUrl: '', towerAttackSfxByBuildId: {} };
+        var src = raw && typeof raw === 'object' ? raw : {};
+        out.defenseBgmUrl = String(src.defenseBgmUrl || '').trim();
+        out.exploreBgmUrl = String(src.exploreBgmUrl || '').trim();
+        var dBv = editorVol01(src.defenseBgmVolume);
+        var eBv = editorVol01(src.exploreBgmVolume);
+        var tV = editorVol01(src.towerAttackSfxVolume);
+        if (dBv !== undefined) out.defenseBgmVolume = dBv;
+        if (eBv !== undefined) out.exploreBgmVolume = eBv;
+        if (tV !== undefined) out.towerAttackSfxVolume = tV;
+        if (src.towerAttackSfxByBuildId && typeof src.towerAttackSfxByBuildId === 'object') {
+            TOWER_MODEL_SPECS.forEach(function (spec) {
+                var u = String(src.towerAttackSfxByBuildId[spec.id] || '').trim();
+                if (u) out.towerAttackSfxByBuildId[spec.id] = u;
+            });
+        }
+        return out;
+    }
+
+    function defaultGlobalScreenUi() {
+        return {
+            startScreenBackgroundUrl: '',
+            levelSelectBackgroundUrl: '',
+            levelSelectBackgroundColor: '#0d1418',
+            levelSelectAccentColor: '#8fb8ae'
+        };
+    }
+
+    function normalizeGlobalScreenUi(raw) {
+        var d = defaultGlobalScreenUi();
+        var src = raw && typeof raw === 'object' ? raw : {};
+        d.startScreenBackgroundUrl = String(src.startScreenBackgroundUrl || '').trim();
+        d.levelSelectBackgroundUrl = String(src.levelSelectBackgroundUrl || '').trim();
+        var bgc = String(src.levelSelectBackgroundColor || '').trim();
+        var acc = String(src.levelSelectAccentColor || '').trim();
+        if (/^#[0-9a-fA-F]{6}$/.test(bgc)) d.levelSelectBackgroundColor = bgc;
+        if (/^#[0-9a-fA-F]{6}$/.test(acc)) d.levelSelectAccentColor = acc;
+        return d;
+    }
+
     function defaultGameAssetConfig() {
         return {
             customModelUrls: {},
@@ -511,7 +600,9 @@
             playerExploreTransform: {
                 offsetMeters: { x: 0, y: 0, z: 0 },
                 rotationDeg: { x: 0, y: 0, z: 0 }
-            }
+            },
+            globalAudio: defaultGlobalAudio(),
+            globalScreenUi: defaultGlobalScreenUi()
         };
     }
 
@@ -540,91 +631,10 @@
                     : {}
             )
         };
+        d.globalAudio = normalizeGlobalAudio(src.globalAudio);
+        d.globalScreenUi = normalizeGlobalScreenUi(src.globalScreenUi);
         return d;
     }
-
-    var BUILT_IN_CITY_LAYOUTS = {
-        beijing: {
-            aliases: ['北京', '北京市', '中国·北京', '中国 · 北京'],
-            defenseName: '北京·帝都枢纽',
-            exploreName: '北京·霓虹街区',
-            geo: CITY_GEO_CONFIGS.beijing,
-            defense: {
-                theme: { ground: '#3d524c', groundAlt: '#344844', road: '#4d6560', obstacle: '#5c4d56', accent: '#7fb5a5', fog: '#263832' },
-                path: [{ col: 0, row: 13 }, { col: 5, row: 13 }, { col: 5, row: 9 }, { col: 10, row: 9 }, { col: 10, row: 4 }, { col: 18, row: 4 }, { col: 18, row: 11 }, { col: 27, row: 11 }],
-                obstacles: cellsRect(2, 2, 4, 2).concat(cellsRect(12, 7, 3, 2), cellsRect(21, 3, 3, 3), cellsRect(2, 15, 5, 2), cellsRect(22, 14, 4, 2))
-            },
-            explore: {
-                theme: { ground: '#05080f', groundAlt: '#0a1220', road: '#1e3040', obstacle: '#382428', accent: '#4a9eaa', fog: '#03060c' },
-                path: [{ col: 3, row: 9 }, { col: 10, row: 9 }, { col: 10, row: 4 }, { col: 17, row: 4 }, { col: 17, row: 13 }, { col: 24, row: 13 }],
-                obstacles: cellsRect(1, 1, 5, 3).concat(cellsRect(21, 1, 5, 4), cellsRect(3, 14, 4, 3), cellsRect(12, 8, 4, 2), cellsRect(22, 8, 3, 3))
-            }
-        },
-        shanghai: {
-            aliases: ['上海', '上海市', '中国·上海', '中国 · 上海'],
-            defenseName: '上海·外滩沙城',
-            exploreName: '上海·学院环廊',
-            geo: CITY_GEO_CONFIGS.shanghai,
-            defense: {
-                theme: { ground: '#6f9fa7', groundAlt: '#5f8f97', road: '#82b5bc', obstacle: '#b88772', accent: '#c9a882', fog: '#507880' },
-                path: [{ col: 0, row: 3 }, { col: 8, row: 3 }, { col: 8, row: 14 }, { col: 15, row: 14 }, { col: 15, row: 7 }, { col: 23, row: 7 }, { col: 23, row: 15 }, { col: 27, row: 15 }],
-                obstacles: cellsRect(3, 8, 3, 3).concat(cellsRect(11, 2, 4, 2), cellsRect(18, 11, 3, 4), cellsRect(24, 2, 3, 3), cellsRect(1, 15, 4, 2))
-            },
-            explore: {
-                theme: { ground: '#1a4d3f', groundAlt: '#154038', road: '#276658', obstacle: '#3d8068', accent: '#6b9888', fog: '#0f3028' },
-                path: [{ col: 4, row: 3 }, { col: 23, row: 3 }, { col: 23, row: 14 }, { col: 4, row: 14 }, { col: 4, row: 3 }],
-                obstacles: cellsRect(8, 6, 4, 6).concat(cellsRect(16, 6, 4, 6), cellsRect(1, 7, 2, 4), cellsRect(25, 7, 2, 4))
-            }
-        },
-        guangzhou: {
-            aliases: ['广州', '广州市', '中国·广州', '中国 · 广州', '中国 · 广州市'],
-            defenseName: '广州·南岭雪径',
-            exploreName: '广州·夜港平台',
-            geo: CITY_GEO_CONFIGS.guangzhou,
-            defense: {
-                theme: { ground: '#79967c', groundAlt: '#6a876e', road: '#8daa91', obstacle: '#a86878', accent: '#c49a7a', fog: '#536956' },
-                path: [{ col: 0, row: 9 }, { col: 4, row: 9 }, { col: 4, row: 3 }, { col: 12, row: 3 }, { col: 12, row: 12 }, { col: 20, row: 12 }, { col: 20, row: 5 }, { col: 27, row: 5 }],
-                obstacles: cellsRect(1, 1, 3, 2).concat(cellsRect(7, 7, 3, 4), cellsRect(15, 2, 3, 3), cellsRect(22, 10, 4, 4), cellsRect(9, 15, 8, 2))
-            },
-            explore: {
-                theme: { ground: '#2a4480', groundAlt: '#264078', road: '#3a5c9c', obstacle: '#5a78b0', accent: '#7a94b8', fog: '#1a2850' },
-                path: [{ col: 2, row: 5 }, { col: 9, row: 5 }, { col: 9, row: 11 }, { col: 18, row: 11 }, { col: 18, row: 6 }, { col: 26, row: 6 }],
-                obstacles: cellsRect(1, 13, 7, 3).concat(cellsRect(12, 2, 5, 3), cellsRect(20, 10, 5, 5), cellsRect(3, 8, 3, 2))
-            }
-        },
-        shenzhen: {
-            aliases: ['深圳', '深圳市', '中国·深圳', '中国 · 深圳', '中国 · 深圳市', '广东·深圳'],
-            defenseName: '深圳·科技裂谷',
-            exploreName: '深圳·欢乐海岸',
-            geo: CITY_GEO_CONFIGS.shenzhen,
-            defense: {
-                theme: { ground: '#9ebfcf', groundAlt: '#8babbf', road: '#b0ccd8', obstacle: '#957dad', accent: '#c4ae88', fog: '#708898' },
-                path: [{ col: 0, row: 15 }, { col: 6, row: 15 }, { col: 6, row: 11 }, { col: 14, row: 11 }, { col: 14, row: 6 }, { col: 8, row: 6 }, { col: 8, row: 2 }, { col: 21, row: 2 }, { col: 21, row: 9 }, { col: 27, row: 9 }],
-                obstacles: cellsRect(2, 3, 4, 4).concat(cellsRect(10, 14, 5, 3), cellsRect(17, 5, 3, 5), cellsRect(23, 12, 4, 4), cellsRect(11, 8, 2, 2))
-            },
-            explore: {
-                theme: { ground: '#5a2878', groundAlt: '#663090', road: '#7848a8', obstacle: '#8860b8', accent: '#a890c8', fog: '#3c1858' },
-                path: [{ col: 5, row: 15 }, { col: 5, row: 9 }, { col: 12, row: 9 }, { col: 12, row: 3 }, { col: 21, row: 3 }, { col: 21, row: 12 }, { col: 26, row: 12 }],
-                obstacles: cellsRect(1, 2, 5, 5).concat(cellsRect(8, 13, 5, 3), cellsRect(15, 7, 4, 4), cellsRect(22, 15, 4, 2))
-            }
-        },
-        jinan: {
-            aliases: ['济南', '济南市', '山东·济南', '山东 · 济南', '中国·济南', '中国 · 济南', '中国 · 济南市'],
-            defenseName: '济南·泉港栈桥',
-            exploreName: '济南·趵突露台',
-            geo: CITY_GEO_CONFIGS.jinan,
-            defense: {
-                theme: { ground: '#6e9e96', groundAlt: '#5f8e86', road: '#82b0a6', obstacle: '#a89458', accent: '#b8a078', fog: '#4a7068' },
-                path: [{ col: 0, row: 6 }, { col: 7, row: 6 }, { col: 7, row: 12 }, { col: 13, row: 12 }, { col: 13, row: 8 }, { col: 19, row: 8 }, { col: 19, row: 3 }, { col: 24, row: 3 }, { col: 24, row: 13 }, { col: 27, row: 13 }],
-                obstacles: cellsRect(1, 1, 5, 3).concat(cellsRect(10, 3, 4, 3), cellsRect(15, 13, 5, 3), cellsRect(21, 6, 3, 4), cellsRect(3, 14, 5, 3))
-            },
-            explore: {
-                theme: { ground: '#8898a8', groundAlt: '#7a8a9c', road: '#9cacb8', obstacle: '#607890', accent: '#80b0a8', fog: '#687884' },
-                path: [{ col: 2, row: 8 }, { col: 8, row: 8 }, { col: 8, row: 3 }, { col: 19, row: 3 }, { col: 19, row: 14 }, { col: 26, row: 14 }],
-                obstacles: cellsRect(1, 1, 4, 3).concat(cellsRect(10, 10, 4, 4), cellsRect(15, 6, 3, 3), cellsRect(23, 2, 4, 4), cellsRect(4, 14, 5, 2))
-            }
-        }
-    };
 
     function readShellCollapsedPrefsFromStorage() {
         try {
@@ -654,6 +664,72 @@
         });
     }
 
+    function clampInspectorWidthPx(px) {
+        var min = 280;
+        var max = Math.min(580, Math.max(320, window.innerWidth - 280 - 480));
+        return Math.round(Math.max(min, Math.min(max, px)));
+    }
+
+    function applyPersistedInspectorWidth() {
+        if (!refs.engineShell || isNarrowWorkbenchLayout() || shellRightCollapsedPref) return;
+        var w = 380;
+        try {
+            var s = window.localStorage.getItem(SHELL_INSPECTOR_WIDTH_KEY);
+            if (s) {
+                var n = parseInt(s, 10);
+                if (Number.isFinite(n)) w = n;
+            }
+        } catch (_e) {}
+        w = clampInspectorWidthPx(w);
+        refs.engineShell.style.setProperty('--shell-inspector-w', w + 'px');
+    }
+
+    function persistInspectorWidthPx(w) {
+        try {
+            window.localStorage.setItem(SHELL_INSPECTOR_WIDTH_KEY, String(w));
+        } catch (_e) {}
+    }
+
+    function bindViewportInspectorSplitter() {
+        var grip = refs.viewportInspectorSplitter;
+        if (!grip || grip.dataset.bound === '1') return;
+        grip.dataset.bound = '1';
+        function onMove(ev) {
+            var dx = ev.clientX - inspectorSplitPointerStartX;
+            var next = clampInspectorWidthPx(inspectorSplitStartWidthPx - dx);
+            if (refs.engineShell) refs.engineShell.style.setProperty('--shell-inspector-w', next + 'px');
+        }
+        function onUp() {
+            grip.classList.remove('is-dragging');
+            document.body.classList.remove('editor-shell--resizing');
+            window.removeEventListener('pointermove', onMove);
+            window.removeEventListener('pointerup', onUp);
+            window.removeEventListener('pointercancel', onUp);
+            if (refs.engineShell) {
+                var cur = refs.engineShell.style.getPropertyValue('--shell-inspector-w').trim();
+                var m = /^(\d+)px$/.exec(cur);
+                if (m) persistInspectorWidthPx(Number(m[1]));
+            }
+            bumpShellLayoutDependentUi();
+        }
+        grip.addEventListener('pointerdown', function (ev) {
+            if (!refs.engineShell || shellRightCollapsedPref || isNarrowWorkbenchLayout()) return;
+            ev.preventDefault();
+            try {
+                grip.setPointerCapture(ev.pointerId);
+            } catch (_e) {}
+            inspectorSplitPointerStartX = ev.clientX;
+            var cur = refs.engineShell.style.getPropertyValue('--shell-inspector-w').trim();
+            var m = /^(\d+)px$/.exec(cur);
+            inspectorSplitStartWidthPx = m ? Number(m[1]) : clampInspectorWidthPx(380);
+            grip.classList.add('is-dragging');
+            document.body.classList.add('editor-shell--resizing');
+            window.addEventListener('pointermove', onMove);
+            window.addEventListener('pointerup', onUp);
+            window.addEventListener('pointercancel', onUp);
+        });
+    }
+
     function applyShellPanelCollapseUi() {
         if (!refs.engineShell || !refs.regionPanel || !refs.inspectorPanel) return;
         var narrow = isNarrowWorkbenchLayout();
@@ -665,6 +741,9 @@
             if (refs.railExpandInspectorPanel) refs.railExpandInspectorPanel.hidden = true;
             if (refs.regionPanelBody) refs.regionPanelBody.removeAttribute('aria-hidden');
             if (refs.inspectorPanelBody) refs.inspectorPanelBody.removeAttribute('aria-hidden');
+            if (refs.viewportInspectorSplitter) {
+                refs.viewportInspectorSplitter.hidden = true;
+            }
             bumpShellLayoutDependentUi();
             return;
         }
@@ -686,6 +765,12 @@
             refs.collapseRegionPanel.setAttribute('aria-expanded', shellLeftCollapsedPref ? 'false' : 'true');
         if (refs.collapseInspectorPanel)
             refs.collapseInspectorPanel.setAttribute('aria-expanded', shellRightCollapsedPref ? 'false' : 'true');
+        if (refs.viewportInspectorSplitter) {
+            refs.viewportInspectorSplitter.hidden = shellRightCollapsedPref;
+        }
+        if (!shellRightCollapsedPref) {
+            applyPersistedInspectorWidth();
+        }
         bumpShellLayoutDependentUi();
     }
 
@@ -820,6 +905,7 @@
         bindCreateLevelModalEvents();
         loadState();
         applyShellPanelCollapseUi();
+        bindViewportInspectorSplitter();
     }
 
     function readGeoMappingEnabledFromStorage() {
@@ -1371,7 +1457,9 @@
                 var button = event.target.closest('[data-workbench]');
                 if (!button) return;
                 activeWorkbench = button.getAttribute('data-workbench') || 'level';
-                if (activeWorkbench === 'theme') themeEditorCacheKey = '';
+                if (activeWorkbench === 'theme') {
+                    themeEditorCacheKey = '';
+                }
                 refs.workbenchTabs.querySelectorAll('[data-workbench]').forEach(function (item) {
                     item.classList.toggle('active', item === button);
                 });
@@ -1388,8 +1476,28 @@
                 renderThemeEditor();
             });
         }
+        if (refs.themeWorkbench && refs.themeWorkbench.dataset.themeChromeBound !== '1') {
+            refs.themeWorkbench.dataset.themeChromeBound = '1';
+            refs.themeWorkbench.addEventListener('click', function (e) {
+                var tabBtn = e.target.closest('[data-theme-workbench-tab]');
+                if (tabBtn) {
+                    setThemeWorkbenchTab(tabBtn.getAttribute('data-theme-workbench-tab') || 'colors');
+                    return;
+                }
+                var sw = e.target.closest('[data-theme-swatch-for]');
+                if (!sw) return;
+                var cid = sw.getAttribute('data-theme-swatch-for') || '';
+                if (!cid) return;
+                var inp = document.getElementById(cid);
+                if (inp && inp.type === 'color') inp.click();
+            });
+        }
         if (refs.themeEditorForm) {
             refs.themeEditorForm.addEventListener('change', readThemeFormToLevel);
+            refs.themeEditorForm.addEventListener('input', function (ev) {
+                var t = ev.target;
+                if (t && t.type === 'color') syncThemeColorSwatches();
+            });
         }
         if (refs.themeBoardTextureUrl) {
             refs.themeBoardTextureUrl.addEventListener('input', function () {
@@ -1425,6 +1533,9 @@
                 renderAll();
             });
         }
+
+        // 过场视频面板事件
+        bindCutsceneEditorEvents();
 
         if (refs.gameplayResourceTabs) {
             refs.gameplayResourceTabs.addEventListener('click', function (event) {
@@ -1661,6 +1772,11 @@
 
         bindLevelFields();
         bindGameAssetPanel();
+        bindLevelAudioUi();
+        bindGlobalAudioUi();
+        bindGlobalSettingsChrome();
+        bindGlobalCutscenePanel();
+        bindGlobalScreenUiPanel();
 
         if (refs.previewSceneOutlineList) {
             refs.previewSceneOutlineList.addEventListener('click', function (event) {
@@ -1986,6 +2102,366 @@
         if (elRx) elRx.value = String(rd.x != null ? rd.x : 0);
         if (elRy) elRy.value = String(rd.y != null ? rd.y : 0);
         if (elRz) elRz.value = String(rd.z != null ? rd.z : 0);
+    }
+
+    function ensureLevelMapAudio(map) {
+        if (!map.levelAudio || typeof map.levelAudio !== 'object') {
+            map.levelAudio = normalizeLevelAudioSource(null);
+        } else {
+            map.levelAudio = normalizeLevelAudioSource(map.levelAudio);
+        }
+        return map.levelAudio;
+    }
+
+    function renderLevelAudioFields(level) {
+        if (!refs.levelAudioTowerRows || !level || !level.map) return;
+        var la = ensureLevelMapAudio(level.map);
+        var dEl = document.getElementById('levelAudioDefenseBgmUrl');
+        var eEl = document.getElementById('levelAudioExploreBgmUrl');
+        if (dEl) dEl.value = la.defenseBgmUrl || '';
+        if (eEl) eEl.value = la.exploreBgmUrl || '';
+        refs.levelAudioTowerRows.innerHTML = TOWER_MODEL_SPECS.map(function (spec) {
+            var url = (la.towerAttackSfxByBuildId && la.towerAttackSfxByBuildId[spec.id]) || '';
+            return [
+                '<div class="game-asset-tower-row level-audio-tower-row">',
+                '  <div class="game-asset-tower-title">' + escapeHtml(spec.key + ' · ' + spec.name + ' 开火') + '</div>',
+                '  <input type="text" class="field-inline level-audio-tower-url" data-level-tower-sfx-id="' +
+                    escapeAttr(spec.id) +
+                    '" placeholder="URL" value="' +
+                    escapeAttr(url) +
+                    '" />',
+                '  <label class="game-asset-upload tight">上传<input type="file" data-level-tower-sfx-file="' +
+                    escapeAttr(spec.id) +
+                    '" accept=".mp3,.wav,.ogg,.m4a,audio/*" /></label>',
+                '</div>'
+            ].join('');
+        }).join('');
+        applyVolSliderDisp('levelAudioDefenseBgmVol', 'levelAudioDefenseBgmVolDisp', la.defenseBgmVolume, 55);
+        applyVolSliderDisp('levelAudioExploreBgmVol', 'levelAudioExploreBgmVolDisp', la.exploreBgmVolume, 55);
+        applyVolSliderDisp('levelAudioTowerVol', 'levelAudioTowerVolDisp', la.towerAttackSfxVolume, 62);
+    }
+
+    function renderGlobalAudioPanel() {
+        if (!state || !state.gameAssetConfig) return;
+        state.gameAssetConfig.globalAudio = normalizeGlobalAudio(state.gameAssetConfig.globalAudio);
+        var g = state.gameAssetConfig.globalAudio;
+        function setv(id, val) {
+            var el = document.getElementById(id);
+            if (el) el.value = val || '';
+        }
+        setv('gaGlobalMenuBgmUrl', g.menuBgmUrl);
+        setv('gaGlobalTowerBuildUrl', g.towerBuildSfxUrl);
+        setv('gaGlobalTowerAttackDefaultUrl', g.towerAttackDefaultSfxUrl);
+        setv('gaGlobalDefenseKillUrl', g.defenseEnemyDeathSfxUrl);
+        setv('gaGlobalExploreAttackUrl', g.exploreBasicAttackSfxUrl);
+        setv('gaGlobalExploreEnemyDeathUrl', g.exploreEnemyDeathSfxUrl);
+        setv('gaGlobalExplorePlayerHitUrl', g.explorePlayerHitSfxUrl);
+        applyVolSliderDisp('gaGlobalMenuBgmVol', 'gaGlobalMenuBgmVolDisp', g.menuBgmVolume, 55);
+        applyVolSliderDisp('gaGlobalTowerBuildVol', 'gaGlobalTowerBuildVolDisp', g.towerBuildSfxVolume, 55);
+        applyVolSliderDisp('gaGlobalTowerAttackVol', 'gaGlobalTowerAttackVolDisp', g.towerAttackSfxVolume, 62);
+        applyVolSliderDisp('gaGlobalDefenseKillVol', 'gaGlobalDefenseKillVolDisp', g.defenseEnemyDeathSfxVolume, 50);
+        applyVolSliderDisp('gaGlobalExploreAttackVol', 'gaGlobalExploreAttackVolDisp', g.exploreBasicAttackSfxVolume, 45);
+        applyVolSliderDisp('gaGlobalExploreEnemyDeathVol', 'gaGlobalExploreEnemyDeathVolDisp', g.exploreEnemyDeathSfxVolume, 50);
+        applyVolSliderDisp('gaGlobalExplorePlayerHitVol', 'gaGlobalExplorePlayerHitVolDisp', g.explorePlayerHitSfxVolume, 55);
+        var mount = document.getElementById('gaGlobalTowerAttackRows');
+        if (mount) {
+            mount.innerHTML = TOWER_MODEL_SPECS.map(function (spec) {
+                var url = (g.towerAttackSfxByBuildId && g.towerAttackSfxByBuildId[spec.id]) || '';
+                return [
+                    '<div class="game-asset-tower-row level-audio-tower-row">',
+                    '  <div class="game-asset-tower-title">' + escapeHtml(spec.key + ' · ' + spec.name + '（全局）') + '</div>',
+                    '  <input type="text" class="field-inline global-tower-sfx-url" data-global-tower-sfx-id="' +
+                        escapeAttr(spec.id) +
+                        '" placeholder="URL" value="' +
+                        escapeAttr(url) +
+                        '" />',
+                    '  <label class="game-asset-upload tight">上传<input type="file" data-global-tower-sfx-file="' +
+                        escapeAttr(spec.id) +
+                        '" accept=".mp3,.wav,.ogg,.m4a,audio/*" /></label>',
+                    '</div>'
+                ].join('');
+            }).join('');
+        }
+    }
+
+    function bindLevelAudioUi() {
+        var sec = document.getElementById('levelAudioSection');
+        if (!sec || sec.dataset.bound === '1') return;
+        sec.dataset.bound = '1';
+        function currentLevelAudio() {
+            var level = getLevel();
+            if (!level || !level.map) return null;
+            return ensureLevelMapAudio(level.map);
+        }
+        var dUrl = document.getElementById('levelAudioDefenseBgmUrl');
+        var eUrl = document.getElementById('levelAudioExploreBgmUrl');
+        if (dUrl) {
+            dUrl.addEventListener('input', function () {
+                var la = currentLevelAudio();
+                if (!la) return;
+                la.defenseBgmUrl = dUrl.value.trim();
+                markDirty('已更新关卡塔防 BGM');
+            });
+        }
+        if (eUrl) {
+            eUrl.addEventListener('input', function () {
+                var la = currentLevelAudio();
+                if (!la) return;
+                la.exploreBgmUrl = eUrl.value.trim();
+                markDirty('已更新关卡探索 BGM');
+            });
+        }
+        function bindBgmFile(inputId, field) {
+            var inp = document.getElementById(inputId);
+            if (!inp) return;
+            inp.addEventListener('change', function () {
+                var f = inp.files && inp.files[0];
+                inp.value = '';
+                if (!f) return;
+                (async function () {
+                    try {
+                        setStatus('正在上传「' + f.name + '」…', 'idle');
+                        var url = await uploadFileToProjectUrl(f, { gameModelsUpload: true, gameModelsSubdir: 'Audio' });
+                        var la = currentLevelAudio();
+                        if (!la) return;
+                        la[field] = url;
+                        if (field === 'defenseBgmUrl' && dUrl) dUrl.value = url;
+                        if (field === 'exploreBgmUrl' && eUrl) eUrl.value = url;
+                        markDirty('已上传关卡 BGM');
+                        setStatus('已上传「' + f.name + '」', 'success');
+                    } catch (err) {
+                        setStatus((err && err.message) || '上传失败', 'error');
+                    }
+                })();
+            });
+        }
+        bindBgmFile('levelAudioDefenseBgmFile', 'defenseBgmUrl');
+        bindBgmFile('levelAudioExploreBgmFile', 'exploreBgmUrl');
+        bindAudioVolumeSlider(
+            'levelAudioDefenseBgmVol',
+            'levelAudioDefenseBgmVolDisp',
+            currentLevelAudio,
+            function (la, v) {
+                la.defenseBgmVolume = v;
+            },
+            '已更新关卡塔防 BGM 音量'
+        );
+        bindAudioVolumeSlider(
+            'levelAudioExploreBgmVol',
+            'levelAudioExploreBgmVolDisp',
+            currentLevelAudio,
+            function (la, v) {
+                la.exploreBgmVolume = v;
+            },
+            '已更新关卡探索 BGM 音量'
+        );
+        bindAudioVolumeSlider(
+            'levelAudioTowerVol',
+            'levelAudioTowerVolDisp',
+            currentLevelAudio,
+            function (la, v) {
+                la.towerAttackSfxVolume = v;
+            },
+            '已更新本关塔开火音效音量'
+        );
+        sec.addEventListener('input', function (e) {
+            var t = e.target;
+            if (!t || !t.classList || !t.classList.contains('level-audio-tower-url')) return;
+            var id = t.getAttribute('data-level-tower-sfx-id');
+            var la = currentLevelAudio();
+            if (!la || !id) return;
+            if (!la.towerAttackSfxByBuildId) la.towerAttackSfxByBuildId = {};
+            var v = t.value.trim();
+            if (v) la.towerAttackSfxByBuildId[id] = v;
+            else delete la.towerAttackSfxByBuildId[id];
+            markDirty('已更新关卡塔开火音效');
+        });
+        sec.addEventListener('change', function (e) {
+            var t = e.target;
+            if (!t || !t.getAttribute('data-level-tower-sfx-file')) return;
+            var id = t.getAttribute('data-level-tower-sfx-file');
+            var f = t.files && t.files[0];
+            t.value = '';
+            if (!f || !id) return;
+            (async function () {
+                try {
+                    setStatus('正在上传「' + f.name + '」…', 'idle');
+                    var url = await uploadFileToProjectUrl(f, { gameModelsUpload: true, gameModelsSubdir: 'Audio' });
+                    var la = currentLevelAudio();
+                    if (!la) return;
+                    if (!la.towerAttackSfxByBuildId) la.towerAttackSfxByBuildId = {};
+                    la.towerAttackSfxByBuildId[id] = url;
+                    var inp2 = sec.querySelector('.level-audio-tower-url[data-level-tower-sfx-id="' + id + '"]');
+                    if (inp2) inp2.value = url;
+                    markDirty('已上传关卡塔开火音效');
+                    setStatus('已绑定「' + f.name + '」', 'success');
+                } catch (err) {
+                    setStatus((err && err.message) || '上传失败', 'error');
+                }
+            })();
+        });
+    }
+
+    function bindGlobalAudioUi() {
+        var sec = document.getElementById('globalAudioBindRoot');
+        if (!sec || sec.dataset.bound === '1') return;
+        sec.dataset.bound = '1';
+        function ga() {
+            if (!state || !state.gameAssetConfig) return null;
+            state.gameAssetConfig.globalAudio = normalizeGlobalAudio(state.gameAssetConfig.globalAudio);
+            return state.gameAssetConfig.globalAudio;
+        }
+        var fields = [
+            ['gaGlobalMenuBgmUrl', 'menuBgmUrl'],
+            ['gaGlobalTowerBuildUrl', 'towerBuildSfxUrl'],
+            ['gaGlobalTowerAttackDefaultUrl', 'towerAttackDefaultSfxUrl'],
+            ['gaGlobalDefenseKillUrl', 'defenseEnemyDeathSfxUrl'],
+            ['gaGlobalExploreAttackUrl', 'exploreBasicAttackSfxUrl'],
+            ['gaGlobalExploreEnemyDeathUrl', 'exploreEnemyDeathSfxUrl'],
+            ['gaGlobalExplorePlayerHitUrl', 'explorePlayerHitSfxUrl']
+        ];
+        fields.forEach(function (pair) {
+            var el = document.getElementById(pair[0]);
+            if (!el) return;
+            el.addEventListener('input', function () {
+                var g = ga();
+                if (!g) return;
+                g[pair[1]] = el.value.trim();
+                markDirty('已更新全局音效');
+            });
+        });
+        var uploads = [
+            ['gaGlobalMenuBgmFile', 'menuBgmUrl', 'gaGlobalMenuBgmUrl'],
+            ['gaGlobalTowerBuildFile', 'towerBuildSfxUrl', 'gaGlobalTowerBuildUrl'],
+            ['gaGlobalTowerAttackDefaultFile', 'towerAttackDefaultSfxUrl', 'gaGlobalTowerAttackDefaultUrl'],
+            ['gaGlobalDefenseKillFile', 'defenseEnemyDeathSfxUrl', 'gaGlobalDefenseKillUrl'],
+            ['gaGlobalExploreAttackFile', 'exploreBasicAttackSfxUrl', 'gaGlobalExploreAttackUrl'],
+            ['gaGlobalExploreEnemyDeathFile', 'exploreEnemyDeathSfxUrl', 'gaGlobalExploreEnemyDeathUrl'],
+            ['gaGlobalExplorePlayerHitFile', 'explorePlayerHitSfxUrl', 'gaGlobalExplorePlayerHitUrl']
+        ];
+        uploads.forEach(function (triple) {
+            var inp = document.getElementById(triple[0]);
+            if (!inp) return;
+            inp.addEventListener('change', function () {
+                var f = inp.files && inp.files[0];
+                inp.value = '';
+                if (!f) return;
+                (async function () {
+                    try {
+                        setStatus('正在上传「' + f.name + '」…', 'idle');
+                        var url = await uploadFileToProjectUrl(f, { gameModelsUpload: true, gameModelsSubdir: 'Audio' });
+                        var g = ga();
+                        if (!g) return;
+                        g[triple[1]] = url;
+                        var urlEl = document.getElementById(triple[2]);
+                        if (urlEl) urlEl.value = url;
+                        markDirty('已上传全局音效');
+                        setStatus('已绑定「' + f.name + '」', 'success');
+                    } catch (err) {
+                        setStatus((err && err.message) || '上传失败', 'error');
+                    }
+                })();
+            });
+        });
+        bindAudioVolumeSlider(
+            'gaGlobalMenuBgmVol',
+            'gaGlobalMenuBgmVolDisp',
+            ga,
+            function (g, v) {
+                g.menuBgmVolume = v;
+            },
+            '已更新全局菜单 BGM 音量'
+        );
+        bindAudioVolumeSlider(
+            'gaGlobalTowerBuildVol',
+            'gaGlobalTowerBuildVolDisp',
+            ga,
+            function (g, v) {
+                g.towerBuildSfxVolume = v;
+            },
+            '已更新全局建造音效音量'
+        );
+        bindAudioVolumeSlider(
+            'gaGlobalTowerAttackVol',
+            'gaGlobalTowerAttackVolDisp',
+            ga,
+            function (g, v) {
+                g.towerAttackSfxVolume = v;
+            },
+            '已更新全局塔开火默认音量'
+        );
+        bindAudioVolumeSlider(
+            'gaGlobalDefenseKillVol',
+            'gaGlobalDefenseKillVolDisp',
+            ga,
+            function (g, v) {
+                g.defenseEnemyDeathSfxVolume = v;
+            },
+            '已更新全局塔防击杀音量'
+        );
+        bindAudioVolumeSlider(
+            'gaGlobalExploreAttackVol',
+            'gaGlobalExploreAttackVolDisp',
+            ga,
+            function (g, v) {
+                g.exploreBasicAttackSfxVolume = v;
+            },
+            '已更新全局探索普攻音量'
+        );
+        bindAudioVolumeSlider(
+            'gaGlobalExploreEnemyDeathVol',
+            'gaGlobalExploreEnemyDeathVolDisp',
+            ga,
+            function (g, v) {
+                g.exploreEnemyDeathSfxVolume = v;
+            },
+            '已更新全局探索敌杀音量'
+        );
+        bindAudioVolumeSlider(
+            'gaGlobalExplorePlayerHitVol',
+            'gaGlobalExplorePlayerHitVolDisp',
+            ga,
+            function (g, v) {
+                g.explorePlayerHitSfxVolume = v;
+            },
+            '已更新全局探索受击音量'
+        );
+        sec.addEventListener('input', function (e) {
+            var t = e.target;
+            if (!t || !t.classList || !t.classList.contains('global-tower-sfx-url')) return;
+            var id = t.getAttribute('data-global-tower-sfx-id');
+            var g = ga();
+            if (!g || !id) return;
+            if (!g.towerAttackSfxByBuildId) g.towerAttackSfxByBuildId = {};
+            var v = t.value.trim();
+            if (v) g.towerAttackSfxByBuildId[id] = v;
+            else delete g.towerAttackSfxByBuildId[id];
+            markDirty('已更新全局塔开火音效');
+        });
+        sec.addEventListener('change', function (e) {
+            var t = e.target;
+            if (!t || !t.getAttribute('data-global-tower-sfx-file')) return;
+            var id = t.getAttribute('data-global-tower-sfx-file');
+            var f = t.files && t.files[0];
+            t.value = '';
+            if (!f || !id) return;
+            (async function () {
+                try {
+                    setStatus('正在上传「' + f.name + '」…', 'idle');
+                    var url = await uploadFileToProjectUrl(f, { gameModelsUpload: true, gameModelsSubdir: 'Audio' });
+                    var g = ga();
+                    if (!g) return;
+                    if (!g.towerAttackSfxByBuildId) g.towerAttackSfxByBuildId = {};
+                    g.towerAttackSfxByBuildId[id] = url;
+                    var inp2 = sec.querySelector('.global-tower-sfx-url[data-global-tower-sfx-id="' + id + '"]');
+                    if (inp2) inp2.value = url;
+                    markDirty('已上传全局塔开火音效');
+                    setStatus('已绑定「' + f.name + '」', 'success');
+                } catch (err) {
+                    setStatus((err && err.message) || '上传失败', 'error');
+                }
+            })();
+        });
     }
 
     function bindGameAssetPanel() {
@@ -2473,27 +2949,6 @@
         return synced;
     }
 
-    function matchBuiltInCity(level) {
-        var haystack = [
-            level.id,
-            level.name,
-            level.location.countryName,
-            level.location.cityName,
-            level.location.regionLabel,
-            level.location.cityCode
-        ].join(' ').replace(/\s+/g, '');
-        var keys = Object.keys(BUILT_IN_CITY_LAYOUTS);
-        for (var index = 0; index < keys.length; index += 1) {
-            var key = keys[index];
-            if (BUILT_IN_CITY_LAYOUTS[key].aliases.some(function (alias) {
-                return haystack.indexOf(alias.replace(/\s+/g, '')) !== -1;
-            })) {
-                return key;
-            }
-        }
-        return '';
-    }
-
     function resolveGeoForLevel(level) {
         var specialGeo = resolveSpecialGeoForLevel(level);
         if (specialGeo) return specialGeo;
@@ -2966,11 +3421,593 @@
         if (refs.previewSceneOutlineList) refs.previewSceneOutlineList.innerHTML = '';
     }
 
+    function findLevelById(levelId) {
+        if (!state || !levelId) return null;
+        return state.levels.find(function (l) {
+            return l.id === levelId;
+        }) || null;
+    }
+
+    function levelVideoCityContext(level) {
+        if (!level) return null;
+        var loc = level.location || {};
+        var code = String(level.cityCode || loc.cityCode || '').trim();
+        var name = String(level.cityName || level.countryName || loc.cityName || level.name || '').trim();
+        if (!code && name) code = slugify(name) || slugify(String(level.id || '')) || 'CUSTOM';
+        if (!code && !name) return null;
+        return { cityCode: code || 'CUSTOM', cityName: name || 'Level' };
+    }
+
+    function setGlobalSettingsTab(tabId) {
+        var next = tabId || 'levels';
+        if (next !== 'levels' && next !== 'cutscenes' && next !== 'audio' && next !== 'backgrounds') next = 'levels';
+        activeGlobalSettingsTab = next;
+        if (refs.globalSettingsSubTabs) {
+            refs.globalSettingsSubTabs.querySelectorAll('[data-global-tab]').forEach(function (btn) {
+                var on = btn.getAttribute('data-global-tab') === activeGlobalSettingsTab;
+                btn.classList.toggle('active', on);
+                btn.setAttribute('aria-selected', on ? 'true' : 'false');
+            });
+        }
+        ['levels', 'cutscenes', 'audio', 'backgrounds'].forEach(function (key) {
+            var panel = document.getElementById('globalTabPanel' + key.charAt(0).toUpperCase() + key.slice(1));
+            if (!panel) return;
+            var show = key === activeGlobalSettingsTab;
+            panel.classList.toggle('view-hidden', !show);
+            panel.setAttribute('aria-hidden', show ? 'false' : 'true');
+        });
+        syncGlobalSettingsHero();
+        if (activeGlobalSettingsTab === 'cutscenes') {
+            syncGlobalCutsceneEditTarget();
+            populateGlobalCutsceneLevelSelect();
+            renderGlobalCutsceneOverview();
+            renderGlobalCutsceneEditor();
+        }
+        if (activeGlobalSettingsTab === 'audio') renderGlobalAudioPanel();
+        if (activeGlobalSettingsTab === 'backgrounds') renderGlobalScreenUiForm();
+    }
+
+    function syncGlobalSettingsHero() {
+        if (refs.globalSettingsHeroTitle) refs.globalSettingsHeroTitle.textContent = '全局设置';
+        if (!refs.globalSettingsHeroDetail) return;
+        var lines = {
+            levels: '当前：关卡管理。可新建/删除关卡，与左侧关卡树数据一致。',
+            cutscenes: '当前：过场动画。总览各关已配置的 map.cutscenes；选择关卡后编辑开场与波次视频（与棋盘主题工作台同源）。',
+            audio: '当前：全局音效。配置 gameAssetConfig.globalAudio，进入关卡前菜单 BGM 与各默认战斗音效。',
+            backgrounds: '当前：背景图片。配置 gameAssetConfig.globalScreenUi，用于开始页与选关页等 UI。'
+        };
+        refs.globalSettingsHeroDetail.textContent = lines[activeGlobalSettingsTab] || lines.levels;
+    }
+
+    function syncGlobalCutsceneEditTarget() {
+        if (!state || !state.levels.length) {
+            globalCutsceneEditLevelId = '';
+            return;
+        }
+        if (!globalCutsceneEditLevelId || !findLevelById(globalCutsceneEditLevelId)) {
+            globalCutsceneEditLevelId = (getLevel() && getLevel().id) || state.levels[0].id;
+        }
+    }
+
+    function getGlobalCutsceneTargetLevel() {
+        return findLevelById(globalCutsceneEditLevelId);
+    }
+
+    function refreshGlobalSettingsWorkbench() {
+        applyGlobalSettingsTabUi();
+    }
+
+    function applyGlobalSettingsTabUi() {
+        setGlobalSettingsTab(activeGlobalSettingsTab);
+        if (activeGlobalSettingsTab === 'levels') renderGlobalLevelsManageList();
+    }
+
+    function renderGlobalLevelsManageList() {
+        var mount = refs.globalLevelsManageList;
+        if (!mount || !state) return;
+        if (!state.levels.length) {
+            mount.innerHTML = '<p class="section-hint">暂无关卡，请点击「新建关卡」。</p>';
+            return;
+        }
+        mount.innerHTML = state.levels
+            .map(function (level) {
+                var region = [level.countryName, level.cityName].filter(Boolean).join(' · ') || '—';
+                return [
+                    '<div class="global-level-manage-row panel-surface" data-level-manage-id="' + escapeAttr(level.id) + '">',
+                    '  <div class="global-level-manage-row__main">',
+                    '    <strong>' + escapeHtml(level.name || level.id) + '</strong>',
+                    '    <span class="section-hint">' + escapeHtml(region) + ' · id: ' + escapeHtml(level.id) + '</span>',
+                    '  </div>',
+                    '  <div class="global-level-manage-row__actions">',
+                    '    <button type="button" class="mini-button" data-level-open="' + escapeAttr(level.id) + '">在编辑器中打开</button>',
+                    '    <button type="button" class="mini-button danger" data-level-delete="' + escapeAttr(level.id) + '">删除</button>',
+                    '  </div>',
+                    '</div>'
+                ].join('');
+            })
+            .join('');
+    }
+
+    function deleteLevelById(levelId) {
+        if (!state || !levelId) return;
+        var idx = state.levels.findIndex(function (l) {
+            return l.id === levelId;
+        });
+        if (idx < 0) return;
+        var name = state.levels[idx].name || levelId;
+        if (!window.confirm('确定删除关卡「' + name + '」？此操作不可撤销。')) return;
+        state.levels.splice(idx, 1);
+        if (selectedLevelId === levelId) {
+            selectedLevelId = state.levels[0] ? state.levels[0].id : '';
+        }
+        if (globalCutsceneEditLevelId === levelId) {
+            globalCutsceneEditLevelId = '';
+        }
+        markDirty('已删除关卡');
+        renderAll();
+    }
+
+    function focusLevelInEditor(levelId) {
+        if (!levelId || !findLevelById(levelId)) return;
+        selectedLevelId = levelId;
+        activeWorkbench = 'level';
+        if (refs.workbenchTabs) {
+            refs.workbenchTabs.querySelectorAll('[data-workbench]').forEach(function (item) {
+                item.classList.toggle('active', item.getAttribute('data-workbench') === 'level');
+            });
+        }
+        renderAll();
+        var treeBtn = Array.prototype.find.call(document.querySelectorAll('[data-level-id]'), function (el) {
+            return el.getAttribute('data-level-id') === levelId;
+        });
+        if (treeBtn && typeof treeBtn.scrollIntoView === 'function') treeBtn.scrollIntoView({ block: 'nearest' });
+    }
+
+    function populateGlobalCutsceneLevelSelect() {
+        var sel = refs.globalCutsceneLevelSelect;
+        if (!sel || !state) return;
+        var preserveId = globalCutsceneEditLevelId || '';
+        sel.innerHTML = state.levels
+            .map(function (level) {
+                var label = (level.name || level.id) + ' (' + level.id + ')';
+                return '<option value="' + escapeAttr(level.id) + '">' + escapeHtml(label) + '</option>';
+            })
+            .join('');
+        syncGlobalCutsceneEditTarget();
+        if (preserveId && findLevelById(preserveId)) {
+            globalCutsceneEditLevelId = preserveId;
+        }
+        sel.value = globalCutsceneEditLevelId || '';
+        if (!sel.value && state.levels.length) {
+            sel.selectedIndex = 0;
+            globalCutsceneEditLevelId = sel.value || '';
+        }
+    }
+
+    function renderGlobalCutsceneOverview() {
+        var mount = refs.globalCutsceneOverview;
+        if (!mount || !state) return;
+        if (!state.levels.length) {
+            mount.innerHTML = '<p class="section-hint">暂无关卡。</p>';
+            return;
+        }
+        mount.innerHTML = [
+            '<table class="global-cutscene-table">',
+            '<thead><tr><th>关卡</th><th>开场</th><th>波次视频</th><th></th></tr></thead>',
+            '<tbody>',
+            state.levels
+                .map(function (level) {
+                    var cs = level.map && level.map.cutscenes;
+                    var intro = cs && cs.introVideo && cs.introVideo.url;
+                    var waves = cs && Array.isArray(cs.waveVideos) ? cs.waveVideos : [];
+                    var waveWithUrl = waves.filter(function (w) {
+                        return w && w.url;
+                    }).length;
+                    var introLabel = intro ? modelBindShortLabel(intro) : '—';
+                    return (
+                        '<tr data-cutscene-overview-id="' +
+                        escapeAttr(level.id) +
+                        '">' +
+                        '<td>' +
+                        escapeHtml(level.name || level.id) +
+                        '</td>' +
+                        '<td>' +
+                        escapeHtml(introLabel) +
+                        '</td>' +
+                        '<td>' +
+                        waveWithUrl +
+                        ' / ' +
+                        waves.length +
+                        '</td>' +
+                        '<td><button type="button" class="mini-button" data-cutscene-edit="' +
+                        escapeAttr(level.id) +
+                        '">编辑</button></td>' +
+                        '</tr>'
+                    );
+                })
+                .join(''),
+            '</tbody></table>'
+        ].join('');
+    }
+
+    function ensureCutscenesForLevel(level) {
+        if (!level || !level.map) return null;
+        if (!level.map.cutscenes) level.map.cutscenes = {};
+        return level.map.cutscenes;
+    }
+
+    function renderGlobalCutsceneEditor() {
+        if (!refs.gIntroVideoInfo) return;
+        var level = getGlobalCutsceneTargetLevel();
+        if (!level || !level.map) {
+            refs.gIntroVideoInfo.textContent = '请先选择关卡';
+            if (refs.gIntroVideoTitle) refs.gIntroVideoTitle.value = '';
+            if (refs.gWaveVideoList) refs.gWaveVideoList.innerHTML = '';
+            return;
+        }
+        var cutscenes = level.map.cutscenes || {};
+        var intro = cutscenes.introVideo || {};
+        var gst = formatIntroVideoStatusLines(intro);
+        refs.gIntroVideoInfo.textContent = gst.text;
+        if (refs.gBtnOpenIntroVideoLocation) {
+            refs.gBtnOpenIntroVideoLocation.disabled = !gst.openPath;
+            refs.gBtnOpenIntroVideoLocation.title = gst.openPath
+                ? '在文件管理器中打开该文件，便于手动替换'
+                : '上传并保存到项目 public 目录后可在此打开';
+        }
+        if (refs.gIntroVideoTitle) refs.gIntroVideoTitle.value = intro.title || '';
+        if (!refs.gWaveVideoList) return;
+        var waveVideos = Array.isArray(cutscenes.waveVideos) ? cutscenes.waveVideos : [];
+        if (!waveVideos.length) {
+            refs.gWaveVideoList.innerHTML = '<p class="section-hint" style="margin:8px 0;">暂无波次视频，点击「＋ 添加」新增。</p>';
+            return;
+        }
+        refs.gWaveVideoList.innerHTML = waveVideos
+            .map(function (wv, idx) {
+                var hasUrl = !!wv.url;
+                return [
+                    '<div class="wave-video-item" data-wv-idx="' + idx + '" style="border:1px solid var(--border,#354);border-radius:6px;padding:10px 12px;margin-bottom:8px;">',
+                    '  <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">',
+                    '    <label style="flex:0 0 auto;font-size:12px;opacity:.7;">第',
+                    '      <input type="number" class="g-wv-wave-input" min="1" max="999" value="' + (wv.afterWave || 1) + '"',
+                    '        style="width:52px;margin:0 3px;" data-wv-idx="' + idx + '">',
+                    '    波后</label>',
+                    '    <button type="button" class="mini-button g-wv-upload-btn" data-wv-idx="' + idx + '" style="flex:1;">',
+                    '      ' + (hasUrl ? '替换视频' : '上传视频'),
+                    '      <input type="file" class="g-wv-file-input" accept="video/mp4,video/webm,video/ogg,video/*"',
+                    '        data-wv-idx="' + idx + '" style="position:absolute;inset:0;opacity:0;cursor:pointer;">',
+                    '    </button>',
+                    '    <button type="button" class="mini-button g-wv-remove-btn" data-wv-idx="' + idx + '" style="color:var(--error-color,#d87880);">✕</button>',
+                    '  </div>',
+                    '  <div class="section-hint g-wv-url-info" style="word-break:break-all;min-height:1.2em;font-size:11px;">',
+                    '    ' + escapeHtml(hasUrl ? wv.url : '未上传视频'),
+                    '  </div>',
+                    '  <label class="field-block" style="margin-top:6px;">',
+                    '    <span style="font-size:12px;">字幕标题（可选）</span>',
+                    '    <input type="text" class="g-wv-title-input" placeholder="留空则不显示字幕"',
+                    '      value="' + escapeAttr(wv.title || '') + '" data-wv-idx="' + idx + '">',
+                    '  </label>',
+                    '</div>'
+                ].join('');
+            })
+            .join('');
+    }
+
+    function renderGlobalScreenUiForm() {
+        if (!state || !state.gameAssetConfig) return;
+        state.gameAssetConfig.globalScreenUi = normalizeGlobalScreenUi(state.gameAssetConfig.globalScreenUi);
+        var u = state.gameAssetConfig.globalScreenUi;
+        var u1 = document.getElementById('gsStartScreenBgUrl');
+        var u2 = document.getElementById('gsLevelSelectBgUrl');
+        var c1 = document.getElementById('gsLevelSelectBgColor');
+        var c2 = document.getElementById('gsLevelSelectAccentColor');
+        if (u1) u1.value = u.startScreenBackgroundUrl || '';
+        if (u2) u2.value = u.levelSelectBackgroundUrl || '';
+        if (c1) c1.value = u.levelSelectBackgroundColor || '#0d1418';
+        if (c2) c2.value = u.levelSelectAccentColor || '#8fb8ae';
+    }
+
+    function bindGlobalScreenUiPanel() {
+        var root = document.getElementById('globalScreenUiBindRoot');
+        if (!root || root.dataset.bound === '1') return;
+        root.dataset.bound = '1';
+        function su() {
+            if (!state || !state.gameAssetConfig) return null;
+            state.gameAssetConfig.globalScreenUi = normalizeGlobalScreenUi(state.gameAssetConfig.globalScreenUi);
+            return state.gameAssetConfig.globalScreenUi;
+        }
+        var u1 = document.getElementById('gsStartScreenBgUrl');
+        var u2 = document.getElementById('gsLevelSelectBgUrl');
+        var c1 = document.getElementById('gsLevelSelectBgColor');
+        var c2 = document.getElementById('gsLevelSelectAccentColor');
+        if (u1) {
+            u1.addEventListener('input', function () {
+                var s = su();
+                if (!s) return;
+                s.startScreenBackgroundUrl = u1.value.trim();
+                markDirty('已更新全局开始页背景');
+            });
+        }
+        if (u2) {
+            u2.addEventListener('input', function () {
+                var s = su();
+                if (!s) return;
+                s.levelSelectBackgroundUrl = u2.value.trim();
+                markDirty('已更新选关页背景图');
+            });
+        }
+        if (c1) {
+            c1.addEventListener('input', function () {
+                var s = su();
+                if (!s) return;
+                s.levelSelectBackgroundColor = c1.value;
+                markDirty('已更新选关页底色');
+            });
+        }
+        if (c2) {
+            c2.addEventListener('input', function () {
+                var s = su();
+                if (!s) return;
+                s.levelSelectAccentColor = c2.value;
+                markDirty('已更新选关页强调色');
+            });
+        }
+        var f1 = document.getElementById('gsStartScreenBgFile');
+        var f2 = document.getElementById('gsLevelSelectBgFile');
+        if (f1) {
+            f1.addEventListener('change', function () {
+                var f = f1.files && f1.files[0];
+                f1.value = '';
+                if (!f) return;
+                void (async function () {
+                    try {
+                        setStatus('正在上传开始页背景…', 'idle');
+                        var url = await uploadFileToProjectUrl(f, { gameModelsUpload: true, gameModelsSubdir: 'UI' });
+                        var s = su();
+                        if (!s) return;
+                        s.startScreenBackgroundUrl = url;
+                        if (u1) u1.value = url;
+                        markDirty('已上传开始页背景');
+                        setStatus('已上传开始页背景', 'success');
+                    } catch (err) {
+                        setStatus((err && err.message) || '上传失败', 'error');
+                    }
+                })();
+            });
+        }
+        if (f2) {
+            f2.addEventListener('change', function () {
+                var f = f2.files && f2.files[0];
+                f2.value = '';
+                if (!f) return;
+                void (async function () {
+                    try {
+                        setStatus('正在上传选关页背景…', 'idle');
+                        var url = await uploadFileToProjectUrl(f, { gameModelsUpload: true, gameModelsSubdir: 'UI' });
+                        var s = su();
+                        if (!s) return;
+                        s.levelSelectBackgroundUrl = url;
+                        if (u2) u2.value = url;
+                        markDirty('已上传选关页背景');
+                        setStatus('已上传选关页背景', 'success');
+                    } catch (err) {
+                        setStatus((err && err.message) || '上传失败', 'error');
+                    }
+                })();
+            });
+        }
+    }
+
+    function bindGlobalCutscenePanel() {
+        var panel = document.getElementById('globalTabPanelCutscenes');
+        if (!panel || panel.dataset.gCutsceneBound === '1') return;
+        panel.dataset.gCutsceneBound = '1';
+        if (refs.gIntroVideoFile) {
+            refs.gIntroVideoFile.addEventListener('change', async function () {
+                var file = refs.gIntroVideoFile.files && refs.gIntroVideoFile.files[0];
+                if (!file) return;
+                var lvl = getGlobalCutsceneTargetLevel();
+                try {
+                    setStatus('正在上传开场视频 ' + file.name + '…', 'idle');
+                    var up = await uploadVideoFile(file, lvl);
+                    var cutscenes = ensureCutscenesForLevel(lvl);
+                    if (!cutscenes) return;
+                    cutscenes.introVideo = { url: up.url };
+                    if (up.projectPath) cutscenes.introVideo.projectPath = up.projectPath;
+                    var gTitle = (refs.gIntroVideoTitle && refs.gIntroVideoTitle.value.trim()) || '';
+                    if (gTitle) cutscenes.introVideo.title = gTitle;
+                    else delete cutscenes.introVideo.title;
+                    refs.gIntroVideoFile.value = '';
+                    markDirty('已上传开场视频（全局过场页）');
+                    renderGlobalCutsceneEditor();
+                    renderGlobalCutsceneOverview();
+                    setStatus('开场视频已上传', 'idle');
+                } catch (err) {
+                    refs.gIntroVideoFile.value = '';
+                    setStatus('视频上传失败: ' + (err && err.message), 'error');
+                }
+            });
+        }
+        if (refs.gIntroVideoTitle) {
+            refs.gIntroVideoTitle.addEventListener('change', function () {
+                var lvl = getGlobalCutsceneTargetLevel();
+                var cutscenes = ensureCutscenesForLevel(lvl);
+                if (!cutscenes || !cutscenes.introVideo) return;
+                var t = refs.gIntroVideoTitle.value.trim();
+                if (t) cutscenes.introVideo.title = t;
+                else delete cutscenes.introVideo.title;
+                markDirty('已更新开场视频标题');
+            });
+        }
+        if (refs.gBtnClearIntroVideo) {
+            refs.gBtnClearIntroVideo.addEventListener('click', function () {
+                var lvl = getGlobalCutsceneTargetLevel();
+                var cutscenes = ensureCutscenesForLevel(lvl);
+                if (!cutscenes) return;
+                delete cutscenes.introVideo;
+                markDirty('已清除开场视频');
+                renderGlobalCutsceneEditor();
+                renderGlobalCutsceneOverview();
+            });
+        }
+        if (refs.gBtnOpenIntroVideoLocation && refs.gBtnOpenIntroVideoLocation.dataset.bound !== '1') {
+            refs.gBtnOpenIntroVideoLocation.dataset.bound = '1';
+            refs.gBtnOpenIntroVideoLocation.addEventListener('click', function () {
+                var lvl = getGlobalCutsceneTargetLevel();
+                var intro = lvl && lvl.map && lvl.map.cutscenes && lvl.map.cutscenes.introVideo;
+                var p = effectiveCutsceneVideoProjectPath(intro);
+                if (!p) {
+                    setStatus('无法定位项目内文件：请使用「上传开场视频」写入 public 目录', 'error');
+                    return;
+                }
+                void revealProjectPathInExplorer(p).catch(function (err) {
+                    setStatus((err && err.message) || '打开资源管理器失败', 'error');
+                });
+            });
+        }
+        if (refs.gBtnAddWaveVideo) {
+            refs.gBtnAddWaveVideo.addEventListener('click', function () {
+                var lvl = getGlobalCutsceneTargetLevel();
+                var cutscenes = ensureCutscenesForLevel(lvl);
+                if (!cutscenes) return;
+                if (!Array.isArray(cutscenes.waveVideos)) cutscenes.waveVideos = [];
+                var usedWaves = cutscenes.waveVideos.map(function (w) {
+                    return w.afterWave;
+                });
+                var nextWave = 1;
+                while (usedWaves.indexOf(nextWave) !== -1) nextWave++;
+                cutscenes.waveVideos.push({ afterWave: nextWave, url: '' });
+                markDirty('已新增波次视频槽（全局过场页）');
+                renderGlobalCutsceneEditor();
+                renderGlobalCutsceneOverview();
+            });
+        }
+        if (refs.gWaveVideoList) {
+            refs.gWaveVideoList.addEventListener('change', function (e) {
+                var target = e.target;
+                var idx = parseInt(target.getAttribute('data-wv-idx') || '', 10);
+                if (isNaN(idx)) return;
+                var lvl = getGlobalCutsceneTargetLevel();
+                var cutscenes = ensureCutscenesForLevel(lvl);
+                if (!cutscenes || !Array.isArray(cutscenes.waveVideos) || !cutscenes.waveVideos[idx]) return;
+                if (target.classList.contains('g-wv-wave-input')) {
+                    cutscenes.waveVideos[idx].afterWave = Math.max(1, parseInt(target.value, 10) || 1);
+                    markDirty('已更新波次');
+                } else if (target.classList.contains('g-wv-title-input')) {
+                    var t = target.value.trim();
+                    if (t) cutscenes.waveVideos[idx].title = t;
+                    else delete cutscenes.waveVideos[idx].title;
+                    markDirty('已更新波次视频标题');
+                } else if (target.classList.contains('g-wv-file-input') && target.files && target.files[0]) {
+                    var fileInner = target.files[0];
+                    var idxInner = parseInt(target.getAttribute('data-wv-idx') || '', 10);
+                    void (async function () {
+                        try {
+                            setStatus('正在上传波次视频 ' + fileInner.name + '…', 'idle');
+                            var up = await uploadVideoFile(fileInner, lvl);
+                            var cs = ensureCutscenesForLevel(getGlobalCutsceneTargetLevel());
+                            if (cs && Array.isArray(cs.waveVideos) && cs.waveVideos[idxInner]) {
+                                cs.waveVideos[idxInner].url = up.url;
+                                if (up.projectPath) cs.waveVideos[idxInner].projectPath = up.projectPath;
+                                else delete cs.waveVideos[idxInner].projectPath;
+                                markDirty('已上传波次视频');
+                                renderGlobalCutsceneEditor();
+                                renderGlobalCutsceneOverview();
+                                setStatus('波次视频已上传', 'idle');
+                            }
+                            target.value = '';
+                        } catch (err) {
+                            target.value = '';
+                            setStatus('波次视频上传失败: ' + (err && err.message), 'error');
+                        }
+                    })();
+                }
+            });
+            refs.gWaveVideoList.addEventListener('click', function (e) {
+                var btn = e.target.closest('.g-wv-remove-btn');
+                if (!btn) return;
+                var idx = parseInt(btn.getAttribute('data-wv-idx') || '', 10);
+                if (isNaN(idx)) return;
+                var lvl = getGlobalCutsceneTargetLevel();
+                var cutscenes = ensureCutscenesForLevel(lvl);
+                if (!cutscenes || !Array.isArray(cutscenes.waveVideos)) return;
+                cutscenes.waveVideos.splice(idx, 1);
+                if (cutscenes.waveVideos.length === 0) delete cutscenes.waveVideos;
+                markDirty('已删除波次视频');
+                renderGlobalCutsceneEditor();
+                renderGlobalCutsceneOverview();
+            });
+        }
+    }
+
+    function bindGlobalSettingsChrome() {
+        if (refs.globalSettingsSubTabs && refs.globalSettingsSubTabs.dataset.bound !== '1') {
+            refs.globalSettingsSubTabs.dataset.bound = '1';
+            refs.globalSettingsSubTabs.addEventListener('click', function (e) {
+                var btn = e.target.closest('[data-global-tab]');
+                if (!btn) return;
+                setGlobalSettingsTab(btn.getAttribute('data-global-tab') || 'levels');
+                renderGlobalLevelsManageList();
+            });
+        }
+        if (refs.btnGlobalOpenCreateLevel && refs.btnGlobalOpenCreateLevel.dataset.bound !== '1') {
+            refs.btnGlobalOpenCreateLevel.dataset.bound = '1';
+            refs.btnGlobalOpenCreateLevel.addEventListener('click', function () {
+                createManualLevel();
+            });
+        }
+        if (refs.globalLevelsManageList && refs.globalLevelsManageList.dataset.bound !== '1') {
+            refs.globalLevelsManageList.dataset.bound = '1';
+            refs.globalLevelsManageList.addEventListener('click', function (e) {
+                var delBtn = e.target.closest('[data-level-delete]');
+                if (delBtn) {
+                    deleteLevelById(delBtn.getAttribute('data-level-delete') || '');
+                    return;
+                }
+                var openBtn = e.target.closest('[data-level-open]');
+                if (openBtn) {
+                    focusLevelInEditor(openBtn.getAttribute('data-level-open') || '');
+                }
+            });
+        }
+        if (refs.globalCutsceneLevelSelect && refs.globalCutsceneLevelSelect.dataset.bound !== '1') {
+            refs.globalCutsceneLevelSelect.dataset.bound = '1';
+            refs.globalCutsceneLevelSelect.addEventListener('change', function () {
+                globalCutsceneEditLevelId = refs.globalCutsceneLevelSelect.value || '';
+                renderGlobalCutsceneEditor();
+            });
+        }
+        if (refs.globalSettingsWorkbench && refs.globalSettingsWorkbench.dataset.cutsceneDelegateBound !== '1') {
+            refs.globalSettingsWorkbench.dataset.cutsceneDelegateBound = '1';
+            refs.globalSettingsWorkbench.addEventListener('click', function (e) {
+                var btn = e.target.closest('[data-cutscene-edit]');
+                if (!btn) return;
+                var id = btn.getAttribute('data-cutscene-edit') || '';
+                if (!id || !findLevelById(id)) return;
+                globalCutsceneEditLevelId = id;
+                activeGlobalSettingsTab = 'cutscenes';
+                if (activeWorkbench !== 'globalSettings') {
+                    activeWorkbench = 'globalSettings';
+                    renderAll();
+                } else {
+                    setGlobalSettingsTab('cutscenes');
+                }
+                if (refs.globalCutsceneLevelSelect) refs.globalCutsceneLevelSelect.value = id;
+                renderGlobalCutsceneEditor();
+                var sel = refs.globalCutsceneLevelSelect;
+                if (sel && typeof sel.scrollIntoView === 'function') {
+                    sel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                }
+            });
+        }
+    }
+
     function renderWorkbenchShell() {
         var gameplay = activeWorkbench === 'gameplay';
         var model = activeWorkbench === 'model';
         var level = activeWorkbench === 'level';
         var theme = activeWorkbench === 'theme';
+        var globalSettings = activeWorkbench === 'globalSettings';
         if (refs.levelWorkbench) refs.levelWorkbench.classList.toggle('view-hidden', !level);
         if (refs.levelWorkbench) refs.levelWorkbench.setAttribute('aria-hidden', level ? 'false' : 'true');
         if (refs.gameplayWorkbench) {
@@ -2984,6 +4021,10 @@
         if (refs.themeWorkbench) {
             refs.themeWorkbench.classList.toggle('view-hidden', !theme);
             refs.themeWorkbench.setAttribute('aria-hidden', theme ? 'false' : 'true');
+        }
+        if (refs.globalSettingsWorkbench) {
+            refs.globalSettingsWorkbench.classList.toggle('view-hidden', !globalSettings);
+            refs.globalSettingsWorkbench.setAttribute('aria-hidden', globalSettings ? 'false' : 'true');
         }
         if (refs.btnOpenContentBrowserFloat) {
             refs.btnOpenContentBrowserFloat.classList.toggle('view-hidden', !level);
@@ -3003,6 +4044,10 @@
             refs.themeInspectorWorkspace.classList.toggle('view-hidden', !theme);
             refs.themeInspectorWorkspace.setAttribute('aria-hidden', theme ? 'false' : 'true');
         }
+        if (refs.globalSettingsInspectorWorkspace) {
+            refs.globalSettingsInspectorWorkspace.classList.toggle('view-hidden', !globalSettings);
+            refs.globalSettingsInspectorWorkspace.setAttribute('aria-hidden', globalSettings ? 'false' : 'true');
+        }
         if (refs.workbenchTabs) {
             refs.workbenchTabs.querySelectorAll('[data-workbench]').forEach(function (item) {
                 item.classList.toggle('active', item.getAttribute('data-workbench') === activeWorkbench);
@@ -3015,16 +4060,79 @@
                 refs.levelSummary.textContent = '统一管理项目模型资产，按分类浏览、预览和上传替换。';
             } else if (theme) {
                 refs.levelSummary.textContent = '编辑当前关卡的棋盘颜色、贴图与半透明参数，与主游戏运行时地图一致。';
+            } else if (globalSettings) {
+                refs.levelSummary.textContent =
+                    '全局设置：在中间主区域切换子标签，编辑关卡、过场、音效与 UI 背景；保存写入项目 JSON。';
             } else {
                 refs.levelSummary.textContent = '自动生成关卡骨架，自由布置塔防与第三人称探索地图。';
             }
         }
         if (!gameplay) disposeGameplayAssetPreview();
         if (!model) disposeModelAssetPreview();
+        if (globalSettings) refreshGlobalSettingsWorkbench();
     }
 
     function themeColorInput(hex) {
         return normalizeEditorThemeColorHex(hex, '#5a7d82');
+    }
+
+    function swatchIdToInputRef(swatchForId) {
+        if (!swatchForId || !refs.themeEditorForm) return null;
+        var map = {
+            themeGround: refs.themeGround,
+            themeGroundAlt: refs.themeGroundAlt,
+            themePath: refs.themePath,
+            themeObstacle: refs.themeObstacle,
+            themeAccent: refs.themeAccent,
+            themeFog: refs.themeFog,
+            themeHoverOk: refs.themeHoverOk,
+            themeHoverBad: refs.themeHoverBad
+        };
+        return map[swatchForId] || document.getElementById(swatchForId);
+    }
+
+    function syncThemeColorSwatches() {
+        if (!refs.themeEditorForm) return;
+        refs.themeEditorForm.querySelectorAll('[data-theme-swatch-for]').forEach(function (btn) {
+            var sid = btn.getAttribute('data-theme-swatch-for');
+            var inp = swatchIdToInputRef(sid);
+            if (!inp || inp.type !== 'color') return;
+            var hex = inp.value || '#000000';
+            btn.style.backgroundColor = hex;
+        });
+    }
+
+    function applyThemeWorkbenchTabUi() {
+        if (activeWorkbench !== 'theme') return;
+        var tab = activeThemeWorkbenchTab === 'cutscenes' ? 'cutscenes' : 'colors';
+        activeThemeWorkbenchTab = tab;
+        var tabsRoot = document.getElementById('themeWorkbenchSubTabs');
+        if (tabsRoot) {
+            tabsRoot.querySelectorAll('[data-theme-workbench-tab]').forEach(function (btn) {
+                var on = btn.getAttribute('data-theme-workbench-tab') === tab;
+                btn.classList.toggle('active', on);
+                btn.setAttribute('aria-selected', on ? 'true' : 'false');
+            });
+        }
+        var colorsPanel = document.getElementById('themeTabPanelColors');
+        var cutPanel = document.getElementById('themeTabPanelCutscenes');
+        if (colorsPanel) {
+            var showColors = tab === 'colors';
+            colorsPanel.classList.toggle('view-hidden', !showColors);
+            colorsPanel.setAttribute('aria-hidden', showColors ? 'false' : 'true');
+        }
+        if (cutPanel) {
+            var showCut = tab === 'cutscenes';
+            cutPanel.classList.toggle('view-hidden', !showCut);
+            cutPanel.setAttribute('aria-hidden', showCut ? 'false' : 'true');
+        }
+        if (tab === 'cutscenes') renderCutsceneEditor();
+        else syncThemeColorSwatches();
+    }
+
+    function setThemeWorkbenchTab(tabId) {
+        activeThemeWorkbenchTab = tabId === 'cutscenes' ? 'cutscenes' : 'colors';
+        applyThemeWorkbenchTabUi();
     }
 
     function fillThemeFormFromLevel() {
@@ -3056,6 +4164,7 @@
         refs.themePathGlowOpacity.value = String(t.pathGlowOpacity);
         refs.themePathDetailOpacity.value = String(t.pathDetailOpacity);
         refs.themeHoverCellOpacity.value = String(t.hoverCellOpacity);
+        syncThemeColorSwatches();
     }
 
     function readThemeFormToLevel() {
@@ -3089,8 +4198,330 @@
             level.map.theme = next;
         }
         markDirty('已更新棋盘主题');
+        syncThemeColorSwatches();
         if (activeWorkbench === 'level') renderMap();
         if (previewApi && typeof previewApi.refresh === 'function') previewApi.refresh({ preserveView: true });
+    }
+
+    // ─── 过场视频编辑器 ────────────────────────────────────────────────────────
+
+    function projectPathFromVideoPublicUrl(url) {
+        var u = String(url || '').trim();
+        if (!u || u.indexOf('..') !== -1) return '';
+        if (u.charAt(0) !== '/') return '';
+        return 'public' + u;
+    }
+
+    function effectiveCutsceneVideoProjectPath(entry) {
+        if (!entry || typeof entry !== 'object') return '';
+        var p = String(entry.projectPath || '').trim();
+        if (p) return p;
+        return projectPathFromVideoPublicUrl(entry.url);
+    }
+
+    function formatIntroVideoStatusLines(intro) {
+        var introUrl = typeof intro.url === 'string' ? intro.url.trim() : '';
+        var introPath = effectiveCutsceneVideoProjectPath(intro);
+        var lines = [];
+        if (introUrl) {
+            lines.push('已设置开场视频：' + modelBindShortLabel(introUrl));
+            lines.push('引用地址：' + introUrl);
+            if (introPath) {
+                lines.push('项目内备份：' + introPath + '（可随仓库分享）');
+            } else {
+                lines.push('提示：未检测到项目 public 下的备份路径，若引用本机绝对路径，分享工程后他人可能无法播放。');
+            }
+        } else if (introPath) {
+            lines.push('已保存项目内视频文件：' + introPath);
+            lines.push('提示：缺少引用地址 URL，请重新上传开场视频或检查关卡 JSON 是否已保存。');
+        } else {
+            lines.push('未设置开场视频');
+        }
+        return { text: lines.join('\n'), openPath: introPath };
+    }
+
+    async function revealProjectPathInExplorer(projectPath) {
+        var res = await fetch('/api/reveal-project-path', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ projectPath: projectPath })
+        });
+        var text = await res.text();
+        var data = {};
+        try {
+            data = JSON.parse(text);
+        } catch (e) {
+            throw new Error(text.slice(0, 200) || '服务器返回异常');
+        }
+        if (!res.ok) throw new Error(data.error || text || '打开失败');
+        setStatus('已在资源管理器中定位视频文件', 'success');
+    }
+
+    /** 获取或初始化当前关卡的 cutscenes 对象 */
+    function ensureLevelCutscenes() {
+        var level = getLevel();
+        if (!level || !level.map) return null;
+        if (!level.map.cutscenes) level.map.cutscenes = {};
+        return level.map.cutscenes;
+    }
+
+    /** 渲染过场视频面板（在 theme 工作台下） */
+    function renderCutsceneEditor() {
+        if (!refs.introVideoInfo) return;
+        var level = getLevel();
+        var cutscenes = (level && level.map && level.map.cutscenes) || {};
+        var intro = cutscenes.introVideo || {};
+        var st = formatIntroVideoStatusLines(intro);
+        refs.introVideoInfo.textContent = st.text;
+        if (refs.btnOpenIntroVideoLocation) {
+            refs.btnOpenIntroVideoLocation.disabled = !st.openPath;
+            refs.btnOpenIntroVideoLocation.title = st.openPath
+                ? '在文件管理器中打开该文件，便于手动替换'
+                : '上传并保存到项目 public 目录后可在此打开';
+        }
+
+        // 开场视频标题
+        if (refs.introVideoTitle) refs.introVideoTitle.value = intro.title || '';
+
+        // 波次视频列表
+        if (!refs.waveVideoList) return;
+        var waveVideos = Array.isArray(cutscenes.waveVideos) ? cutscenes.waveVideos : [];
+        if (!waveVideos.length) {
+            refs.waveVideoList.innerHTML = '<p class="section-hint" style="margin:8px 0;">暂无波次视频，点击"＋ 添加"新增。</p>';
+            return;
+        }
+        refs.waveVideoList.innerHTML = waveVideos.map(function (wv, idx) {
+            var hasUrl = !!wv.url;
+            return [
+                '<div class="wave-video-item" data-wv-idx="' + idx + '" style="border:1px solid var(--border,#354);border-radius:6px;padding:10px 12px;margin-bottom:8px;">',
+                '  <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">',
+                '    <label style="flex:0 0 auto;font-size:12px;opacity:.7;">第',
+                '      <input type="number" class="wv-wave-input" min="1" max="999" value="' + (wv.afterWave || 1) + '"',
+                '        style="width:52px;margin:0 3px;" data-wv-idx="' + idx + '">',
+                '    波后</label>',
+                '    <button type="button" class="mini-button wv-upload-btn" data-wv-idx="' + idx + '" style="flex:1;">',
+                '      ' + (hasUrl ? '替换视频' : '上传视频'),
+                '      <input type="file" class="wv-file-input" accept="video/mp4,video/webm,video/ogg,video/*"',
+                '        data-wv-idx="' + idx + '" style="position:absolute;inset:0;opacity:0;cursor:pointer;">',
+                '    </button>',
+                '    <button type="button" class="mini-button wv-remove-btn" data-wv-idx="' + idx + '" style="color:var(--error-color,#d87880);">✕</button>',
+                '  </div>',
+                '  <div class="section-hint wv-url-info" style="word-break:break-all;min-height:1.2em;font-size:11px;">',
+                '    ' + escapeHtml(hasUrl ? wv.url : '未上传视频'),
+                '  </div>',
+                '  <label class="field-block" style="margin-top:6px;">',
+                '    <span style="font-size:12px;">字幕标题（可选）</span>',
+                '    <input type="text" class="wv-title-input" placeholder="留空则不显示字幕"',
+                '      value="' + escapeAttr(wv.title || '') + '" data-wv-idx="' + idx + '">',
+                '  </label>',
+                '</div>'
+            ].join('');
+        }).join('');
+    }
+
+    /** 绑定过场视频面板的事件（只绑一次，通过委托处理动态行） */
+    function bindCutsceneEditorEvents() {
+        // 开场视频上传
+        if (refs.introVideoFile) {
+            refs.introVideoFile.addEventListener('change', async function () {
+                var file = refs.introVideoFile.files && refs.introVideoFile.files[0];
+                if (!file) return;
+                try {
+                    setStatus('正在上传开场视频 ' + file.name + '…', 'idle');
+                    var up = await uploadVideoFile(file, getLevel());
+                    var cutscenes = ensureLevelCutscenes();
+                    if (!cutscenes) return;
+                    cutscenes.introVideo = { url: up.url };
+                    if (up.projectPath) cutscenes.introVideo.projectPath = up.projectPath;
+                    var titleTrim = (refs.introVideoTitle && refs.introVideoTitle.value.trim()) || '';
+                    if (titleTrim) cutscenes.introVideo.title = titleTrim;
+                    else delete cutscenes.introVideo.title;
+                    refs.introVideoFile.value = '';
+                    markDirty('已上传开场视频');
+                    renderCutsceneEditor();
+                    renderGlobalCutsceneOverview();
+                    setStatus('开场视频已上传', 'idle');
+                } catch (err) {
+                    refs.introVideoFile.value = '';
+                    setStatus('视频上传失败: ' + err.message, 'error');
+                }
+            });
+        }
+
+        // 开场视频标题实时保存
+        if (refs.introVideoTitle) {
+            refs.introVideoTitle.addEventListener('change', function () {
+                var cutscenes = ensureLevelCutscenes();
+                if (!cutscenes || !cutscenes.introVideo) return;
+                var t = refs.introVideoTitle.value.trim();
+                if (t) {
+                    cutscenes.introVideo.title = t;
+                } else {
+                    delete cutscenes.introVideo.title;
+                }
+                markDirty('已更新开场视频标题');
+            });
+        }
+
+        // 清除开场视频
+        if (refs.btnClearIntroVideo) {
+            refs.btnClearIntroVideo.addEventListener('click', function () {
+                var cutscenes = ensureLevelCutscenes();
+                if (!cutscenes) return;
+                delete cutscenes.introVideo;
+                markDirty('已清除开场视频');
+                renderCutsceneEditor();
+                renderGlobalCutsceneOverview();
+            });
+        }
+        if (refs.btnOpenIntroVideoLocation && refs.btnOpenIntroVideoLocation.dataset.bound !== '1') {
+            refs.btnOpenIntroVideoLocation.dataset.bound = '1';
+            refs.btnOpenIntroVideoLocation.addEventListener('click', function () {
+                var level = getLevel();
+                var intro = level && level.map && level.map.cutscenes && level.map.cutscenes.introVideo;
+                var p = effectiveCutsceneVideoProjectPath(intro);
+                if (!p) {
+                    setStatus('无法定位项目内文件：请使用「上传开场视频」写入 public 目录', 'error');
+                    return;
+                }
+                void revealProjectPathInExplorer(p).catch(function (err) {
+                    setStatus((err && err.message) || '打开资源管理器失败', 'error');
+                });
+            });
+        }
+
+        // 添加波次视频条目
+        if (refs.btnAddWaveVideo) {
+            refs.btnAddWaveVideo.addEventListener('click', function () {
+                var cutscenes = ensureLevelCutscenes();
+                if (!cutscenes) return;
+                if (!Array.isArray(cutscenes.waveVideos)) cutscenes.waveVideos = [];
+                // 找下一个未使用的波次序号
+                var usedWaves = cutscenes.waveVideos.map(function (w) { return w.afterWave; });
+                var nextWave = 1;
+                while (usedWaves.indexOf(nextWave) !== -1) nextWave++;
+                cutscenes.waveVideos.push({ afterWave: nextWave, url: '' });
+                markDirty('已新增波次视频槽');
+                renderCutsceneEditor();
+            });
+        }
+
+        // 波次视频列表：委托处理所有子元素事件
+        if (refs.waveVideoList) {
+            // 波次输入变更
+            refs.waveVideoList.addEventListener('change', function (e) {
+                var target = e.target;
+                var idx = parseInt(target.getAttribute('data-wv-idx') || '', 10);
+                if (isNaN(idx)) return;
+                var cutscenes = ensureLevelCutscenes();
+                if (!cutscenes || !Array.isArray(cutscenes.waveVideos) || !cutscenes.waveVideos[idx]) return;
+                if (target.classList.contains('wv-wave-input')) {
+                    cutscenes.waveVideos[idx].afterWave = Math.max(1, parseInt(target.value, 10) || 1);
+                    markDirty('已更新波次');
+                } else if (target.classList.contains('wv-title-input')) {
+                    var t = target.value.trim();
+                    if (t) { cutscenes.waveVideos[idx].title = t; } else { delete cutscenes.waveVideos[idx].title; }
+                    markDirty('已更新波次视频标题');
+                } else if (target.classList.contains('wv-file-input') && target.files && target.files[0]) {
+                    var fileInner = target.files[0];
+                    var idxInner = parseInt(target.getAttribute('data-wv-idx') || '', 10);
+                    void (async function () {
+                        try {
+                            setStatus('正在上传波次视频 ' + fileInner.name + '…', 'idle');
+                            var up = await uploadVideoFile(fileInner, getLevel());
+                            var cs = ensureLevelCutscenes();
+                            if (cs && Array.isArray(cs.waveVideos) && cs.waveVideos[idxInner]) {
+                                cs.waveVideos[idxInner].url = up.url;
+                                if (up.projectPath) cs.waveVideos[idxInner].projectPath = up.projectPath;
+                                else delete cs.waveVideos[idxInner].projectPath;
+                                markDirty('已上传波次视频');
+                                renderCutsceneEditor();
+                                renderGlobalCutsceneOverview();
+                                setStatus('波次视频已上传', 'idle');
+                            }
+                            target.value = '';
+                        } catch (err) {
+                            target.value = '';
+                            setStatus('波次视频上传失败: ' + err.message, 'error');
+                        }
+                    })();
+                }
+            });
+
+            // 删除波次视频条目
+            refs.waveVideoList.addEventListener('click', function (e) {
+                var btn = e.target.closest('.wv-remove-btn');
+                if (!btn) return;
+                var idx = parseInt(btn.getAttribute('data-wv-idx') || '', 10);
+                if (isNaN(idx)) return;
+                var cutscenes = ensureLevelCutscenes();
+                if (!cutscenes || !Array.isArray(cutscenes.waveVideos)) return;
+                cutscenes.waveVideos.splice(idx, 1);
+                if (cutscenes.waveVideos.length === 0) delete cutscenes.waveVideos;
+                markDirty('已删除波次视频');
+                renderCutsceneEditor();
+            });
+        }
+    }
+
+    /**
+     * 上传视频文件到项目视频目录，返回 publicUrl。
+     * 优先使用城市上下文（/api/editor-assets），否则回退到 /api/upload-video。
+     */
+    async function uploadVideoFile(file, levelForCityContext) {
+        var content = await fileToBase64(file);
+        var levelCtx = levelForCityContext || getLevel();
+        var cityContext = levelVideoCityContext(levelCtx) || getGameplayCityContext();
+        if (cityContext) {
+            var requestBody = {
+                name: file.name,
+                content: content,
+                cityCode: cityContext.cityCode,
+                cityName: cityContext.cityName,
+                assetType: 'LevelVideos',
+                resourceKind: 'cutscene-video',
+                assetName: file.name.replace(/\.[^.]+$/, '')
+            };
+            var res = await fetch('/api/editor-assets', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(requestBody)
+            });
+            var resText = await res.text();
+            if (!res.ok) throw new Error(parseFetchErrorBody(res.status, resText));
+            var payload = {};
+            try {
+                payload = JSON.parse(resText);
+            } catch (e) {
+                throw new Error('服务器返回非 JSON');
+            }
+            rememberEditorAsset(payload, requestBody.resourceKind);
+            var outA = {
+                url: String(payload.publicUrl || '').trim(),
+                projectPath: String(payload.projectPath || '').trim()
+            };
+            if (!outA.url) throw new Error('上传接口未返回有效的 publicUrl');
+            return outA;
+        }
+        var res2 = await fetch('/api/upload-video', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: file.name, content: content })
+        });
+        var resText2 = await res2.text();
+        if (!res2.ok) throw new Error(parseFetchErrorBody(res2.status, resText2));
+        var payload2 = {};
+        try {
+            payload2 = JSON.parse(resText2);
+        } catch (e) {
+            throw new Error('服务器返回非 JSON');
+        }
+        var outB = {
+            url: String(payload2.url || '').trim(),
+            projectPath: String(payload2.projectPath || '').trim()
+        };
+        if (!outB.url) throw new Error('上传接口未返回有效的 url');
+        return outB;
     }
 
     function renderThemeEditor() {
@@ -3102,6 +4533,7 @@
             fillThemeFormFromLevel();
         }
         if (refs.themeScopeSelect) refs.themeScopeSelect.value = activeThemeScope;
+        applyThemeWorkbenchTabUi();
     }
 
     function renderGameplayEditor() {
@@ -4126,6 +5558,7 @@
         refs.fieldTileSize.value = String(level.map.grid.tileSize);
         renderGeoFields(level);
         renderExploreGameplayPanels();
+        renderLevelAudioFields(level);
         renderSelectionInspector();
     }
 
@@ -6571,6 +8004,7 @@
         normalized.explorationLayout = normalizeExplorationLayout(source.explorationLayout, normalized);
         normalized.actors = normalizeActors(source.actors, seed);
         normalized.boardImageLayers = normalizeBoardImageLayers(source.boardImageLayers);
+        normalized.levelAudio = normalizeLevelAudioSource(source.levelAudio);
         trimMapToBounds(normalized);
         return normalized;
     }
@@ -7579,59 +9013,6 @@
         return candidate;
     }
 
-    function uid(prefix) {
-        return prefix + '-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
-    }
-
-    function slugify(value) {
-        return String(value || '')
-            .trim()
-            .toLowerCase()
-            .replace(/['’]/g, '')
-            .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, '-')
-            .replace(/^-+|-+$/g, '')
-            .slice(0, 70);
-    }
-
-    function updatePath(target, path, value) {
-        if (!target) return;
-        var parts = path.split('.');
-        var cursor = target;
-        for (var i = 0; i < parts.length - 1; i += 1) {
-            if (!cursor[parts[i]] || typeof cursor[parts[i]] !== 'object') cursor[parts[i]] = {};
-            cursor = cursor[parts[i]];
-        }
-        cursor[parts[parts.length - 1]] = value;
-    }
-
-    function toggleCell(cells, col, row) {
-        var c = Number(col);
-        var r = Number(row);
-        var index = cells.findIndex(function (cell) {
-            return Number(cell.col) === c && Number(cell.row) === r;
-        });
-        if (index >= 0) cells.splice(index, 1);
-        else cells.push({ col: c, row: r });
-    }
-
-    function removeCell(cells, col, row) {
-        var c = Number(col);
-        var r = Number(row);
-        var index = cells.findIndex(function (cell) {
-            return Number(cell.col) === c && Number(cell.row) === r;
-        });
-        if (index >= 0) cells.splice(index, 1);
-    }
-
-    function hasCell(cells, col, row) {
-        if (!Array.isArray(cells)) return false;
-        var c = Number(col);
-        var r = Number(row);
-        return cells.some(function (cell) {
-            return Number(cell.col) === c && Number(cell.row) === r;
-        });
-    }
-
     function ensureExplorationLayout(map) {
         if (!map.explorationLayout) {
             map.explorationLayout = normalizeExplorationLayout(null, map);
@@ -7643,82 +9024,8 @@
         return map.explorationLayout;
     }
 
-    function cloneCells(cells) {
-        return (cells || []).map(function (cell) {
-            return { col: cell.col, row: cell.row };
-        });
-    }
-
     function cloneGeoConfig(geo) {
         return normalizeGeoConfig(clone(geo));
     }
 
-    function cellsRect(col, row, width, height) {
-        var cells = [];
-        for (var y = row; y < row + height; y += 1) {
-            for (var x = col; x < col + width; x += 1) {
-                cells.push({ col: x, row: y });
-            }
-        }
-        return cells;
-    }
-
-    function atCell(col, row) {
-        var c = Number(col);
-        var r = Number(row);
-        return function (item) {
-            return Number(item.col) === c && Number(item.row) === r;
-        };
-    }
-
-    function notAtCell(col, row) {
-        var c = Number(col);
-        var r = Number(row);
-        return function (item) {
-            return Number(item.col) !== c || Number(item.row) !== r;
-        };
-    }
-
-    function inBounds(cols, rows) {
-        return function (item) {
-            var c = Number(item.col);
-            var r = Number(item.row);
-            return c >= 0 && c < cols && r >= 0 && r < rows;
-        };
-    }
-
-    function byId(id) {
-        return function (item) { return item && item.id === id; };
-    }
-
-    function clamp(value, min, max) {
-        return Math.min(max, Math.max(min, value));
-    }
-
-    function clone(value) {
-        return JSON.parse(JSON.stringify(value));
-    }
-
-    function normalizeChineseCityName(value) {
-        return String(value || '')
-            .replace(/^中国[·\s-]*/, '')
-            .replace(/ · .+$/, '')
-            .replace(/[市区县盟州地区特别行政\s]/g, '')
-            .trim();
-    }
-
-    function escapeHtml(value) {
-        return String(value == null ? '' : value)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#39;');
-    }
-
-    function escapeAttr(value) {
-        return escapeHtml(value);
-    }
-
     document.addEventListener('DOMContentLoaded', init);
-})();

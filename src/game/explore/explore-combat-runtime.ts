@@ -24,6 +24,8 @@ export interface ExploreCombatHost {
   allocateUid(): number;
   showToast(text: string, important?: boolean): void;
   damageExplorePlayer(amount: number): void;
+  onExploreBasicAttackFired?(): void;
+  onExploreEnemyKilled?(): void;
 }
 
 export class ExploreCombatRuntime {
@@ -176,6 +178,7 @@ export class ExploreCombatRuntime {
       type: "basic",
       target: nearestEnemy,
     });
+    this.host.onExploreBasicAttackFired?.();
   }
 
   castOrbSkill(): void {
@@ -392,6 +395,7 @@ export class ExploreCombatRuntime {
   private killEnemy(enemy: ExploreEnemy): void {
     enemy.dead = true;
     this.enemyGroup.remove(enemy.mesh);
+    this.host.onExploreEnemyKilled?.();
 
     const itemPool = [
       { name: "\u91d1\u5c5e\u788e\u7247", icon: "\ud83d\udd29" },
