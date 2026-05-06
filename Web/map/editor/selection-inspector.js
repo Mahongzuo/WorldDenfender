@@ -1,5 +1,5 @@
 import { clamp, escapeAttr, escapeHtml, updatePath } from './utils.js';
-import { LCB_CELL_KIND_LABEL } from './content.js';
+import { DEFENSE_ELEMENT_OPTIONS, LCB_CELL_KIND_LABEL } from './content.js';
 import { fieldHtml, selectHtml, boardLayerFieldHtml, findBoardImageLayerById } from './html-builders.js';
 import { ensureWorldOffset } from './level-mutators.js';
 
@@ -25,6 +25,26 @@ function buildInspectorForm(env, kind, item) {
             })
         )
         .join('');
+    var elementOptions = DEFENSE_ELEMENT_OPTIONS.map(function (opt) {
+        return (
+            '<option value="' +
+            escapeAttr(opt.id) +
+            '"' +
+            (opt.id === item.element ? ' selected' : '') +
+            '>' +
+            escapeHtml(opt.label || opt.id) +
+            '</option>'
+        );
+    }).join('');
+    var bossOptions = [
+        ['ai-atlas', '重构者 Atlas'],
+        ['ai-vulcan', '熔核调度员 Vulcan'],
+        ['ai-prism', '棱镜审计官 Prism'],
+        ['ai-gridmind', '雷网中枢 Gridmind'],
+        ['ai-echo', '回声协议 Echo']
+    ].map(function (opt) {
+        return '<option value="' + escapeAttr(opt[0]) + '"' + (opt[0] === item.bossId ? ' selected' : '') + '>' + escapeHtml(opt[1]) + '</option>';
+    }).join('');
     var base = [
         '<div class="form-grid two">',
         fieldHtml('名称', 'name', item.name || ''),
@@ -54,6 +74,53 @@ function buildInspectorForm(env, kind, item) {
         base.push(selectHtml('模型', 'modelId', modelOptions));
         base.push(fieldHtml('交互类型', 'interaction', item.interaction || 'inspect'));
         base.push(fieldHtml('半径', 'radius', item.radius || 2, 'number', '0.1'));
+    }
+    if (kind === 'exploreBoss') {
+        if (!item.overrideStats || typeof item.overrideStats !== 'object') item.overrideStats = {};
+        base.push(selectHtml('Boss 模板', 'bossId', bossOptions));
+        base.push(selectHtml('属性', 'element', elementOptions));
+        base.push(selectHtml('模型', 'modelId', modelOptions));
+        base.push(fieldHtml('模型路径', 'modelPath', item.modelPath || ''));
+        base.push(fieldHtml('模型缩放', 'modelScale', item.modelScale || 1.8, 'number', '0.1'));
+        base.push(fieldHtml('等级', 'level', item.level || 1, 'number'));
+        base.push(fieldHtml('触发半径', 'triggerRadius', item.triggerRadius || 9, 'number', '0.1'));
+        base.push(fieldHtml('覆盖生命(0=默认)', 'overrideStats.maxHp', item.overrideStats.maxHp || 0, 'number'));
+        base.push(fieldHtml('覆盖攻击(0=默认)', 'overrideStats.attack', item.overrideStats.attack || 0, 'number'));
+        base.push(fieldHtml('覆盖速度(0=默认)', 'overrideStats.speed', item.overrideStats.speed || 0, 'number', '0.1'));
+        base.push(fieldHtml('奖励金钱(0=默认)', 'overrideStats.rewardMoney', item.overrideStats.rewardMoney || 0, 'number'));
+        base.push(fieldHtml('奖励 XP(0=默认)', 'overrideStats.rewardXp', item.overrideStats.rewardXp || 0, 'number'));
+    }
+    if (kind === 'exploreSpawner') {
+        base.push(fieldHtml('敌人模板 ID', 'enemyTypeId', item.enemyTypeId || 'ai-drone'));
+        base.push(selectHtml('属性', 'element', elementOptions));
+        base.push(selectHtml('模型', 'modelId', modelOptions));
+        base.push(fieldHtml('模型路径', 'modelPath', item.modelPath || ''));
+        base.push(fieldHtml('模型缩放', 'modelScale', item.modelScale || 1, 'number', '0.1'));
+        base.push(fieldHtml('最大同时存在', 'maxConcurrent', item.maxConcurrent || 3, 'number'));
+        base.push(fieldHtml('生成间隔(秒)', 'spawnIntervalSec', item.spawnIntervalSec || 6, 'number', '0.1'));
+        base.push(fieldHtml('每次生成数量', 'spawnCount', item.spawnCount || 1, 'number'));
+        base.push(fieldHtml('触发半径', 'triggerRadius', item.triggerRadius || 12, 'number', '0.1'));
+        base.push(fieldHtml('活动半径', 'activeRadius', item.activeRadius || 18, 'number', '0.1'));
+        base.push(fieldHtml('总生成上限(0=无限)', 'totalLimit', item.totalLimit || 0, 'number'));
+    }
+    if (kind === 'explorePickup') {
+        var typeOptions =
+            '<option value="money"' + (item.type === 'money' ? ' selected' : '') + '>金币</option>' +
+            '<option value="item"' + (item.type === 'item' ? ' selected' : '') + '>道具</option>';
+        var itemTypeOptions =
+            '<option value="material"' + (item.itemType !== 'consumable' ? ' selected' : '') + '>材料</option>' +
+            '<option value="consumable"' + (item.itemType === 'consumable' ? ' selected' : '') + '>消耗品</option>';
+        base.push(selectHtml('奖励类型', 'type', typeOptions));
+        base.push(fieldHtml('金币金额', 'moneyAmount', item.moneyAmount || 0, 'number'));
+        base.push(fieldHtml('道具 ID', 'itemId', item.itemId || ''));
+        base.push(fieldHtml('道具名称', 'itemName', item.itemName || 'AI 记忆碎片'));
+        base.push(selectHtml('道具类型', 'itemType', itemTypeOptions));
+        base.push(fieldHtml('图标', 'itemIcon', item.itemIcon || 'AI'));
+        base.push(fieldHtml('数量', 'quantity', item.quantity || 1, 'number'));
+        base.push(selectHtml('模型', 'modelId', modelOptions));
+        base.push(fieldHtml('模型路径', 'modelPath', item.modelPath || ''));
+        base.push(fieldHtml('模型缩放', 'modelScale', item.modelScale || 1, 'number', '0.1'));
+        base.push(fieldHtml('拾取半径', 'collectRadius', item.collectRadius || 1.25, 'number', '0.1'));
     }
     base.push('</div>');
     return base.join('');
@@ -91,6 +158,12 @@ function updateSelectedField(env, input) {
             : input.value;
     if (input.type === 'number' && !Number.isFinite(next)) return;
     updatePath(target.item, path, next);
+    if (path === 'modelId') {
+        var asset = env.getBrowsableModelAssets().find(function (item) {
+            return item.id === String(next || '');
+        });
+        target.item.modelPath = asset ? asset.path || asset.publicUrl || '' : '';
+    }
     if (path === 'col' || path === 'row') {
         target.item[path] = Math.max(0, Math.floor(Number(next) || 0));
         env.renderMap();
@@ -126,7 +199,7 @@ export function renderSelectionInspector(refs, env) {
         }
         refs.selectionInspector.className = 'selection-inspector';
         refs.selectionInspector.innerHTML =
-            '<p class="section-hint">数据写入 <code>map.boardImageLayers</code>。Delete 移除该配图层。</p>' +
+            '<p class="section-hint">数据写入 <code>map.boardImageLayers</code>。Delete 移除该配图层。宽度设为 <strong>≥100%</strong> 时配图在预览与<strong>游戏中</strong>会<strong>铺满整盘格子并拉伸</strong>以适应棋盘比例（原为保持比例则另一边可能留白）。滚轮缩放或填入宽度即可触发。</p>' +
             '<div class="form-grid two">' +
             boardLayerFieldHtml('左上角 X%', 'centerX', layer.centerX, 0.5) +
             boardLayerFieldHtml('左上角 Y%', 'centerY', layer.centerY, 0.5) +

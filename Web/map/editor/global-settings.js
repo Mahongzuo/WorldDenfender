@@ -1,7 +1,7 @@
 import { escapeAttr, escapeHtml } from './utils.js';
 import { modelBindShortLabel } from './display-utils.js';
 import { findLevelById } from './id-utils.js';
-import { effectiveCutsceneVideoProjectPath, formatIntroVideoStatusLines } from './cutscene-utils.js';
+import { effectiveCutsceneVideoOpenPath, effectiveCutsceneVideoProjectPath, formatIntroVideoStatusLines } from './cutscene-utils.js';
 
 var GLOBAL_SETTINGS_TABS = ['levels', 'cutscenes', 'audio', 'backgrounds'];
 
@@ -174,12 +174,15 @@ function renderGlobalCutsceneEditor(refs, env) {
     var cutscenes = level.map.cutscenes || {};
     var intro = cutscenes.introVideo || {};
     var status = formatIntroVideoStatusLines(intro);
-    refs.gIntroVideoInfo.textContent = status.text;
+    var openPath = effectiveCutsceneVideoOpenPath(intro, level);
+    refs.gIntroVideoInfo.textContent = status.text + (!status.openPath && openPath ? '\n项目视频目录：' + openPath : '');
     if (refs.gBtnOpenIntroVideoLocation) {
-        refs.gBtnOpenIntroVideoLocation.disabled = !status.openPath;
-        refs.gBtnOpenIntroVideoLocation.title = status.openPath
-            ? '在文件管理器中打开该文件，便于手动替换'
-            : '上传并保存到项目 public 目录后可在此打开';
+        refs.gBtnOpenIntroVideoLocation.disabled = !openPath;
+        refs.gBtnOpenIntroVideoLocation.title = effectiveCutsceneVideoProjectPath(intro)
+            ? '在文件管理器中定位当前视频文件，便于手动替换'
+            : openPath
+                ? '打开该关卡的视频保存目录'
+                : '无法推断当前关卡的视频保存目录';
     }
     if (refs.gIntroVideoTitle) refs.gIntroVideoTitle.value = intro.title || '';
     if (!refs.gWaveVideoList) return;
@@ -308,9 +311,9 @@ export function bindGlobalCutscenePanel(refs, env) {
         refs.gBtnOpenIntroVideoLocation.addEventListener('click', function () {
             var level = getGlobalCutsceneTargetLevel(env);
             var intro = level && level.map && level.map.cutscenes && level.map.cutscenes.introVideo;
-            var projectPath = effectiveCutsceneVideoProjectPath(intro);
+            var projectPath = effectiveCutsceneVideoOpenPath(intro, level);
             if (!projectPath) {
-                env.setStatus('无法定位项目内文件：请使用「上传开场视频」写入 public 目录', 'error');
+                env.setStatus('无法推断该关卡的项目视频目录，请先设置城市信息或上传视频', 'error');
                 return;
             }
             void env.revealProjectPathInExplorer(projectPath).catch(function (error) {

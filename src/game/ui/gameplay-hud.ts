@@ -66,7 +66,7 @@ export function refreshGameplayHud(dom: GameplayHudDom, m: GameplayHudModels): v
   dom.mapNameElement.textContent = m.activeMapLabel;
   dom.dropHudElement.textContent =
     m.mode === "explore"
-      ? `${Math.ceil(m.dropTimerRemaining)}s \u540e\u6389\u843d`
+      ? "编辑器奖励"
       : "\u5207\u5230\u63a2\u7d22";
 
   const spec = BUILD_SPECS[m.selectedBuild];

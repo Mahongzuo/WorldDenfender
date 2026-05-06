@@ -78,6 +78,83 @@ function addExplorePoint(env, col, row) {
     env.setSelectedObject({ kind: 'explorePoint', id: id });
 }
 
+function addExploreBoss(env, col, row) {
+    var level = env.getLevel();
+    if (!Array.isArray(level.map.exploreBosses)) level.map.exploreBosses = [];
+    var id = uid('boss');
+    var bossIds = ['ai-atlas', 'ai-vulcan', 'ai-prism', 'ai-gridmind', 'ai-echo'];
+    var names = ['重构者 Atlas', '熔核调度员 Vulcan', '棱镜审计官 Prism', '雷网中枢 Gridmind', '回声协议 Echo'];
+    var elements = ['force', 'thermal', 'light', 'electric', 'sound'];
+    var idx = level.map.exploreBosses.length % bossIds.length;
+    level.map.exploreBosses.push({
+        id: id,
+        bossId: bossIds[idx],
+        name: names[idx],
+        col: col,
+        row: row,
+        modelId: '',
+        modelPath: '',
+        modelScale: 1.8,
+        element: elements[idx],
+        level: 1,
+        triggerRadius: 9,
+        respawn: false,
+        overrideStats: { maxHp: 0, attack: 0, defense: 0, speed: 0, rewardMoney: 0, rewardXp: 0 }
+    });
+    env.setSelectedObject({ kind: 'exploreBoss', id: id });
+}
+
+function addExploreSpawner(env, col, row) {
+    var level = env.getLevel();
+    if (!Array.isArray(level.map.exploreSpawners)) level.map.exploreSpawners = [];
+    var id = uid('spawner');
+    level.map.exploreSpawners.push({
+        id: id,
+        name: 'AI 刷怪点 ' + (level.map.exploreSpawners.length + 1),
+        col: col,
+        row: row,
+        enemyTypeId: 'ai-drone',
+        element: 'electric',
+        modelId: '',
+        modelPath: '',
+        modelScale: 1,
+        maxConcurrent: 3,
+        spawnIntervalSec: 6,
+        spawnCount: 1,
+        triggerRadius: 12,
+        activeRadius: 18,
+        totalLimit: 0,
+        disableWhenBossDefeated: false,
+        rewards: [{ money: 12, xp: 10, itemName: '', itemIcon: 'AI', quantity: 1 }]
+    });
+    env.setSelectedObject({ kind: 'exploreSpawner', id: id });
+}
+
+function addExplorePickup(env, col, row, type) {
+    var level = env.getLevel();
+    if (!Array.isArray(level.map.explorePickups)) level.map.explorePickups = [];
+    var id = uid('pickup');
+    var isItem = type === 'item';
+    level.map.explorePickups.push({
+        id: id,
+        type: isItem ? 'item' : 'money',
+        name: isItem ? 'AI 记忆碎片' : '城市算力资金',
+        col: col,
+        row: row,
+        moneyAmount: isItem ? 0 : 50,
+        itemId: '',
+        itemName: isItem ? 'AI 记忆碎片' : '',
+        itemType: 'material',
+        itemIcon: isItem ? 'AI' : '$',
+        quantity: 1,
+        modelId: '',
+        modelPath: '',
+        modelScale: 1,
+        collectRadius: 1.25
+    });
+    env.setSelectedObject({ kind: 'explorePickup', id: id });
+}
+
 export function handleCellAction(env, col, row) {
     var level = env.getLevel();
     if (!level) return;
@@ -95,6 +172,10 @@ export function handleCellAction(env, col, row) {
         if (env.getActiveTool() === 'spawn') setExploreStartPoint(env, col, row);
         if (env.getActiveTool() === 'objective') setExploreExitPoint(env, col, row);
         if (env.getActiveTool() === 'buildSlot') addExplorePoint(env, col, row);
+        if (env.getActiveTool() === 'exploreBoss') addExploreBoss(env, col, row);
+        if (env.getActiveTool() === 'exploreSpawner') addExploreSpawner(env, col, row);
+        if (env.getActiveTool() === 'exploreMoney') addExplorePickup(env, col, row, 'money');
+        if (env.getActiveTool() === 'exploreItem') addExplorePickup(env, col, row, 'item');
         if (env.getActiveTool() === 'safeZone') {
             if (!Array.isArray(exploreLayout.safeZones)) exploreLayout.safeZones = [];
             toggleCell(exploreLayout.safeZones, col, row);
@@ -135,6 +216,9 @@ export function moveMarker(env, kind, id, col, row) {
     var layout = ensureExplorationLayout(level.map);
     if (kind === 'spawn') item = env.getActiveEditorMode() === 'explore' ? layout.startPoint : level.map.spawnPoints.find(byId(id));
     if (kind === 'explorePoint') item = level.map.explorationPoints.find(byId(id));
+    if (kind === 'exploreBoss') item = Array.isArray(level.map.exploreBosses) ? level.map.exploreBosses.find(byId(id)) : null;
+    if (kind === 'exploreSpawner') item = Array.isArray(level.map.exploreSpawners) ? level.map.exploreSpawners.find(byId(id)) : null;
+    if (kind === 'explorePickup') item = Array.isArray(level.map.explorePickups) ? level.map.explorePickups.find(byId(id)) : null;
     if (kind === 'objective') {
         item = env.getActiveEditorMode() === 'explore'
             ? layout.exitPoint
@@ -175,6 +259,9 @@ export function eraseCellAt(env, col, row) {
 
     level.map.explorationPoints = level.map.explorationPoints.filter(notAtCell(c, r));
     level.map.actors = level.map.actors.filter(notAtCell(c, r));
+    if (Array.isArray(level.map.exploreBosses)) level.map.exploreBosses = level.map.exploreBosses.filter(notAtCell(c, r));
+    if (Array.isArray(level.map.exploreSpawners)) level.map.exploreSpawners = level.map.exploreSpawners.filter(notAtCell(c, r));
+    if (Array.isArray(level.map.explorePickups)) level.map.explorePickups = level.map.explorePickups.filter(notAtCell(c, r));
     if (Array.isArray(level.map.terrain)) removeCell(level.map.terrain, c, r);
 }
 

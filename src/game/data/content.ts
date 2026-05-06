@@ -96,7 +96,6 @@ export const BUILD_SPECS: Record<BuildId, BuildSpec> = {
     element: "light",
     functionTags: ["areaAttack", "damageOverTime"],
     requiresUnlock: true,
-    city: "jinan",
     range: 6.2,
     maxHp: 420,
     fireRate: 1.25,

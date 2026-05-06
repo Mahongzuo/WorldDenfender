@@ -46,6 +46,71 @@ export function clearBoardImageInteractionState() {
     resizeState = null;
 }
 
+export function addBoardImageLayerFromUrl(level, src, options) {
+    return new Promise(function (resolve, reject) {
+        if (!level || !level.map || !level.map.grid) {
+            reject(new Error('当前关卡缺少棋盘网格'));
+            return;
+        }
+        var normalizedSrc = typeof src === 'string' ? src.trim() : '';
+        if (!normalizedSrc) {
+            reject(new Error('缺少棋盘图片地址'));
+            return;
+        }
+        if (!Array.isArray(level.map.boardImageLayers)) level.map.boardImageLayers = [];
+        var base = options || {};
+        var image = new Image();
+        image.onload = function () {
+            var aspect =
+                image.naturalWidth > 0
+                    ? clampBoardAspect(image.naturalHeight / image.naturalWidth)
+                    : clampBoardAspect(0.75);
+            var maxOrd =
+                level.map.boardImageLayers.length === 0
+                    ? -1
+                    : Math.max.apply(
+                          null,
+                          level.map.boardImageLayers.map(function (layer) {
+                              return Number(layer.order) || 0;
+                          })
+                      );
+            var rawWidthPct = Number(base.widthPct);
+            var cover = base.cover === true || rawWidthPct >= 100;
+            var layer = {
+                id: uid('board-img'),
+                src: normalizedSrc,
+                centerX: cover ? 0 : clamp(Number(base.centerX), 0, 100),
+                centerY: cover ? 0 : clamp(Number(base.centerY), 0, 100),
+                widthPct: cover ? 100 : clamp(Number.isFinite(rawWidthPct) ? rawWidthPct : 46, 5, 500),
+                opacity: clamp(Number(base.opacity), 0, 1),
+                order: Number.isFinite(Number(base.order)) ? Number(base.order) : maxOrd + 1,
+                aspect: aspect
+            };
+            if (!Number.isFinite(layer.opacity)) layer.opacity = 1;
+            if (base.replaceLayerId) {
+                var index = level.map.boardImageLayers.findIndex(function (item) {
+                    return item && item.id === base.replaceLayerId;
+                });
+                if (index !== -1) {
+                    layer.id = base.replaceLayerId;
+                    if (Number.isFinite(Number(level.map.boardImageLayers[index].order))) {
+                        layer.order = Number(level.map.boardImageLayers[index].order);
+                    }
+                    level.map.boardImageLayers.splice(index, 1, layer);
+                    resolve(layer);
+                    return;
+                }
+            }
+            level.map.boardImageLayers.push(layer);
+            resolve(layer);
+        };
+        image.onerror = function () {
+            reject(new Error('棋盘图片加载失败'));
+        };
+        image.src = normalizedSrc;
+    });
+}
+
 export function renderBoardImagesPanel(refs, env) {
     if (!refs.boardImagesPanel) return;
     var show = env.getActiveWorkbench() === 'level' && env.getViewportViewMode() === 'board';
@@ -178,10 +243,6 @@ function readSpriteAspect(layer, spriteEl) {
     return clampBoardAspect(0.75);
 }
 
-function toolAllowsBoardSpriteEdit(activeTool) {
-    return activeTool === 'select' || activeTool === 'boardImage';
-}
-
 function applyBoardImageResizePointerMove(event, env) {
     var resize = resizeState;
     if (!resize) return;
@@ -272,12 +333,7 @@ export function bindBoardImageGlobalHandlers(refs, env) {
     refs.mapStage.addEventListener(
         'pointerdown',
         function (event) {
-            if (
-                env.getActiveWorkbench() !== 'level' ||
-                env.getViewportViewMode() !== 'board' ||
-                !toolAllowsBoardSpriteEdit(env.getActiveTool())
-            )
-                return;
+            if (env.getActiveWorkbench() !== 'level' || env.getViewportViewMode() !== 'board') return;
             var spriteEl = event.target.closest('.map-board-image-sprite');
             if (!spriteEl) return;
             var layerId = spriteEl.getAttribute('data-board-image-id') || '';
@@ -375,12 +431,7 @@ export function bindBoardImageGlobalHandlers(refs, env) {
     refs.mapStage.addEventListener(
         'wheel',
         function (event) {
-            if (
-                env.getActiveWorkbench() !== 'level' ||
-                env.getViewportViewMode() !== 'board' ||
-                !toolAllowsBoardSpriteEdit(env.getActiveTool())
-            )
-                return;
+            if (env.getActiveWorkbench() !== 'level' || env.getViewportViewMode() !== 'board') return;
             var spriteEl = event.target.closest('.map-board-image-sprite');
             if (!spriteEl) return;
             event.preventDefault();
@@ -451,32 +502,20 @@ export function tryConsumeBoardImageFileDrop(event, refs, env) {
                 ingestNext();
                 return;
             }
-            var image = new Image();
-            image.onload = function () {
-                var id = uid('board-img');
-                var aspect =
-                    image.naturalWidth > 0
-                        ? clampBoardAspect(image.naturalHeight / image.naturalWidth)
-                        : clampBoardAspect(0.75);
-                level.map.boardImageLayers.push({
-                    id: id,
-                    src: url,
-                    centerX: clamp(base.lx + (offset % 3) * 3, 0, 100),
-                    centerY: clamp(base.ty + Math.floor(offset / 3) * 3, 0, 100),
-                    widthPct: 46,
-                    opacity: 1,
-                    order: maxOrd + 1 + offset,
-                    aspect: aspect
-                });
-                env.setSelectedObject({ kind: 'boardImage', id: id });
+            addBoardImageLayerFromUrl(level, url, {
+                centerX: clamp(base.lx + (offset % 3) * 3, 0, 100),
+                centerY: clamp(base.ty + Math.floor(offset / 3) * 3, 0, 100),
+                widthPct: 46,
+                opacity: 1,
+                order: maxOrd + 1 + offset
+            }).then(function (layer) {
+                env.setSelectedObject({ kind: 'boardImage', id: layer.id });
                 index += 1;
                 ingestNext();
-            };
-            image.onerror = function () {
+            }).catch(function () {
                 index += 1;
                 ingestNext();
-            };
-            image.src = url;
+            });
         };
         reader.readAsDataURL(images[offset]);
     }

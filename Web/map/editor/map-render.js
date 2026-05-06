@@ -16,27 +16,33 @@ function boardSpriteLayersHtml(env, level) {
         });
     return list
         .map(function (layer) {
+            var stretchFill = Number(layer.widthPct) >= 100;
             var selected =
                 selectedObject &&
                 selectedObject.kind === 'boardImage' &&
                 selectedObject.id === layer.id
                     ? ' map-board-image-sprite--selected'
                     : '';
+            var stretchCls = stretchFill ? ' map-board-image-sprite--stretch-fill' : '';
             var opacity = Number(layer.opacity);
             if (!Number.isFinite(opacity)) opacity = 1;
             opacity = clamp(opacity, 0, 1);
             var zIndex = Math.round(20 + Number(layer.order || 0));
-            var style =
-                'left:' +
-                escapeAttr(String(layer.centerX)) +
-                '%;top:' +
-                escapeAttr(String(layer.centerY)) +
-                '%;width:' +
-                escapeAttr(String(layer.widthPct)) +
-                '%;opacity:' +
-                escapeAttr(String(opacity)) +
-                ';z-index:' +
-                escapeAttr(String(zIndex));
+            var style = stretchFill
+                ? 'left:0;top:0;width:100%;height:100%;opacity:' +
+                  escapeAttr(String(opacity)) +
+                  ';z-index:' +
+                  escapeAttr(String(zIndex))
+                : 'left:' +
+                  escapeAttr(String(layer.centerX)) +
+                  '%;top:' +
+                  escapeAttr(String(layer.centerY)) +
+                  '%;width:' +
+                  escapeAttr(String(layer.widthPct)) +
+                  '%;opacity:' +
+                  escapeAttr(String(opacity)) +
+                  ';z-index:' +
+                  escapeAttr(String(zIndex));
             var handlesHtml = selected
                 ? '<div class="bil-handles" aria-hidden="true">' +
                   ['nw', 'n', 'ne', 'w', 'e', 'sw', 's', 'se']
@@ -57,6 +63,7 @@ function boardSpriteLayersHtml(env, level) {
             return (
                 '<div class="map-board-image-sprite' +
                 selected +
+                stretchCls +
                 '" draggable="false" tabindex="-1" data-board-image-id="' +
                 escapeAttr(layer.id) +
                 '" style="' +
@@ -118,6 +125,15 @@ function buildCellMarkersFragments(env, level, col, row) {
     }
     level.map.explorationPoints.filter(atCell(col, row)).forEach(function (point) {
         markers.push(markerHtml('explorePoint', point.id, 'P', 'cell-marker explore', selectedObject));
+    });
+    (level.map.exploreBosses || []).filter(atCell(col, row)).forEach(function (boss) {
+        markers.push(markerHtml('exploreBoss', boss.id, 'AI', 'cell-marker objective', selectedObject));
+    });
+    (level.map.exploreSpawners || []).filter(atCell(col, row)).forEach(function (spawner) {
+        markers.push(markerHtml('exploreSpawner', spawner.id, 'SP', 'cell-marker spawn', selectedObject));
+    });
+    (level.map.explorePickups || []).filter(atCell(col, row)).forEach(function (pickup) {
+        markers.push(markerHtml('explorePickup', pickup.id, pickup.type === 'item' ? 'I' : '$', 'cell-marker explore', selectedObject));
     });
     level.map.actors.filter(atCell(col, row)).forEach(function (actor) {
         markers.push(markerHtml('actor', actor.id, actor.icon || actor.name.charAt(0), 'actor-marker ' + actor.category, selectedObject));

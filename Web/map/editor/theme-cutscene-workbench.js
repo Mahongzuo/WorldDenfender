@@ -2,7 +2,7 @@
  * Theme / cutscene workbench — 关卡过场面板与远端打开路径辅助。
  */
 import { escapeHtml, escapeAttr } from './utils.js';
-import { formatIntroVideoStatusLines, effectiveCutsceneVideoProjectPath } from './cutscene-utils.js';
+import { formatIntroVideoStatusLines, effectiveCutsceneVideoOpenPath, effectiveCutsceneVideoProjectPath } from './cutscene-utils.js';
 
 export function ensureLevelCutscenesForLevel(level) {
     if (!level || !level.map) return null;
@@ -33,12 +33,15 @@ export function renderCutsceneEditor(refs, env) {
     var cutscenes = (level && level.map && level.map.cutscenes) || {};
     var intro = cutscenes.introVideo || {};
     var st = formatIntroVideoStatusLines(intro);
-    refs.introVideoInfo.textContent = st.text;
+    var openPath = effectiveCutsceneVideoOpenPath(intro, level);
+    refs.introVideoInfo.textContent = st.text + (!st.openPath && openPath ? '\n项目视频目录：' + openPath : '');
     if (refs.btnOpenIntroVideoLocation) {
-        refs.btnOpenIntroVideoLocation.disabled = !st.openPath;
-        refs.btnOpenIntroVideoLocation.title = st.openPath
-            ? '在文件管理器中打开该文件，便于手动替换'
-            : '上传并保存到项目 public 目录后可在此打开';
+        refs.btnOpenIntroVideoLocation.disabled = !openPath;
+        refs.btnOpenIntroVideoLocation.title = effectiveCutsceneVideoProjectPath(intro)
+            ? '在文件管理器中定位当前视频文件，便于手动替换'
+            : openPath
+                ? '打开该关卡的视频保存目录'
+                : '无法推断当前关卡的视频保存目录';
     }
 
     if (refs.introVideoTitle) refs.introVideoTitle.value = intro.title || '';
@@ -146,9 +149,9 @@ export function bindCutsceneEditorEvents(refs, env) {
         refs.btnOpenIntroVideoLocation.addEventListener('click', function () {
             var level = env.getLevel();
             var intro = level && level.map && level.map.cutscenes && level.map.cutscenes.introVideo;
-            var p = effectiveCutsceneVideoProjectPath(intro);
+            var p = effectiveCutsceneVideoOpenPath(intro, level);
             if (!p) {
-                env.setStatus('无法定位项目内文件：请使用「上传开场视频」写入 public 目录', 'error');
+                env.setStatus('无法推断该关卡的项目视频目录，请先设置城市信息或上传视频', 'error');
                 return;
             }
             void env.revealProjectPathInExplorer(p).catch(function (err) {

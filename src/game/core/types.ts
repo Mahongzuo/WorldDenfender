@@ -160,6 +160,112 @@ export interface MapActorDef {
   scale?: number;
 }
 
+export type ExploreElement = DefenseElement;
+
+export type ExplorePickupType = "money" | "item";
+
+export interface ExploreRewardSpec {
+  money?: number;
+  xp?: number;
+  itemId?: string;
+  itemName?: string;
+  itemType?: InventoryItem["type"];
+  itemIcon?: string;
+  quantity?: number;
+}
+
+export interface ExploreBossSkillSpec {
+  id: string;
+  name: string;
+  description?: string;
+  cooldownSec: number;
+  range?: number;
+  radius?: number;
+  damage?: number;
+  effect?: DefenseStatusId;
+}
+
+export interface ExploreBossDefinition {
+  id: string;
+  name: string;
+  aiArchetype: string;
+  cityTheme: string;
+  element: ExploreElement;
+  modelPath?: string;
+  modelScale?: number;
+  maxHp: number;
+  attack: number;
+  defense?: number;
+  speed?: number;
+  aggroRange?: number;
+  attackCooldown?: number;
+  resistances?: DefenseResistanceProfile;
+  skills: ExploreBossSkillSpec[];
+  rewards?: ExploreRewardSpec[];
+  dialogueHint?: string;
+}
+
+export interface ExploreBossPlacement {
+  id: string;
+  bossId: string;
+  name?: string;
+  col: number;
+  row: number;
+  modelId?: string;
+  modelPath?: string;
+  modelScale?: number;
+  element?: ExploreElement;
+  level?: number;
+  triggerRadius?: number;
+  respawn?: boolean;
+  overrideStats?: Partial<{
+    maxHp: number;
+    attack: number;
+    defense: number;
+    speed: number;
+    rewardMoney: number;
+    rewardXp: number;
+  }>;
+}
+
+export interface ExploreSpawnerPlacement {
+  id: string;
+  name: string;
+  col: number;
+  row: number;
+  enemyTypeId: string;
+  element?: ExploreElement;
+  modelId?: string;
+  modelPath?: string;
+  modelScale?: number;
+  maxConcurrent: number;
+  spawnIntervalSec: number;
+  spawnCount: number;
+  triggerRadius: number;
+  activeRadius: number;
+  totalLimit?: number;
+  disableWhenBossDefeated?: boolean;
+  rewards?: ExploreRewardSpec[];
+}
+
+export interface ExplorePickupPlacement {
+  id: string;
+  type: ExplorePickupType;
+  name: string;
+  col: number;
+  row: number;
+  moneyAmount?: number;
+  itemId?: string;
+  itemName?: string;
+  itemType?: InventoryItem["type"];
+  itemIcon?: string;
+  quantity?: number;
+  modelId?: string;
+  modelPath?: string;
+  modelScale?: number;
+  collectRadius?: number;
+}
+
 /** 编辑器棋盘配图：叠在程序性格子底板之上；路径高光与标记在它之上 */
 export interface MapBoardImageLayer {
   id: string;
@@ -225,6 +331,12 @@ export interface MapDefinition {
   cutscenes?: LevelCutsceneConfig;
   /** 关卡配乐与按塔型覆盖的攻击音效（编辑器 map.levelAudio） */
   levelAudio?: LevelMapAudioConfig;
+  /** 本关防御玩法在城市玩法库中为各塔 id 绑定的模型 URL（优先于全局 gameAssetConfig.customModelUrls） */
+  towerModelUrls?: Partial<Record<BuildId, string>>;
+  /** Explore RPG: placed AI bosses, configurable minion spawners and authored pickups. */
+  exploreBosses?: ExploreBossPlacement[];
+  exploreSpawners?: ExploreSpawnerPlacement[];
+  explorePickups?: ExplorePickupPlacement[];
 }
 
 export interface EditorCell {
@@ -265,6 +377,9 @@ export interface EditorLevelMap {
   spawnPoints?: Array<EditorCell & { id?: string; name?: string }>;
   objectivePoint?: EditorCell & { id?: string; name?: string };
   explorationPoints?: Array<EditorCell & { id?: string; name?: string }>;
+  exploreBosses?: Array<Record<string, unknown>>;
+  exploreSpawners?: Array<Record<string, unknown>>;
+  explorePickups?: Array<Record<string, unknown>>;
   explorationLayout?: EditorExplorationLayout;
   boardImageLayers?: MapBoardImageLayer[];
   /** 过场视频配置 */
@@ -353,15 +468,26 @@ export interface InventoryItem {
 
 export interface ExploreEnemy {
   id: string;
+  name?: string;
   mesh: THREE.Group;
   hpBar: THREE.Mesh;
   hp: number;
   maxHp: number;
+  element?: DefenseElement;
+  resistances?: DefenseResistanceProfile;
+  boss?: boolean;
+  placementId?: string;
+  sourceSpawnerId?: string;
+  rewardMoney?: number;
+  rewardXp?: number;
+  rewardItems?: ExploreRewardSpec[];
   speed: number;
   attackDamage: number;
   aggroRange: number;
   attackCooldown: number;
   attackTimer: number;
+  skillTimer?: number;
+  visualRadius?: number;
   dead: boolean;
 }
 
@@ -372,6 +498,7 @@ export interface ExploreProjectile {
   lifetime: number;
   type: "basic" | "orb" | "blast" | "lightning" | "spark";
   target?: ExploreEnemy | null;
+  element?: DefenseElement;
 }
 
 export interface EditorLevel {
@@ -478,6 +605,7 @@ export interface MoneyDrop {
   autoCollect: boolean;
   collectTimer: number;
   source: GameMode;
+  pickup?: ExplorePickupPlacement;
 }
 
 export interface TimedEffect {

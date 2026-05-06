@@ -2,7 +2,7 @@ import * as THREE from "three";
 
 import { createDefenseMoneyDrop, createExploreMoneyDrop, getAvailableMoneyDropCells } from "./drops-runtime";
 import { cellToWorld, randomWeightedAmount } from "../core/runtime-grid";
-import type { Building, GridCell, MoneyDrop } from "../core/types";
+import type { Building, ExplorePickupPlacement, GridCell, MoneyDrop } from "../core/types";
 
 export interface ExploreMoneyDropSpawnContext {
   buildings: Building[];
@@ -11,6 +11,13 @@ export interface ExploreMoneyDropSpawnContext {
   dropGroup: THREE.Group;
   allocateUid(): number;
   createMesh(amount: number): THREE.Group;
+}
+
+export interface PlacedExplorePickupSpawnContext {
+  drops: MoneyDrop[];
+  dropGroup: THREE.Group;
+  allocateUid(): number;
+  createMesh(pickup: ExplorePickupPlacement): THREE.Group;
 }
 
 export interface DefenseMoneyDropSpawnContext {
@@ -61,4 +68,24 @@ export function spawnDefenseMoneyDropAtWorld(
   drop.mesh.position.set(position.x, 0.28, position.z);
   context.drops.push(drop);
   context.dropGroup.add(drop.mesh);
+}
+
+export function spawnPlacedExplorePickup(
+  context: PlacedExplorePickupSpawnContext,
+  pickup: ExplorePickupPlacement,
+): boolean {
+  const amount = pickup.type === "money" ? Math.max(0, Math.round(pickup.moneyAmount ?? 0)) : 0;
+  const drop = createExploreMoneyDrop({
+    uid: context.allocateUid(),
+    amount,
+    cell: { col: pickup.col, row: pickup.row },
+    mesh: context.createMesh(pickup),
+  });
+  drop.pickup = pickup;
+
+  const position = cellToWorld(pickup);
+  drop.mesh.position.set(position.x, 0.25, position.z);
+  context.drops.push(drop);
+  context.dropGroup.add(drop.mesh);
+  return true;
 }

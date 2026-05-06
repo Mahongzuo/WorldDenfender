@@ -68,8 +68,26 @@ export function renderRuntimeMapScene(options: {
   mode: GameMode;
   useGeoBackdrop?: boolean;
   safeZoneCells?: Set<string>;
+  /**
+   * 与 TowerDefenseGame.mapGroup.scale.x/z 一致；真实底板 GEO 通常为 20，探索为 1。
+   * 用于：棋盘配图裁剪与世界尺寸对齐、障碍物与端点在非均匀缩放下的纵向拉伸观感。
+   */
+  mapGroupWorldXzScale?: number;
 }): void {
-  const { scene, mapGroup, hoverMesh, map, pathCells, obstacleCells, currentCity, mode, useGeoBackdrop, safeZoneCells } = options;
+  const {
+    scene,
+    mapGroup,
+    hoverMesh,
+    map,
+    pathCells,
+    obstacleCells,
+    currentCity,
+    mode,
+    useGeoBackdrop,
+    safeZoneCells,
+    mapGroupWorldXzScale = 1,
+  } = options;
+  const xzScale = Number.isFinite(mapGroupWorldXzScale) && mapGroupWorldXzScale > 0 ? mapGroupWorldXzScale : 1;
 
   mapGroup.add(hoverMesh);
   hoverMesh.visible = false;
@@ -102,6 +120,7 @@ export function renderRuntimeMapScene(options: {
   const isJinan = currentCity === "jinan" || map.id.startsWith("jinan");
   const isBeijing = currentCity === "beijing" || map.id.startsWith("beijing");
   const usesGeoBackdrop = !!useGeoBackdrop && !!map.geo?.enabled;
+  const geoVerticalStretch = usesGeoBackdrop && xzScale > 1 ? xzScale : 1;
   const trimmedBoard = (map.theme.boardTextureUrl ?? "").trim();
   const hasCustomBoardImage = trimmedBoard.length > 0;
   const jinanPresetBoard = isJinan && !hasCustomBoardImage;
@@ -203,6 +222,9 @@ export function renderRuntimeMapScene(options: {
           mesh.position.set(position.x, 0.14, position.z);
           mesh.renderOrder = 6;
           mesh.receiveShadow = true;
+          if (geoVerticalStretch > 1) {
+            mesh.scale.set(1, geoVerticalStretch, 1);
+          }
           mapGroup.add(mesh);
           addPathTileDetails(mapGroup, cell, position, map.theme.accent, pathCells, pathDetailOpacity);
         } else if (flatBoardMode) {
@@ -234,6 +256,9 @@ export function renderRuntimeMapScene(options: {
           mesh.position.set(position.x, 0.72, position.z);
           mesh.castShadow = true;
           mesh.receiveShadow = true;
+          if (geoVerticalStretch > 1) {
+            mesh.scale.set(1, geoVerticalStretch, 1);
+          }
           mapGroup.add(mesh);
         } else if (isBeijing && !flatBoardMode) {
           const buildingHeight = 1.0 + (Math.sin(col * 0.5) + Math.cos(row * 0.5)) * 0.5;
@@ -263,6 +288,9 @@ export function renderRuntimeMapScene(options: {
           const mesh = new THREE.Mesh(tileGeometry, (col + row) % 2 === 0 ? groundMaterial : groundAltMaterial);
           mesh.position.set(position.x, -0.01, position.z);
           mesh.receiveShadow = true;
+          if (geoVerticalStretch > 1) {
+            mesh.scale.set(1, geoVerticalStretch, 1);
+          }
           mapGroup.add(mesh);
         } else if (isBeijing && !flatBoardMode) {
           // Use pseudo-random biomes for Beijing ground
@@ -320,13 +348,13 @@ export function renderRuntimeMapScene(options: {
 
   /* 略高于程序性格子 / flat 整块底板，低于路径高亮与安全区 */
   const decorY = usesGeoBackdrop ? 0.048 : flatBoardMode ? 0.063 : 0.098;
-  addBoardDecorImageLayers(mapGroup, map, decorY);
+  addBoardDecorImageLayers(mapGroup, map, decorY, xzScale);
 
   if (mode === "defense") {
-    addEndpointMarker(mapGroup, map.path[0], 0x6bbf90, "入口");
-    addEndpointMarker(mapGroup, map.path[map.path.length - 1], 0xd87880, "基地");
+    addEndpointMarker(mapGroup, map.path[0], 0x6bbf90, "入口", geoVerticalStretch);
+    addEndpointMarker(mapGroup, map.path[map.path.length - 1], 0xd87880, "基地", geoVerticalStretch);
   } else {
-    addEndpointMarker(mapGroup, map.path[0], map.theme.accent, "探索起点");
+    addEndpointMarker(mapGroup, map.path[0], map.theme.accent, "探索起点", geoVerticalStretch);
   }
 
   // Safe zone floor overlays
@@ -389,7 +417,12 @@ function decorClamp01(v: number, fallback: number): number {
   return Math.max(0, Math.min(1, v));
 }
 
-function addBoardDecorImageLayers(mapGroup: THREE.Group, map: MapDefinition, y: number): void {
+function addBoardDecorImageLayers(
+  mapGroup: THREE.Group,
+  map: MapDefinition,
+  y: number,
+  worldXzFootprintStretch = 1,
+): void {
   const layers = map.boardImageLayers;
   if (!layers?.length) return;
   const textureLoader = new THREE.TextureLoader();
@@ -397,7 +430,8 @@ function addBoardDecorImageLayers(mapGroup: THREE.Group, map: MapDefinition, y: 
   const rows = mapRows(map);
   const spanX = cols * TILE_SIZE;
   const spanZ = rows * TILE_SIZE;
-  const clipPlanes = boardFootprintClipPlanes(spanX / 2, spanZ / 2);
+  const s = Number.isFinite(worldXzFootprintStretch) && worldXzFootprintStretch > 0 ? worldXzFootprintStretch : 1;
+  const clipPlanes = boardFootprintClipPlanes((spanX / 2) * s, (spanZ / 2) * s);
   [...layers].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).forEach(layer => {
     textureLoader.load(
       layer.src,
@@ -411,15 +445,28 @@ function addBoardDecorImageLayers(mapGroup: THREE.Group, map: MapDefinition, y: 
         if (tex.image && "width" in tex.image && (tex.image as HTMLImageElement).width > 0) {
           aspect = (tex.image as HTMLImageElement).height / (tex.image as HTMLImageElement).width;
         }
-        const widthPct = decorClampPct(layer.widthPct, 45);
-        const planeW = (widthPct / 100) * spanX;
-        const planeH = planeW * aspect;
-        const leftPct = decorClampPct(layer.centerX, 0);
-        const topPct = decorClampPct(layer.centerY, 0);
-        const wx0 = -spanX / 2 + (leftPct / 100) * spanX;
-        const wz0 = -spanZ / 2 + (topPct / 100) * spanZ;
-        const cx = wx0 + planeW / 2;
-        const cz = wz0 + planeH / 2;
+        const rawWp = Number(layer.widthPct);
+        const widthPctClamped = decorClampPct(layer.widthPct, 45);
+        const stretchFillGrid = Number.isFinite(rawWp) && rawWp >= 100;
+        let planeW: number;
+        let planeH: number;
+        let cx: number;
+        let cz: number;
+        if (stretchFillGrid) {
+          planeW = spanX;
+          planeH = spanZ;
+          cx = 0;
+          cz = 0;
+        } else {
+          planeW = (widthPctClamped / 100) * spanX;
+          planeH = planeW * aspect;
+          const leftPct = decorClampPct(layer.centerX, 0);
+          const topPct = decorClampPct(layer.centerY, 0);
+          const wx0 = -spanX / 2 + (leftPct / 100) * spanX;
+          const wz0 = -spanZ / 2 + (topPct / 100) * spanZ;
+          cx = wx0 + planeW / 2;
+          cz = wz0 + planeH / 2;
+        }
         const opacity = decorClamp01(layer.opacity ?? 1, 1);
         const decoMat = new THREE.MeshBasicMaterial({
           map: tex,
@@ -441,7 +488,7 @@ function addBoardDecorImageLayers(mapGroup: THREE.Group, map: MapDefinition, y: 
         const mesh = new THREE.Mesh(new THREE.PlaneGeometry(planeW, planeH), decoMat);
         mesh.rotation.x = -Math.PI / 2;
         mesh.position.set(cx, y, cz);
-        mesh.renderOrder = 4;
+        mesh.renderOrder = s > 1.001 ? 14 : 4;
         mapGroup.add(mesh);
       },
       undefined,
@@ -752,10 +799,20 @@ function addJinanPathGuides(mapGroup: THREE.Group, path: GridCell[], laneColor: 
   }
 }
 
-function addEndpointMarker(mapGroup: THREE.Group, cell: GridCell, color: number, label: string): void {
+function addEndpointMarker(
+  mapGroup: THREE.Group,
+  cell: GridCell,
+  color: number,
+  label: string,
+  verticalStretch = 1,
+): void {
   const group = new THREE.Group();
   const position = cellToWorld(cell);
   group.position.set(position.x, 0.2, position.z);
+
+  if (verticalStretch > 1 && Number.isFinite(verticalStretch)) {
+    group.scale.set(1, verticalStretch, 1);
+  }
 
   const halo = new THREE.Mesh(
     new THREE.CircleGeometry(0.9, 48),

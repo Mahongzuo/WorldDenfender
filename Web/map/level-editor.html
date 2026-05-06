@@ -125,6 +125,10 @@
                 <button class="tool-button" data-tool="buildSlot">塔位</button>
                 <button class="tool-button" data-tool="objective">防守目标</button>
                 <button class="tool-button" data-tool="explorePoint">探索点</button>
+                <button class="tool-button" data-tool="exploreBoss">AI Boss</button>
+                <button class="tool-button" data-tool="exploreSpawner">AI 刷怪点</button>
+                <button class="tool-button" data-tool="exploreMoney">金币</button>
+                <button class="tool-button" data-tool="exploreItem">道具</button>
                 <button class="tool-button" data-tool="safeZone">安全区</button>
                 <button class="tool-button" data-tool="actor">模型 Actor</button>
                 <button class="tool-button danger" data-tool="erase">橡皮擦</button>
@@ -249,6 +253,33 @@
                             <div id="gameplayAssetPreviewEmpty" class="empty-state">当前条目还没有绑定可预览的图片或模型。</div>
                             <img id="gameplayAssetPreviewImage" class="gameplay-asset-preview-image view-hidden" alt="资源缩略图预览">
                             <div id="gameplayAssetPreviewHost" class="gameplay-asset-preview-host view-hidden" aria-label="模型预览"></div>
+                            <div id="gameplayTowerPreviewActions" class="gameplay-tower-preview-actions view-hidden">
+                                <div class="gameplay-tower-preview-actions__row">
+                                    <label class="mini-button upload-button">
+                                        上传照片，AI生成3D
+                                        <input id="gameplayAiModelImageUpload" type="file" accept="image/png,image/jpeg,image/jpg,image/webp,image/*">
+                                    </label>
+                                    <label class="mini-button upload-button">
+                                        上传 / 替换本城模型
+                                        <input id="gameplayTowerModelUpload" type="file" accept=".glb,.gltf,.obj,model/gltf-binary,model/gltf+json">
+                                    </label>
+                                    <button type="button" id="btnPickGameplayTowerProjectModel" class="mini-button" title="从 public/GameModels 等已扫描的模型中选择">
+                                        从项目模型选择
+                                    </button>
+                                    <button type="button" id="btnClearGameplayTowerModel" class="mini-button">清除本城覆盖</button>
+                                    <button
+                                        type="button"
+                                        id="btnOpenGameplayTowerModelLocation"
+                                        class="mini-button"
+                                        disabled
+                                        title="在资源管理器中打开 public 下的模型文件（或 Tower 目录）"
+                                    >
+                                        打开模型保存位置
+                                    </button>
+                                </div>
+                                <p id="gameplayAiModelStatus" class="section-hint gameplay-tower-preview-actions__hint gameplay-ai-model-status">上传照片后，使用 Meshy 生成并替换当前条目模型。</p>
+                                <p class="section-hint gameplay-tower-preview-actions__hint">本组按钮仅写入<strong>当前城市玩法库</strong>。要改<strong>所有关卡</strong>的默认塔模，请打开顶部「全局设置 → 游戏资产」。</p>
+                            </div>
                         </section>
                         <form id="gameplayEditorForm" class="gameplay-form">
                             <div class="form-grid two">
@@ -378,6 +409,7 @@
                         <div class="mode-ribbon-inner">
                             <button type="button" class="mode-button secondary active" data-theme-workbench-tab="colors" role="tab" aria-selected="true">主题配色</button>
                             <button type="button" class="mode-button secondary" data-theme-workbench-tab="cutscenes" role="tab" aria-selected="false">过场视频</button>
+                            <button type="button" class="mode-button secondary" data-theme-workbench-tab="ai-board" role="tab" aria-selected="false">AI 棋盘图</button>
                         </div>
                     </div>
 
@@ -515,6 +547,44 @@
                         </div>
                         <p class="section-hint">设置在某波次结束后播放的视频；如未上传或波次无对应视频则自动跳过。</p>
                         <div id="waveVideoList" class="wave-video-list"></div>
+                    </div>
+                    </div>
+
+                    <div id="themeTabPanelBoardAi" class="theme-settings-tab-panel view-hidden" data-theme-panel="ai-board" aria-hidden="true">
+                    <div class="theme-cutscene-stack theme-board-ai-stack" id="themeBoardAiPanel">
+                        <div class="panel-head panel-head-tight">
+                            <div>
+                                <div class="eyebrow">Board Image AI</div>
+                                <h2>棋盘图片生成</h2>
+                            </div>
+                        </div>
+
+                        <p id="themeBoardAiContext" class="section-hint">根据当前关卡的城市、棋盘尺寸和主题作用域，自动生成更适合编辑器落图的提示词。</p>
+
+                        <div class="section-title-row"><h3>推荐提示词</h3></div>
+                        <div id="themeBoardAiPromptPresets" class="theme-board-ai-preset-list"></div>
+
+                        <label class="field-block">
+                            <span>生成提示词</span>
+                            <textarea id="themeBoardAiPrompt" rows="7" placeholder="例如：北京城市防守棋盘底图，故宫红墙、胡同肌理、主路清晰、可摆放地标与障碍"></textarea>
+                        </label>
+                        <p class="section-hint">系统会自动倾向生成更适合作为棋盘底图的画面。快捷键：<kbd>Ctrl</kbd> + <kbd>Enter</kbd> 直接生成。</p>
+
+                        <div class="theme-board-ai-actions">
+                            <button type="button" class="theme-board-ai-generate" id="themeBoardAiGenerate">生成并应用到当前关卡</button>
+                            <button type="button" class="mini-button" id="themeBoardAiOpenLocation" disabled>打开图片保存位置</button>
+                            <button type="button" class="mini-button" id="themeBoardAiFocusLayout">切到棋盘布局调整</button>
+                        </div>
+
+                        <div id="themeBoardAiStatus" class="section-hint theme-board-ai-status"></div>
+
+                        <div id="themeBoardAiResultCard" class="theme-board-ai-result view-hidden">
+                            <img id="themeBoardAiResultImage" class="theme-board-ai-result__image" alt="生成的棋盘图片预览">
+                            <div class="theme-board-ai-result__meta">
+                                <strong id="themeBoardAiResultTitle">已生成棋盘图片</strong>
+                                <div id="themeBoardAiResultMeta" class="section-hint"></div>
+                            </div>
+                        </div>
                     </div>
                     </div>
                 </div>
@@ -730,6 +800,7 @@
                 <button type="button" class="mini-button sidebar-collapse-btn" id="collapseInspectorPanel" aria-expanded="true" aria-controls="inspectorPanelBody" title="收起侧栏（扩大中间编辑区）">收起</button>
             </div>
 
+            <div class="inspector-panel-scroll">
             <div id="levelInspectorWorkspace">
 
             <section class="inspector-section">
@@ -967,8 +1038,11 @@
                             <span>保存分类</span>
                             <select id="gameplayAssetType">
                                 <option value="Enemies">Enemies / 敌人</option>
+                                <option value="Towers">Towers / 防御塔</option>
                                 <option value="Characters">Characters / 角色</option>
                                 <option value="Skills">Skills / 技能</option>
+                                <option value="Cards">Cards / 卡片</option>
+                                <option value="Items">Items / 道具</option>
                             </select>
                         </label>
                     </div>
@@ -1023,6 +1097,7 @@
                     <h3>布局提示</h3>
                     <p class="section-hint">全局设置已在<strong>中间主区域</strong>编辑。可收起本栏以扩大中间画布区域。</p>
                 </section>
+            </div>
             </div>
             </div>
         </aside>
@@ -1135,6 +1210,29 @@
                     <button type="button" class="action-button accent" id="btnConfirmCreateLevel">确认创建</button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <!-- 本城防御塔：从已有项目模型中选择 -->
+    <div id="gameplayTowerModelPickModal" class="modal-overlay view-hidden" aria-hidden="true" tabindex="-1">
+        <div class="modal-surface panel-surface gameplay-tower-model-pick-modal" role="dialog" aria-modal="true" aria-labelledby="gameplayTowerModelPickTitle">
+            <div class="gameplay-tower-model-pick-head">
+                <div>
+                    <div class="eyebrow">Project models</div>
+                    <h2 id="gameplayTowerModelPickTitle">选择项目模型</h2>
+                    <p class="section-hint">列表来自「项目模型」目录与编辑器已上传的模型文件；仅写入当前城市玩法库，与全局「游戏资产」无关。</p>
+                </div>
+                <button type="button" class="modal-close-button" id="btnCancelGameplayTowerModelPick" aria-label="关闭">×</button>
+            </div>
+            <label class="field-block gameplay-tower-model-pick-filter">
+                <span>筛选</span>
+                <input id="gameplayTowerModelPickFilter" type="search" placeholder="按名称、路径搜索…" autocomplete="off">
+            </label>
+            <div id="gameplayTowerModelPickList" class="gameplay-tower-pick-list" role="listbox" aria-label="项目模型列表"></div>
+            <div class="gameplay-tower-model-pick-footer">
+                <p class="section-hint">若列表为空，请打开右下角「项目模型」浮窗并点击 <strong>刷新</strong> 扫描 <code>public/GameModels</code>。</p>
+                <button type="button" class="action-button ghost-action" id="btnCloseGameplayTowerModelPick">关闭</button>
+            </div>
         </div>
     </div>
 

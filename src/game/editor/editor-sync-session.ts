@@ -324,6 +324,7 @@ export async function pullEditorLevelsFromProjectFile(options: {
     exploreMaps: EXPLORE_MAPS,
     cityMap: CITY_MAP,
     cityAliases: CITY_EDITOR_ALIASES,
+    cityGameplayConfigs: payload.cityGameplayConfigs,
   });
   return {
     importedCount: result.importedCount,

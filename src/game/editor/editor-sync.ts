@@ -1,12 +1,15 @@
 import { hasEditorDefenseLayout, hasEditorExploreLayout, parseEditorColor, parseEditorOpacity, runtimeMapToEditorExplorationLayout, runtimeMapToEditorMap } from "./editor-runtime";
 import { sanitizeLevelMapAudioFromEditor } from "../audio/game-audio";
-import { CITY_GEO_CONFIG } from "../data/content";
+import { CITY_GEO_CONFIG, BUILD_SPECS } from "../data/content";
 import { clamp, orderEditorPathCells, sameCell, uniqueCells, GRID_COLS, GRID_ROWS } from "../core/runtime-grid";
 import type {
   EditorCell,
   EditorLevel,
   EditorLevelMap,
+  ExploreBossPlacement,
   ExploreGameplaySettings,
+  ExplorePickupPlacement,
+  ExploreSpawnerPlacement,
   GameMode,
   GeoMapConfig,
   GridCell,
@@ -14,7 +17,9 @@ import type {
   MapActorDef,
   MapBoardImageLayer,
   MapDefinition,
+  BuildId,
 } from "../core/types";
+import { sanitizeDefenseElement } from "../defense/defense-taxonomy";
 
 function sanitizeBoardImageLayers(raw: unknown): MapBoardImageLayer[] | undefined {
   if (!Array.isArray(raw)) {
@@ -90,6 +95,118 @@ function sanitizeLevelCutscenes(raw: unknown): LevelCutsceneConfig | undefined {
   return { ...(introVideo ? { introVideo } : {}), ...(waveVideos ? { waveVideos } : {}) };
 }
 
+function positiveNumber(raw: unknown, fallback: number, max = 1e9): number {
+  const v = Number(raw);
+  return Number.isFinite(v) && v > 0 ? Math.min(v, max) : fallback;
+}
+
+function nonNegativeNumber(raw: unknown, fallback: number, max = 1e9): number {
+  const v = Number(raw);
+  return Number.isFinite(v) && v >= 0 ? Math.min(v, max) : fallback;
+}
+
+function sanitizeExploreBosses(raw: unknown, project: (cell: EditorCell) => GridCell): ExploreBossPlacement[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: ExploreBossPlacement[] = [];
+  for (let i = 0; i < raw.length; i += 1) {
+    const item = raw[i];
+    if (!item || typeof item !== "object") continue;
+    const r = item as Record<string, unknown>;
+    const override = r.overrideStats && typeof r.overrideStats === "object" ? r.overrideStats as Record<string, unknown> : {};
+    out.push({
+      id: String(r.id || `explore-boss-${i + 1}`),
+      bossId: String(r.bossId || "ai-atlas"),
+      ...(typeof r.name === "string" && r.name.trim() ? { name: r.name.trim() } : {}),
+      ...project({ col: Number(r.col), row: Number(r.row) }),
+      ...(typeof r.modelId === "string" && r.modelId ? { modelId: r.modelId } : {}),
+      ...(typeof r.modelPath === "string" && r.modelPath ? { modelPath: r.modelPath } : {}),
+      modelScale: positiveNumber(r.modelScale, 1.8, 12),
+      ...(sanitizeDefenseElement(r.element) ? { element: sanitizeDefenseElement(r.element) } : {}),
+      level: Math.max(1, Math.round(Number(r.level) || 1)),
+      triggerRadius: positiveNumber(r.triggerRadius, 9, 80),
+      respawn: !!r.respawn,
+      overrideStats: {
+        maxHp: nonNegativeNumber(override.maxHp, 0),
+        attack: nonNegativeNumber(override.attack, 0),
+        defense: nonNegativeNumber(override.defense, 0),
+        speed: nonNegativeNumber(override.speed, 0),
+        rewardMoney: nonNegativeNumber(override.rewardMoney, 0),
+        rewardXp: nonNegativeNumber(override.rewardXp, 0),
+      },
+    });
+  }
+  return out.length ? out : undefined;
+}
+
+function sanitizeExploreSpawners(raw: unknown, project: (cell: EditorCell) => GridCell): ExploreSpawnerPlacement[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: ExploreSpawnerPlacement[] = [];
+  for (let i = 0; i < raw.length; i += 1) {
+    const item = raw[i];
+    if (!item || typeof item !== "object") continue;
+    const r = item as Record<string, unknown>;
+    out.push({
+      id: String(r.id || `explore-spawner-${i + 1}`),
+      name: String(r.name || `AI 刷怪点 ${i + 1}`),
+      ...project({ col: Number(r.col), row: Number(r.row) }),
+      enemyTypeId: String(r.enemyTypeId || "ai-drone"),
+      ...(sanitizeDefenseElement(r.element) ? { element: sanitizeDefenseElement(r.element) } : {}),
+      ...(typeof r.modelId === "string" && r.modelId ? { modelId: r.modelId } : {}),
+      ...(typeof r.modelPath === "string" && r.modelPath ? { modelPath: r.modelPath } : {}),
+      modelScale: positiveNumber(r.modelScale, 1, 10),
+      maxConcurrent: Math.max(1, Math.round(Number(r.maxConcurrent) || 3)),
+      spawnIntervalSec: positiveNumber(r.spawnIntervalSec, 6, 3600),
+      spawnCount: Math.max(1, Math.round(Number(r.spawnCount) || 1)),
+      triggerRadius: positiveNumber(r.triggerRadius, 12, 120),
+      activeRadius: positiveNumber(r.activeRadius, 18, 180),
+      totalLimit: Math.max(0, Math.round(Number(r.totalLimit) || 0)),
+      disableWhenBossDefeated: !!r.disableWhenBossDefeated,
+      rewards: Array.isArray(r.rewards)
+        ? r.rewards.flatMap((reward): NonNullable<ExploreSpawnerPlacement["rewards"]> => {
+            if (!reward || typeof reward !== "object") return [];
+            const rr = reward as Record<string, unknown>;
+            return [{
+              money: nonNegativeNumber(rr.money, 12),
+              xp: nonNegativeNumber(rr.xp, 10),
+              ...(typeof rr.itemName === "string" && rr.itemName ? { itemName: rr.itemName } : {}),
+              ...(typeof rr.itemIcon === "string" && rr.itemIcon ? { itemIcon: rr.itemIcon.slice(0, 2) } : {}),
+              quantity: Math.max(1, Math.round(Number(rr.quantity) || 1)),
+            }];
+          })
+        : [{ money: 12, xp: 10 }],
+    });
+  }
+  return out.length ? out : undefined;
+}
+
+function sanitizeExplorePickups(raw: unknown, project: (cell: EditorCell) => GridCell): ExplorePickupPlacement[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: ExplorePickupPlacement[] = [];
+  for (let i = 0; i < raw.length; i += 1) {
+    const item = raw[i];
+    if (!item || typeof item !== "object") continue;
+    const r = item as Record<string, unknown>;
+    const type = r.type === "item" ? "item" : "money";
+    out.push({
+      id: String(r.id || `explore-pickup-${i + 1}`),
+      type,
+      name: String(r.name || (type === "money" ? "城市算力资金" : "AI 道具")),
+      ...project({ col: Number(r.col), row: Number(r.row) }),
+      moneyAmount: nonNegativeNumber(r.moneyAmount, type === "money" ? 50 : 0),
+      ...(typeof r.itemId === "string" && r.itemId ? { itemId: r.itemId } : {}),
+      itemName: String(r.itemName || r.name || "AI 记忆碎片"),
+      itemType: r.itemType === "consumable" ? "consumable" : "material",
+      itemIcon: String(r.itemIcon || (type === "money" ? "$" : "AI")).slice(0, 2),
+      quantity: Math.max(1, Math.round(Number(r.quantity) || 1)),
+      ...(typeof r.modelId === "string" && r.modelId ? { modelId: r.modelId } : {}),
+      ...(typeof r.modelPath === "string" && r.modelPath ? { modelPath: r.modelPath } : {}),
+      modelScale: positiveNumber(r.modelScale, 1, 8),
+      collectRadius: positiveNumber(r.collectRadius, 1.25, 20),
+    });
+  }
+  return out.length ? out : undefined;
+}
+
 export interface CityRuntimeMapInfo {
   label: string;
   defenseIndex: number;
@@ -104,6 +221,8 @@ interface SyncEditorLevelsOptions {
   exploreMaps: MapDefinition[];
   cityMap: Record<string, CityRuntimeMapInfo>;
   cityAliases: Record<string, string[]>;
+  /** 城市玩法库（用于把各城市的防御塔模型绑定同步到对应关卡的运行时地图） */
+  cityGameplayConfigs?: Record<string, unknown>;
 }
 
 interface SyncEditorLevelsResult {
@@ -113,7 +232,7 @@ interface SyncEditorLevelsResult {
 }
 
 export function syncEditorLevelsToRuntime(options: SyncEditorLevelsOptions): SyncEditorLevelsResult {
-  const { levels, requestedLevelId, maps, exploreMaps, cityMap, cityAliases } = options;
+  const { levels, requestedLevelId, maps, exploreMaps, cityMap, cityAliases, cityGameplayConfigs } = options;
   let importedCount = 0;
   let requestedDefIdx = -1;
   let requestedExpIdx = -1;
@@ -139,7 +258,8 @@ export function syncEditorLevelsToRuntime(options: SyncEditorLevelsOptions): Syn
     const syncedLevel = cityCode ? levelWithBuiltInLayouts(level, cityCode, cityMap, maps, exploreMaps) : level;
     const levelGeo = cityCode ? resolveEditorLevelGeo(syncedLevel, cityMap[cityCode]?.geo) : resolveEditorLevelGeo(syncedLevel);
     const runtimeLevel = levelGeo ? { ...syncedLevel, map: { ...syncedLevel.map, geo: levelGeo } } : syncedLevel;
-    const defenseMap = editorLevelToRuntimeMap(runtimeLevel, "defense");
+    const defenseTowerModels = extractTowerModelUrlsFromCityConfigs(runtimeLevel, cityGameplayConfigs);
+    const defenseMap = editorLevelToRuntimeMap(runtimeLevel, "defense", defenseTowerModels);
     const exploreMap = editorLevelToRuntimeMap(runtimeLevel, "explore");
     const defenseIndex = maps.push(defenseMap) - 1;
     const exploreIndex = exploreMaps.push(exploreMap) - 1;
@@ -232,7 +352,83 @@ export function levelWithBuiltInLayouts(
   return { ...level, map };
 }
 
-export function editorLevelToRuntimeMap(level: EditorLevel, mode: GameMode): MapDefinition {
+function normalizeCityConfigIdentity(value: unknown): string {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[·\s]/g, "")
+    .replace(/市$/g, "");
+}
+
+function levelCityIdentities(level: EditorLevel): Set<string> {
+  const loc = level.location ?? {};
+  const ids = [
+    level.id,
+    loc.cityCode,
+    loc.cityName,
+    loc.regionLabel,
+    loc.countryName,
+  ]
+    .map(normalizeCityConfigIdentity)
+    .filter(Boolean);
+  return new Set(ids);
+}
+
+function extractTowerModelUrlsFromCityConfigs(
+  level: EditorLevel,
+  rawConfigs: Record<string, unknown> | undefined,
+): Partial<Record<BuildId, string>> | undefined {
+  if (!rawConfigs || typeof rawConfigs !== "object") {
+    return undefined;
+  }
+  const levelIds = levelCityIdentities(level);
+  for (const [configKey, rawCfg] of Object.entries(rawConfigs)) {
+    if (!rawCfg || typeof rawCfg !== "object") {
+      continue;
+    }
+    const cfg = rawCfg as {
+      cityCode?: string;
+      cityName?: string;
+      aliases?: string[];
+      towers?: Array<{ id?: string; assetRefs?: { modelPath?: unknown } }>;
+    };
+    const cfgIds = [
+      configKey,
+      cfg.cityCode,
+      cfg.cityName,
+      ...(Array.isArray(cfg.aliases) ? cfg.aliases : []),
+    ]
+      .map(normalizeCityConfigIdentity)
+      .filter(Boolean);
+    let match = false;
+    for (const cid of cfgIds) {
+      if (levelIds.has(cid)) {
+        match = true;
+        break;
+      }
+    }
+    if (!match) {
+      continue;
+    }
+    const out: Partial<Record<BuildId, string>> = {};
+    for (const t of cfg.towers ?? []) {
+      const tid = String(t.id ?? "").trim() as BuildId;
+      const path = String(t.assetRefs?.modelPath ?? "").trim();
+      if (!path || !Object.prototype.hasOwnProperty.call(BUILD_SPECS, tid)) {
+        continue;
+      }
+      out[tid] = path;
+    }
+    return Object.keys(out).length ? out : undefined;
+  }
+  return undefined;
+}
+
+export function editorLevelToRuntimeMap(
+  level: EditorLevel,
+  mode: GameMode,
+  defenseTowerModelUrls?: Partial<Record<BuildId, string>>,
+): MapDefinition {
   const editorMap = level.map ?? {};
   const exploreLayout = mode === "explore" ? editorMap.explorationLayout : undefined;
   const grid = exploreLayout?.grid ?? editorMap.grid ?? {};
@@ -275,6 +471,9 @@ export function editorLevelToRuntimeMap(level: EditorLevel, mode: GameMode): Map
   const theme = exploreLayout?.theme ?? editorMap.theme ?? {};
   const boardImageLayers = sanitizeBoardImageLayers(editorMap.boardImageLayers);
   const levelAudio = sanitizeLevelMapAudioFromEditor(editorMap.levelAudio);
+  const exploreBosses = mode === "explore" ? sanitizeExploreBosses(editorMap.exploreBosses, project) : undefined;
+  const exploreSpawners = mode === "explore" ? sanitizeExploreSpawners(editorMap.exploreSpawners, project) : undefined;
+  const explorePickups = mode === "explore" ? sanitizeExplorePickups(editorMap.explorePickups, project) : undefined;
 
   const levelGeo = resolveEditorLevelGeo(level);
 
@@ -316,12 +515,19 @@ export function editorLevelToRuntimeMap(level: EditorLevel, mode: GameMode): Map
     ...(mode === "explore"
       ? {
           exploreGameplay: { ...(exploreLayout?.gameplay ?? {}) } as ExploreGameplaySettings,
+          ...(exploreBosses?.length ? { exploreBosses } : {}),
+          ...(exploreSpawners?.length ? { exploreSpawners } : {}),
+          ...(explorePickups?.length ? { explorePickups } : {}),
         }
       : {}),
     ...(mode === "defense"
-      ? { cutscenes: sanitizeLevelCutscenes(editorMap.cutscenes) }
+      ? {
+          cutscenes: sanitizeLevelCutscenes(editorMap.cutscenes),
+          ...(defenseTowerModelUrls && Object.keys(defenseTowerModelUrls).length ? { towerModelUrls: defenseTowerModelUrls } : {}),
+        }
       : {}),
     ...(levelAudio ? { levelAudio } : {}),
+    ...(boardImageLayers?.length ? { boardImageLayers } : {}),
   };
 }
 

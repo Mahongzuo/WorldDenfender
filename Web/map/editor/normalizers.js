@@ -42,7 +42,15 @@ export function defaultObjectivePoint(grid) {
 
 export function normalizeStatus(status, map) {
     if (status === 'designed' || status === 'needs-work' || status === 'draft') return status;
-    var hasWork = map && (map.actors.length || map.roads.length || map.spawnPoints.length || map.explorationPoints.length);
+    var hasWork =
+        map &&
+        (map.actors.length ||
+            map.roads.length ||
+            map.spawnPoints.length ||
+            map.explorationPoints.length ||
+            (map.exploreBosses && map.exploreBosses.length) ||
+            (map.exploreSpawners && map.exploreSpawners.length) ||
+            (map.explorePickups && map.explorePickups.length));
     return hasWork ? 'needs-work' : 'draft';
 }
 
@@ -313,6 +321,117 @@ export function normalizeExplorePoints(points, legacyExplore) {
             modelId: String(point.modelId || ''),
             interaction: String(point.interaction || point.kind || 'inspect'),
             radius: Math.max(0, Number(point.radius || 2))
+        };
+    });
+}
+
+var DEFAULT_EXPLORE_BOSS_IDS = ['ai-atlas', 'ai-vulcan', 'ai-prism', 'ai-gridmind', 'ai-echo'];
+
+function normalizeExploreElement(value, fallback) {
+    var raw = String(value || '').trim();
+    if (DEFENSE_ELEMENT_OPTIONS.some(function (opt) { return opt.id === raw; })) return raw;
+    return fallback || 'electric';
+}
+
+function positiveNumber(value, fallback, max) {
+    var n = Number(value);
+    if (!Number.isFinite(n) || n <= 0) return fallback;
+    return max ? Math.min(n, max) : n;
+}
+
+function nonNegativeNumber(value, fallback, max) {
+    var n = Number(value);
+    if (!Number.isFinite(n) || n < 0) return fallback;
+    return max ? Math.min(n, max) : n;
+}
+
+export function normalizeExploreBosses(bosses) {
+    var list = Array.isArray(bosses) ? bosses : [];
+    return list.map(function (boss, index) {
+        var source = boss && typeof boss === 'object' ? boss : {};
+        var override = source.overrideStats && typeof source.overrideStats === 'object' ? source.overrideStats : {};
+        return {
+            id: String(source.id || uid('explore-boss')),
+            bossId: String(source.bossId || DEFAULT_EXPLORE_BOSS_IDS[index % DEFAULT_EXPLORE_BOSS_IDS.length]),
+            name: String(source.name || 'AI 化身 Boss ' + (index + 1)),
+            col: clamp(Number(source.col) || 0, 0, 79),
+            row: clamp(Number(source.row) || 0, 0, 79),
+            modelId: String(source.modelId || ''),
+            modelPath: String(source.modelPath || ''),
+            modelScale: positiveNumber(source.modelScale, 1.8, 12),
+            element: normalizeExploreElement(source.element, 'electric'),
+            level: Math.max(1, Math.round(Number(source.level) || 1)),
+            triggerRadius: positiveNumber(source.triggerRadius, 9, 80),
+            respawn: !!source.respawn,
+            overrideStats: {
+                maxHp: nonNegativeNumber(override.maxHp, 0, 10000000),
+                attack: nonNegativeNumber(override.attack, 0, 1000000),
+                defense: nonNegativeNumber(override.defense, 0, 1000000),
+                speed: nonNegativeNumber(override.speed, 0, 1000),
+                rewardMoney: nonNegativeNumber(override.rewardMoney, 0, 10000000),
+                rewardXp: nonNegativeNumber(override.rewardXp, 0, 10000000)
+            }
+        };
+    });
+}
+
+export function normalizeExploreSpawners(spawners) {
+    var list = Array.isArray(spawners) ? spawners : [];
+    return list.map(function (spawner, index) {
+        var source = spawner && typeof spawner === 'object' ? spawner : {};
+        var rewards = Array.isArray(source.rewards) ? source.rewards : [];
+        return {
+            id: String(source.id || uid('explore-spawner')),
+            name: String(source.name || 'AI 刷怪点 ' + (index + 1)),
+            col: clamp(Number(source.col) || 0, 0, 79),
+            row: clamp(Number(source.row) || 0, 0, 79),
+            enemyTypeId: String(source.enemyTypeId || 'ai-drone'),
+            element: normalizeExploreElement(source.element, 'electric'),
+            modelId: String(source.modelId || ''),
+            modelPath: String(source.modelPath || ''),
+            modelScale: positiveNumber(source.modelScale, 1, 10),
+            maxConcurrent: Math.max(1, Math.round(Number(source.maxConcurrent) || 3)),
+            spawnIntervalSec: positiveNumber(source.spawnIntervalSec, 6, 3600),
+            spawnCount: Math.max(1, Math.round(Number(source.spawnCount) || 1)),
+            triggerRadius: positiveNumber(source.triggerRadius, 12, 120),
+            activeRadius: positiveNumber(source.activeRadius, 18, 180),
+            totalLimit: Math.max(0, Math.round(Number(source.totalLimit) || 0)),
+            disableWhenBossDefeated: !!source.disableWhenBossDefeated,
+            rewards: rewards.map(function (reward) {
+                var r = reward && typeof reward === 'object' ? reward : {};
+                return {
+                    money: nonNegativeNumber(r.money, 12, 1000000),
+                    xp: nonNegativeNumber(r.xp, 10, 1000000),
+                    itemName: String(r.itemName || ''),
+                    itemIcon: String(r.itemIcon || 'AI').slice(0, 2),
+                    quantity: Math.max(1, Math.round(Number(r.quantity) || 1))
+                };
+            })
+        };
+    });
+}
+
+export function normalizeExplorePickups(pickups) {
+    var list = Array.isArray(pickups) ? pickups : [];
+    return list.map(function (pickup, index) {
+        var source = pickup && typeof pickup === 'object' ? pickup : {};
+        var type = source.type === 'item' ? 'item' : 'money';
+        return {
+            id: String(source.id || uid('explore-pickup')),
+            type: type,
+            name: String(source.name || (type === 'money' ? '城市算力资金' : 'AI 道具') + ' ' + (index + 1)),
+            col: clamp(Number(source.col) || 0, 0, 79),
+            row: clamp(Number(source.row) || 0, 0, 79),
+            moneyAmount: nonNegativeNumber(source.moneyAmount, type === 'money' ? 50 : 0, 10000000),
+            itemId: String(source.itemId || ''),
+            itemName: String(source.itemName || source.name || 'AI 记忆碎片'),
+            itemType: source.itemType === 'consumable' ? 'consumable' : 'material',
+            itemIcon: String(source.itemIcon || (type === 'money' ? '$' : 'AI')).slice(0, 2),
+            quantity: Math.max(1, Math.round(Number(source.quantity) || 1)),
+            modelId: String(source.modelId || ''),
+            modelPath: String(source.modelPath || ''),
+            modelScale: positiveNumber(source.modelScale, 1, 8),
+            collectRadius: positiveNumber(source.collectRadius, 1.25, 20)
         };
     });
 }
@@ -607,6 +726,46 @@ export function normalizeEditorAssetsCatalog(raw) {
     }) : [];
 }
 
+function normalizeCutsceneVideoEntry(raw) {
+    var source = raw && typeof raw === 'object' ? raw : {};
+    var url = String(source.url || '').trim();
+    var projectPath = String(source.projectPath || '').trim().replace(/\\/g, '/');
+    var title = String(source.title || '').trim();
+    if (!url && !projectPath && !title) return null;
+    var out = {};
+    if (url) out.url = url;
+    if (projectPath) out.projectPath = projectPath;
+    if (title) out.title = title;
+    return out;
+}
+
+function normalizeWaveCutsceneEntry(raw, index) {
+    var source = raw && typeof raw === 'object' ? raw : {};
+    var out = {
+        afterWave: Math.max(1, Number(source.afterWave) || index + 1)
+    };
+    var url = String(source.url || '').trim();
+    var projectPath = String(source.projectPath || '').trim().replace(/\\/g, '/');
+    var title = String(source.title || '').trim();
+    if (url) out.url = url;
+    if (projectPath) out.projectPath = projectPath;
+    if (title) out.title = title;
+    return out;
+}
+
+export function normalizeCutscenes(raw) {
+    var source = raw && typeof raw === 'object' ? raw : {};
+    var normalized = {};
+    var introVideo = normalizeCutsceneVideoEntry(source.introVideo);
+    if (introVideo) normalized.introVideo = introVideo;
+    if (Array.isArray(source.waveVideos) && source.waveVideos.length) {
+        normalized.waveVideos = source.waveVideos
+            .map(normalizeWaveCutsceneEntry)
+            .filter(Boolean);
+    }
+    return normalized;
+}
+
 
 export function normalizeExplorationLayout(layout, fallbackMap) {
     var source = layout && typeof layout === 'object' ? layout : {};
@@ -784,6 +943,81 @@ export function mergeDistinctStrings() {
     return bucket;
 }
 
+/** 济南专属：塔 id 与由其衍生的角色/技能/卡片 id。 */
+var JINAN_EXCLUSIVE_GAMEPLAY_IDS = {
+    qinqiong: true,
+    liqingzhao: true,
+    bianque: true,
+    'qinqiong-skill': true,
+    'liqingzhao-skill': true,
+    'bianque-skill': true,
+    'qinqiong-card': true,
+    'liqingzhao-card': true,
+    'bianque-card': true,
+    'qinqiong-skill-card': true,
+    'liqingzhao-skill-card': true,
+    'bianque-skill-card': true
+};
+
+var STELLAR_GAMEPLAY_IDS = {
+    stellar: true,
+    'stellar-skill': true,
+    'stellar-card': true,
+    'stellar-skill-card': true
+};
+
+function isJinanCityGameplayConfig(config) {
+    if (!config || typeof config !== 'object') return false;
+    var haystack = []
+        .concat(config.cityCode || '', config.cityName || '', Array.isArray(config.aliases) ? config.aliases : [])
+        .join(' ')
+        .replace(/\s+/g, '');
+    return /\u6d4e\u5357|\u6cc9\u57ce|370100|shandong|cn-370100|shandong_370100/i.test(haystack);
+}
+
+function isJinanExclusiveGameplayEntryId(id) {
+    return !!JINAN_EXCLUSIVE_GAMEPLAY_IDS[String(id || '')];
+}
+
+function isStellarGameplayEntryId(id) {
+    return !!STELLAR_GAMEPLAY_IDS[String(id || '')];
+}
+
+function stripNonJinanExclusiveGameplayEntries(config) {
+    if (!config || isJinanCityGameplayConfig(config)) return;
+    var pred = function (entry) {
+        return !isJinanExclusiveGameplayEntryId(entry && entry.id);
+    };
+    config.towers = (config.towers || []).filter(pred);
+    config.characters = (config.characters || []).filter(pred);
+    config.skills = (config.skills || []).filter(pred);
+    config.cards = (config.cards || []).filter(pred);
+}
+
+/** 星辉棱镜·天河：标记为全关卡常驻，避免标签中强调「济南专属」。 */
+function normalizeStellarGameplayEntryTags(config) {
+    if (!config || typeof config !== 'object') return;
+    ['towers', 'characters', 'skills', 'cards'].forEach(function (kind) {
+        var list = config[kind];
+        if (!Array.isArray(list)) return;
+        list.forEach(function (entry) {
+            if (!entry || !isStellarGameplayEntryId(entry.id) || !Array.isArray(entry.tags)) return;
+            var seen = Object.create(null);
+            entry.tags = entry.tags
+                .map(function (tag) {
+                    var t = String(tag || '');
+                    if (t === '\u6d4e\u5357' || t === '\u6d4e\u5357\u5e02') return '\u901a\u7528';
+                    return t;
+                })
+                .filter(function (t) {
+                    if (!t || seen[t]) return false;
+                    seen[t] = true;
+                    return true;
+                });
+        });
+    });
+}
+
 export function normalizeGameplayPlacement(value) {
     var placement = String(value || 'roadside').trim();
     return placement === 'road' || placement === 'on-road' || placement === 'path' ? 'road' : 'roadside';
@@ -955,13 +1189,20 @@ export function buildDefaultEnemyEntries(config) {
 export function buildDefaultTowerEntries(config) {
     var cityName = config && config.cityName ? config.cityName : '';
     var cityCode = config && config.cityCode ? config.cityCode : '';
+    var jinanCfg = isJinanCityGameplayConfig(config);
     return TOWER_MODEL_SPECS.map(function (spec) {
+        if (!jinanCfg && JINAN_EXCLUSIVE_GAMEPLAY_IDS[spec.id]) {
+            return null;
+        }
         var meta = DEFAULT_TOWER_DEFENSE_META[spec.id] || {};
         return {
             id: spec.id,
             name: spec.name,
             summary: '当前关卡可用防御塔，可在这里覆盖费用、射程、攻速和伤害。',
-            tags: [cityName || '通用', spec.key].filter(Boolean),
+            tags:
+                spec.id === 'stellar'
+                    ? mergeDistinctStrings('\u901a\u7528', spec.key)
+                    : [cityName || '\u901a\u7528', spec.key].filter(Boolean),
             rarity: spec.id === 'stellar' || spec.id === 'qinqiong' || spec.id === 'liqingzhao' || spec.id === 'bianque' ? 'S' : 'common',
             placement: spec.id === 'mine' || spec.id === 'qinqiong' ? 'road' : 'roadside',
             element: meta.element || '',
@@ -975,7 +1216,7 @@ export function buildDefaultTowerEntries(config) {
             cityName: cityName,
             updatedAt: ''
         };
-    });
+    }).filter(Boolean);
 }
 
 export function buildDefaultCardEntries(config) {
@@ -1093,6 +1334,8 @@ export function normalizeCityGameplayConfigs(raw) {
         if (!normalized[key].items.length) {
             normalized[key].items = buildDefaultDefenseItemEntries(normalized[key]);
         }
+        stripNonJinanExclusiveGameplayEntries(normalized[key]);
+        normalizeStellarGameplayEntryTags(normalized[key]);
     });
     return normalized;
 }
@@ -1137,6 +1380,9 @@ export function createDefaultMap() {
         },
         geo: { enabled: false, provider: 'cesium-ion', assetId: DEFAULT_CESIUM_ION_3D_TILES_ASSET_ID, center: { lat: 0, lon: 0, heightMeters: 0 }, extentMeters: 1000, rotationDeg: 0, yOffsetMeters: 0, boardHeightMeters: 32 },
         actors: [],
+        exploreBosses: [],
+        exploreSpawners: [],
+        explorePickups: [],
         boardImageLayers: []
     };
 }
@@ -1151,6 +1397,9 @@ export function trimMapToBounds(map) {
     map.spawnPoints = map.spawnPoints.filter(inBounds(cols, rows));
     map.explorationPoints = map.explorationPoints.filter(inBounds(cols, rows));
     map.actors = map.actors.filter(inBounds(cols, rows));
+    map.exploreBosses = map.exploreBosses.filter(inBounds(cols, rows));
+    map.exploreSpawners = map.exploreSpawners.filter(inBounds(cols, rows));
+    map.explorePickups = map.explorePickups.filter(inBounds(cols, rows));
     if (map.objectivePoint && !inBounds(cols, rows)(map.objectivePoint)) {
         map.objectivePoint = defaultObjectivePoint(map.grid);
     }
@@ -1202,10 +1451,14 @@ export function normalizeMap(map, seed) {
     normalized.enemyExits = normalized.spawnPoints;
     normalized.objectivePoint = normalizePoint(source.objectivePoint) || defaultObjectivePoint(normalized.grid, legacyTd);
     normalized.explorationPoints = normalizeExplorePoints(source.explorationPoints, legacyExplore);
+    normalized.exploreBosses = normalizeExploreBosses(source.exploreBosses);
+    normalized.exploreSpawners = normalizeExploreSpawners(source.exploreSpawners);
+    normalized.explorePickups = normalizeExplorePickups(source.explorePickups);
     normalized.explorationLayout = normalizeExplorationLayout(source.explorationLayout, normalized);
     normalized.actors = normalizeActors(source.actors, seed);
     normalized.boardImageLayers = normalizeBoardImageLayers(source.boardImageLayers);
     normalized.levelAudio = normalizeLevelAudioSource(source.levelAudio);
+    normalized.cutscenes = normalizeCutscenes(source.cutscenes);
     trimMapToBounds(normalized);
     return normalized;
 }

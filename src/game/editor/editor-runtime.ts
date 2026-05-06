@@ -124,7 +124,10 @@ export function editorLevelRuntimePriority(level: EditorLevel): number {
     (map?.enemyPaths?.reduce((sum, path) => sum + (path.cells?.length ?? 0), 0) ?? 0) +
     (map?.obstacles?.length ?? 0) +
     (map?.spawnPoints?.length ?? 0) +
-    (map?.explorationPoints?.length ?? 0);
+    (map?.explorationPoints?.length ?? 0) +
+    (map?.exploreBosses?.length ?? 0) +
+    (map?.exploreSpawners?.length ?? 0) +
+    (map?.explorePickups?.length ?? 0);
 
   const statusScore = level.status === "designed" ? 30 : level.status === "needs-work" ? 20 : 10;
   return statusScore + Math.min(designScore, 9);

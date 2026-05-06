@@ -15,6 +15,7 @@ const artsDir = path.resolve(publicDir, "Arts");
 const gameModelsDir = path.resolve(publicDir, "GameModels");
 const editorConfigFile = path.resolve(__dirname, "Web", "data", "level-editor-state.json");
 const runtimeSourceFile = path.resolve(__dirname, "src", "game", "data", "content.ts");
+const meshyImageTo3dApiUrl = "https://api.meshy.ai/openapi/v1/image-to-3d";
 
 function readJsonBody(request) {
   return new Promise((resolve, reject) => {
@@ -205,6 +206,84 @@ function sendJson(response, statusCode, payload) {
   response.statusCode = statusCode;
   response.setHeader("Content-Type", "application/json; charset=utf-8");
   response.end(JSON.stringify(payload, null, 2));
+}
+
+function resolveVolcArkApiKey() {
+  return [
+    process.env.VOLCENGINE_ARK_API_KEY,
+    loadedEnv.VOLCENGINE_ARK_API_KEY,
+    process.env.ARK_API_KEY,
+    loadedEnv.ARK_API_KEY,
+  ]
+    .map((item) => String(item || "").trim())
+    .find(Boolean) || "";
+}
+
+function resolveMeshyApiKey() {
+  return [process.env.MESHY_API_KEY, loadedEnv.MESHY_API_KEY]
+    .map((item) => String(item || "").trim())
+    .find(Boolean) || "";
+}
+
+async function readJsonResponse(response, fallbackMessage) {
+  const text = await response.text();
+  let payload = {};
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch (_error) {
+      payload = {};
+    }
+  }
+  if (!response.ok) {
+    throw new Error(String(payload.error || payload.message || fallbackMessage || `Request failed: ${response.status}`));
+  }
+  return payload;
+}
+
+function inferRemoteModelExtension(contentType, assetUrl) {
+  const normalizedType = String(contentType || "").toLowerCase();
+  const cleanUrl = String(assetUrl || "").split("#")[0].split("?")[0];
+  const ext = path.extname(cleanUrl).toLowerCase();
+  if ([".glb", ".gltf", ".obj", ".fbx"].includes(ext)) {
+    return ext;
+  }
+  if (normalizedType.includes("model/gltf+json")) return ".gltf";
+  if (normalizedType.includes("text/plain")) return ".obj";
+  return ".glb";
+}
+
+function extractGeneratedImageUrl(payload) {
+  if (!payload || typeof payload !== "object") return "";
+  const directCandidates = [payload.url, payload.image_url, payload?.output?.url, payload?.result?.url];
+  for (const candidate of directCandidates) {
+    const value = String(candidate || "").trim();
+    if (value) return value;
+  }
+  if (Array.isArray(payload.data)) {
+    for (const item of payload.data) {
+      const value = String((item && item.url) || "").trim();
+      if (value) return value;
+    }
+  }
+  return "";
+}
+
+function inferRemoteImageExtension(contentType, assetUrl) {
+  const loweredType = String(contentType || "").toLowerCase();
+  if (loweredType.includes("png")) return ".png";
+  if (loweredType.includes("webp")) return ".webp";
+  if (loweredType.includes("jpeg") || loweredType.includes("jpg")) return ".jpg";
+  try {
+    const parsed = new URL(String(assetUrl || ""));
+    const ext = path.extname(parsed.pathname || "").toLowerCase();
+    if (ext === ".png" || ext === ".webp" || ext === ".jpg" || ext === ".jpeg") {
+      return ext === ".jpeg" ? ".jpg" : ext;
+    }
+  } catch {
+    // ignore malformed URLs and fall back to png
+  }
+  return ".png";
 }
 
 function gmEntryId(relPathPosix) {
@@ -440,6 +519,112 @@ export default defineConfig({
           }
         });
 
+        server.middlewares.use("/api/generate-board-image", async (request, response) => {
+          if (request.method !== "POST") {
+            sendJson(response, 405, { error: "Method not allowed" });
+            return;
+          }
+
+          try {
+            const apiKey = resolveVolcArkApiKey();
+            if (!apiKey) {
+              sendJson(response, 400, {
+                error: "Missing VOLCENGINE_ARK_API_KEY. Please add it to .env.local before generating board images.",
+              });
+              return;
+            }
+
+            const body = await readJsonBody(request);
+            const prompt = String(body.prompt ?? "").trim();
+            if (!prompt) {
+              sendJson(response, 400, { error: "Prompt is required" });
+              return;
+            }
+
+            const cityName = sanitizeProjectSegment(body.cityName ?? body.levelName ?? "未命名城市");
+            const cityCode = sanitizeProjectSegment(body.cityCode ?? "");
+            const levelName = sanitizeProjectSegment(body.levelName ?? cityName);
+            const scope = String(body.scope ?? "defense") === "explore" ? "explore" : "defense";
+            const model = String(
+              process.env.VOLCENGINE_ARK_IMAGE_MODEL ||
+                loadedEnv.VOLCENGINE_ARK_IMAGE_MODEL ||
+                "doubao-seedream-5-0-260128",
+            ).trim();
+
+            const arkResponse = await fetch("https://ark.cn-beijing.volces.com/api/v3/images/generations", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${apiKey}`,
+              },
+              body: JSON.stringify({
+                model,
+                prompt,
+                sequential_image_generation: "disabled",
+                response_format: "url",
+                size: "2K",
+                stream: false,
+                watermark: true,
+              }),
+            });
+
+            const arkText = await arkResponse.text();
+            let arkPayload = {};
+            try {
+              arkPayload = arkText ? JSON.parse(arkText) : {};
+            } catch {
+              throw new Error(`Ark returned non-JSON response: ${arkText.slice(0, 240)}`);
+            }
+            if (!arkResponse.ok) {
+              throw new Error(String(arkPayload.error?.message || arkPayload.message || arkText || "image generation failed"));
+            }
+
+            const remoteUrl = extractGeneratedImageUrl(arkPayload);
+            if (!remoteUrl) {
+              throw new Error("Ark did not return an image URL");
+            }
+
+            const remoteImageResponse = await fetch(remoteUrl);
+            if (!remoteImageResponse.ok) {
+              throw new Error(`Failed to download generated image: ${remoteImageResponse.status}`);
+            }
+            const extension = inferRemoteImageExtension(remoteImageResponse.headers.get("content-type"), remoteUrl);
+            const assetType = "Maps";
+            const resourceKind = "board-image";
+            const directory = path.join(artsDir, assetType, cityName);
+            const assetName = sanitizeProjectSegment(`${levelName}-${scope}-board`);
+            const baseName = sanitizeProjectSegment(`${cityName}-${assetName}`);
+            const fileName = ensureUniqueFilename(directory, baseName, extension);
+            const absolutePath = path.join(directory, fileName);
+
+            await mkdir(directory, { recursive: true });
+            await writeFile(absolutePath, Buffer.from(await remoteImageResponse.arrayBuffer()));
+
+            const relativeSegments = path.relative(publicDir, absolutePath).split(path.sep).filter(Boolean);
+            const projectPath = path.posix.join("public", ...relativeSegments);
+            const publicUrl = buildPublicUrl(...relativeSegments);
+
+            sendJson(response, 200, {
+              id: `${Date.now()}-${sanitizeName(`${cityCode || cityName}-board-image-${assetName}`)}`,
+              name: assetName,
+              assetType,
+              resourceKind,
+              cityCode,
+              cityName,
+              fileName,
+              model,
+              prompt,
+              remoteUrl,
+              projectPath,
+              publicUrl,
+            });
+          } catch (error) {
+            sendJson(response, 500, {
+              error: error instanceof Error ? error.message : "failed to generate board image",
+            });
+          }
+        });
+
         /** 在系统文件管理器中定位 public 下的文件（开发机本地体验） */
         server.middlewares.use("/api/reveal-project-path", async (request, response) => {
           if (request.method !== "POST") {
@@ -477,19 +662,24 @@ export default defineConfig({
               return;
             }
             const platform = process.platform;
+            const isDirectory = statSync(abs).isDirectory();
 
             /** Windows：explorer /select 必须写成 “/select,\"路径\””，且不宜用 execFile 等待退出（易判为失败） */
             if (platform === "win32") {
               const forCmd = abs.replace(/"/g, '""');
-              exec(`explorer.exe /select,"${forCmd}"`, { windowsHide: true }, () => {});
+              if (isDirectory) {
+                exec(`explorer.exe "${forCmd}"`, { windowsHide: true }, () => {});
+              } else {
+                exec(`explorer.exe /select,"${forCmd}"`, { windowsHide: true }, () => {});
+              }
             } else if (platform === "darwin") {
-              spawn("open", ["-R", abs], {
+              spawn("open", isDirectory ? [abs] : ["-R", abs], {
                 detached: true,
                 stdio: "ignore",
                 windowsHide: true,
               }).unref();
             } else {
-              spawn("xdg-open", [path.dirname(abs)], {
+              spawn("xdg-open", [isDirectory ? abs : path.dirname(abs)], {
                 detached: true,
                 stdio: "ignore",
                 windowsHide: true,
@@ -522,6 +712,155 @@ export default defineConfig({
               entries: [],
             });
           }
+        });
+
+        server.middlewares.use("/api/meshy/image-to-3d", async (request, response) => {
+          const relativePath = String(request.url || "/").split("?")[0] || "/";
+          const meshyApiKey = resolveMeshyApiKey();
+          if (!meshyApiKey) {
+            sendJson(response, 500, { error: "Missing MESHY_API_KEY in .env.local or environment" });
+            return;
+          }
+
+          if (request.method === "POST" && (relativePath === "/" || relativePath === "")) {
+            try {
+              const body = await readJsonBody(request);
+              const imageDataUrl = String(body.imageDataUrl ?? "").trim();
+              const nameHint = sanitizeProjectSegment(String(body.nameHint ?? "meshy-model"));
+              if (!/^data:image\//i.test(imageDataUrl) && !/^https?:\/\//i.test(imageDataUrl)) {
+                sendJson(response, 400, { error: "imageDataUrl must be a data:image URL or remote image URL" });
+                return;
+              }
+              const payload = await readJsonResponse(
+                await fetch(meshyImageTo3dApiUrl, {
+                  method: "POST",
+                  headers: {
+                    Authorization: `Bearer ${meshyApiKey}`,
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify({
+                    image_url: imageDataUrl,
+                    name: nameHint,
+                  }),
+                }),
+                "Failed to create Meshy image-to-3D task"
+              );
+              const taskId = String(payload.result ?? payload.id ?? "").trim();
+              if (!taskId) {
+                sendJson(response, 502, { error: "Meshy did not return a task id" });
+                return;
+              }
+              sendJson(response, 200, {
+                taskId,
+                status: String(payload.status || "PENDING"),
+              });
+            } catch (error) {
+              sendJson(response, 500, {
+                error: error instanceof Error ? error.message : "failed to create Meshy task",
+              });
+            }
+            return;
+          }
+
+          if (request.method === "POST" && relativePath.replace(/\/+$/g, "") === "/import") {
+            try {
+              const body = await readJsonBody(request);
+              const taskId = String(body.taskId ?? "").trim();
+              if (!taskId || /\//.test(taskId)) {
+                sendJson(response, 400, { error: "Invalid Meshy task id" });
+                return;
+              }
+              const taskPayload = await readJsonResponse(
+                await fetch(`${meshyImageTo3dApiUrl}/${encodeURIComponent(taskId)}`, {
+                  headers: { Authorization: `Bearer ${meshyApiKey}` },
+                }),
+                "Failed to retrieve Meshy task"
+              );
+              const taskStatus = String(taskPayload.status || "").toUpperCase();
+              const modelUrl = String(taskPayload?.model_urls?.glb || taskPayload?.model_urls?.gltf || "").trim();
+              if (taskStatus !== "SUCCEEDED" && taskStatus !== "COMPLETED") {
+                sendJson(response, 409, {
+                  error: "Meshy task is not ready for import",
+                  status: taskStatus || "PENDING",
+                });
+                return;
+              }
+              if (!modelUrl) {
+                sendJson(response, 502, { error: "Meshy task succeeded but no downloadable model URL was returned" });
+                return;
+              }
+              const remoteModelResponse = await fetch(modelUrl);
+              if (!remoteModelResponse.ok) {
+                sendJson(response, 502, { error: `Failed to download Meshy model: ${remoteModelResponse.status}` });
+                return;
+              }
+              const extension = inferRemoteModelExtension(remoteModelResponse.headers.get("content-type"), modelUrl);
+              const baseName = sanitizeProjectSegment(String(body.nameHint ?? `meshy-${taskId.slice(0, 8)}`));
+              let subRaw = String(body.subdirectory ?? "")
+                .replace(/\\/g, "/")
+                .replace(/^\/+|\/+$/g, "");
+              const subSegments = subRaw
+                .split("/")
+                .map((segment) => sanitizeProjectSegment(segment))
+                .filter(Boolean);
+              let targetDir = gameModelsDir;
+              for (const segment of subSegments) {
+                targetDir = path.join(targetDir, segment);
+              }
+              await mkdir(targetDir, { recursive: true });
+              const fileName = ensureUniqueFilename(targetDir, baseName || "meshy-model", extension);
+              const absolutePath = path.join(targetDir, fileName);
+              await writeFile(absolutePath, Buffer.from(await remoteModelResponse.arrayBuffer()));
+              const relativeSegments = path.relative(publicDir, absolutePath).split(path.sep).filter(Boolean);
+              const projectPath = path.posix.join("public", ...relativeSegments);
+              const publicUrl = buildPublicUrl(...relativeSegments);
+              sendJson(response, 200, {
+                taskId,
+                fileName,
+                projectPath,
+                publicUrl,
+                relativePath: relativeSegments.slice(1).join("/"),
+                modelUrl,
+                thumbnailUrl: String(taskPayload.thumbnail_url || ""),
+              });
+            } catch (error) {
+              sendJson(response, 500, {
+                error: error instanceof Error ? error.message : "failed to import Meshy model",
+              });
+            }
+            return;
+          }
+
+          if (request.method === "GET") {
+            const taskId = decodeURIComponent(relativePath.replace(/^\/+|\/+$/g, ""));
+            if (!taskId || /\//.test(taskId) || taskId === "import") {
+              sendJson(response, 400, { error: "Invalid Meshy task id" });
+              return;
+            }
+            try {
+              const payload = await readJsonResponse(
+                await fetch(`${meshyImageTo3dApiUrl}/${encodeURIComponent(taskId)}`, {
+                  headers: { Authorization: `Bearer ${meshyApiKey}` },
+                }),
+                "Failed to retrieve Meshy task"
+              );
+              sendJson(response, 200, {
+                taskId,
+                status: String(payload.status || ""),
+                progress: payload.progress,
+                thumbnailUrl: String(payload.thumbnail_url || ""),
+                modelUrl: String(payload?.model_urls?.glb || payload?.model_urls?.gltf || ""),
+                taskError: payload.task_error || null,
+              });
+            } catch (error) {
+              sendJson(response, 500, {
+                error: error instanceof Error ? error.message : "failed to retrieve Meshy task",
+              });
+            }
+            return;
+          }
+
+          sendJson(response, 405, { error: "Method not allowed" });
         });
 
         server.middlewares.use("/api/game-models/upload", async (request, response) => {

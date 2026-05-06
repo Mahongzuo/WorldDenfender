@@ -110,6 +110,7 @@ export function bindEditorEvents(refs, env) {
     if (refs.btnThemeCopyToDefense) refs.btnThemeCopyToDefense.addEventListener('click', env.copyThemeToDefense);
 
     env.bindCutsceneEditorEvents();
+    env.bindThemeBoardImageWorkbenchEvents();
     env.bindGameplayUi();
 
     if (refs.modelCategoryTabs) {

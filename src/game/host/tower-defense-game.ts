@@ -72,7 +72,7 @@ import {
   presentGameOverScreen,
 } from "../persistence/game-flow-coordinator";
 import { HudBillboardOrient } from "../ui/hud-billboard-orient";
-import { spawnDefenseMoneyDropAtWorld, spawnExploreMoneyDropOnGrid } from "../drops/money-drop-spawn";
+import { spawnDefenseMoneyDropAtWorld, spawnPlacedExplorePickup } from "../drops/money-drop-spawn";
 import {
   buildRuntimeMapState,
   loadMapActors,
@@ -130,6 +130,8 @@ import type {
   EditorLevelMap,
   Enemy,
   EnemyType,
+  ExploreElement,
+  ExplorePickupPlacement,
   GameAssetConfig,
   GameMode,
   GachaFocusBanner,
@@ -326,6 +328,8 @@ export class TowerDefenseGame {
   /** 首次挂载前快照，编辑器多次同步时需先清空 `syncEditorLevelsToRuntime` 追加的地图条目 */
   private bundledCityMapJson = "";
   private bundledBuildSpecsJson = "";
+  /** level-editor-state.json 中全局塔模型 URL；切换防御地图时与 map.towerModelUrls 合并 */
+  private globalCustomModelUrls: Partial<Record<BuildId, string>> = {};
 
   /** 从编辑器标签页保存后返回时防抖热重载 */
   private editorProjectReloadTimer = 0;
@@ -781,7 +785,7 @@ export class TowerDefenseGame {
         await this.loadDefaultPlayer();
       }
       setGameSessionActive(true);
-      this.loadDefenseMap(data.defenseMapIndex ?? 0, true);
+      this.loadDefenseMap(data.defenseMapIndex ?? 0, true, { skipTowerUrlMerge: true });
       this.baseHp = data.baseHp ?? INITIAL_BASE_HP;
       this.wave = data.wave ?? 1;
       this.nextWaveDelay = data.nextWaveDelay ?? 3;
@@ -841,15 +845,40 @@ export class TowerDefenseGame {
         BUILD_SPECS,
       );
       if (!loaded) {
+        this.globalCustomModelUrls = {};
         return;
       }
 
       this.modelCustomization.assignFromLoadedEditorBundle(loaded);
+      this.globalCustomModelUrls = { ...this.modelCustomization.customModelUrls };
       this.playerExploreTransform = loaded.playerExploreTransform;
       setGlobalGameAudio(loaded.globalAudio);
     } catch (error) {
       console.warn("[GameAssetConfig]", error);
     }
+  }
+
+  private async applyPerMapTowerModelOverrides(map: MapDefinition): Promise<void> {
+    const merged: Partial<Record<BuildId, string>> = { ...this.globalCustomModelUrls };
+    const overrides = map.towerModelUrls;
+    if (overrides) {
+      for (const [rawKey, url] of Object.entries(overrides)) {
+        const id = rawKey as BuildId;
+        if (typeof url === "string" && url.trim() && Object.prototype.hasOwnProperty.call(BUILD_SPECS, id)) {
+          merged[id] = url.trim();
+        }
+      }
+    }
+    this.modelCustomization.customModelUrls = merged;
+    try {
+      await this.modelCustomization.restoreMeshesFromStoredUrls({
+        gltfLoader: this.gltfLoader,
+        objLoader: this.objLoader,
+      });
+    } catch (error) {
+      console.warn("[TowerModelOverrides]", error);
+    }
+    refreshBuildCardModelFlags(this.modelCustomization.customModels);
   }
 
   private async loadDefaultPlayer(): Promise<void> {
@@ -1099,8 +1128,27 @@ export class TowerDefenseGame {
       },
       showToast: (text, important) => this.showToast(text, important),
       damageExplorePlayer: (amount) => this.applyExplorePlayerDamage(amount),
+      grantExploreMoney: (amount) => {
+        this.economy.addMoney(Math.round(amount));
+        this.showToast(`AI 回收奖励 +$${Math.round(amount)}`);
+      },
       onExploreBasicAttackFired: () => playExploreBasicAttack(),
       onExploreEnemyKilled: () => playExploreEnemyKilled(),
+      loadExploreGltfScene: async (url) => {
+        const trimmed = url.trim();
+        if (!trimmed) {
+          return null;
+        }
+        try {
+          const gltf = await new Promise<any>((resolve, reject) => {
+            this.gltfLoader.load(trimmed, resolve, undefined, reject);
+          });
+          return gltf.scene.clone(true) as THREE.Object3D;
+        } catch (e) {
+          console.warn("[ExploreCombatHost] GLTF:", trimmed, e);
+          return null;
+        }
+      },
     };
   }
 
@@ -1245,6 +1293,15 @@ export class TowerDefenseGame {
           if (code === "KeyI") this.toggleInventory();
           if (code === "KeyE") this.exploreCombat.castOrbSkill();
           if (code === "KeyR") this.exploreCombat.castRSkill();
+          const elementHotkeys: Partial<Record<string, ExploreElement>> = {
+            Digit1: "force",
+            Digit2: "thermal",
+            Digit3: "light",
+            Digit4: "electric",
+            Digit5: "sound",
+          };
+          const nextElement = elementHotkeys[code];
+          if (nextElement) this.exploreCombat.setPlayerElement(nextElement);
         }
         if (pressed) {
           this.keys.add(code);
@@ -1464,7 +1521,11 @@ export class TowerDefenseGame {
     }
   }
 
-  private loadDefenseMap(index: number, resetEncounter: boolean): void {
+  private loadDefenseMap(
+    index: number,
+    resetEncounter: boolean,
+    options?: { skipTowerUrlMerge?: boolean },
+  ): void {
     this.defenseMapIndex = index;
     this.baseHp = INITIAL_BASE_HP;
     this.wave = 1;
@@ -1491,6 +1552,10 @@ export class TowerDefenseGame {
     this.defenseObstacleCells = runtimeState.obstacleCells;
     this.defensePathWorldPoints = runtimeState.pathWorldPoints;
 
+    if (!options?.skipTowerUrlMerge) {
+      void this.applyPerMapTowerModelOverrides(map);
+    }
+
     if (this.mode === "defense") {
       this.showDefenseView();
     }
@@ -1512,6 +1577,10 @@ export class TowerDefenseGame {
     this.exploreMapInitialized = true;
     const map = EXPLORE_MAPS[this.exploreMapIndex];
     this.exploreCombat.syncGameplay(map.exploreGameplay);
+    this.exploreCombat.syncMapContent({
+      bosses: map.exploreBosses,
+      spawners: map.exploreSpawners,
+    });
     const runtimeState = buildRuntimeMapState(map);
     this.explorePathCells = runtimeState.pathCells;
     this.exploreObstacleCells = runtimeState.obstacleCells;
@@ -1534,10 +1603,7 @@ export class TowerDefenseGame {
       // Clear explore enemies and projectiles
       this.exploreCombat.resetEncounter();
       this.exploreProgress.hp = this.exploreProgress.maxHp;
-    }
-
-    if (resetExploration) {
-      this.spawnExploreMoneyDrops(5);
+      this.spawnPlacedExplorePickups(map);
     }
 
     if (options?.skipViewRefresh) {
@@ -1586,6 +1652,7 @@ export class TowerDefenseGame {
       currentCity: this.currentCity,
       mode: this.mode,
       useGeoBackdrop: hasGeoBackdrop,
+      mapGroupWorldXzScale: this.playfieldVisualScale,
     });
     this.geoTilesRuntime.load(map.geo);
     const defActorGen = ++this.mapActorGen;
@@ -1643,6 +1710,7 @@ export class TowerDefenseGame {
       mode: this.mode,
       useGeoBackdrop: canUseGeoTiles(map.geo),
       safeZoneCells: this.exploreSafeZoneCells,
+      mapGroupWorldXzScale: this.playfieldVisualScale,
     });
     this.geoTilesRuntime.load(map.geo);
     const expActorGen = ++this.mapActorGen;
@@ -1677,16 +1745,35 @@ export class TowerDefenseGame {
     }
     this.buildingDefenseHud.syncSkillHudScaleCorrection(this.buildings);
     this.buildingDefenseHud.layoutAll(this.buildings);
+    this.syncGeoSquashCompensationAcrossAttachedMeshes();
   }
 
-  /** 地图组使用 (sx,1,sz) 拉大棋盘会与真实底板对齐，但会令子物体的 Y 被相对“拍扁”；对单位根结点补偿 Y，使占位与 GLTF 等高宽比恢复正常。 */
+  /** GEO 棋盘用 (sx,1,sz) 放大 XZ；子网格需同步还原/施加 Y 向补偿以免「拍扁」或模式切换残留错误倍数 */
+  private syncGeoSquashCompensationAcrossAttachedMeshes(): void {
+    for (const enemy of this.enemies) {
+      this.applyGeoPlayfieldSquashCompensation(enemy.mesh);
+    }
+    for (const building of this.buildings) {
+      const visual = building.mesh.children[0];
+      if (visual) {
+        this.applyGeoPlayfieldSquashCompensation(visual);
+      }
+    }
+    for (const drop of this.drops) {
+      this.applyGeoPlayfieldSquashCompensation(drop.mesh);
+    }
+  }
+
   private applyGeoPlayfieldSquashCompensation(mesh: THREE.Object3D): void {
-    const s = this.playfieldVisualScale;
-    if (s !== 1 && mesh.userData.geoSquashCompensatedScale !== s) {
-      const previous = Number(mesh.userData.geoSquashCompensatedScale) || 1;
-      mesh.scale.y /= previous;
-      mesh.scale.y *= s;
-      mesh.userData.geoSquashCompensatedScale = s;
+    const target = this.playfieldVisualScale;
+    const storedRaw = mesh.userData.geoSquashCompensatedScale;
+    const previous = typeof storedRaw === "number" && storedRaw > 0 && Number.isFinite(storedRaw) ? storedRaw : 1;
+    mesh.scale.y /= previous;
+    if (target !== 1 && Number.isFinite(target)) {
+      mesh.scale.y *= target;
+      mesh.userData.geoSquashCompensatedScale = target;
+    } else {
+      delete mesh.userData.geoSquashCompensatedScale;
     }
   }
 
@@ -2158,12 +2245,6 @@ export class TowerDefenseGame {
     tickExploreSession({
       dt,
       movePlayer: (d) => this.movePlayer(d),
-      dropTimer: this.dropTimer,
-      dropRespawnIntervalSec: this.resolveCurrentExploreGameplay().moneyDropRespawnIntervalSec,
-      setDropTimer: (v) => {
-        this.dropTimer = v;
-      },
-      spawnExploreMoneyDrops: (c) => this.spawnExploreMoneyDrops(c),
       drops: this.drops,
       setDrops: (next) => {
         this.drops = next;
@@ -2171,16 +2252,7 @@ export class TowerDefenseGame {
       playerPosition: this.player.position,
       dropGroup: this.dropGroup,
       onExploreDropCollect: (drop) => {
-        this.economy.grantExploreResourcePickup(Math.round(drop.amount), 1);
-        this.showToast(`\u62fe\u53d6\u8d44\u6e90 +$${drop.amount}\uff0c\u83b7\u5f97 1 \u5f20\u7279\u6d3e\u8865\u7ed9\u5361\uff01`);
-        this.addInventoryItem({
-          id: `drop-${Date.now()}`,
-          name: "\u8d44\u6e90\u78c1\u7247",
-          quantity: 1,
-          type: "material",
-          icon: "\ud83d\udcbe",
-          collectedAt: Date.now(),
-        });
+        this.collectAuthoredExplorePickup(drop);
       },
       exploreCombatTick: (d) => this.exploreCombat.tick(d),
       updateExploreHud: () => this.updateExploreHud(),
@@ -2412,6 +2484,7 @@ export class TowerDefenseGame {
       c.getSkillECooldown() > 0 ? `${(c.getSkillECooldown() / eMax) * 100}%` : "0%";
     this.exploreSkillRCd.style.height =
       c.getSkillRCooldown() > 0 ? `${(c.getSkillRCooldown() / rMax) * 100}%` : "0%";
+    this.selectedElement.textContent = `探索属性：${c.getPlayerElementLabel()}（1-5 切换）`;
   }
 
   private movePlayer(dt: number): void {
@@ -2506,35 +2579,66 @@ export class TowerDefenseGame {
     return uid;
   }
 
-  private spawnExploreMoneyDrops(count: number): void {
-    let spawned = 0;
-    for (let index = 0; index < count; index += 1) {
-      if (this.spawnMoneyDrop(false)) {
-        spawned += 1;
-      }
-    }
-    if (spawned > 0) {
-      this.showToast(`\u63a2\u7d22\u533a\u5237\u65b0\u4e86 ${spawned} \u4e2a\u91d1\u94b1\u9053\u5177`);
-    }
-  }
-
-  private spawnMoneyDrop(showFeedback = true): boolean {
-    const rolled = spawnExploreMoneyDropOnGrid({
-      buildings: this.buildings,
-      obstacleCells: this.obstacleCells,
-      drops: this.drops,
-      dropGroup: this.dropGroup,
-      allocateUid: () => this.allocateNextDropUid(),
-      createMesh: (amount) => this.createMoneyDropMesh(amount),
-    });
-    if (rolled === false) {
-      return false;
+  private spawnPlacedExplorePickups(map: MapDefinition): void {
+    for (const pickup of map.explorePickups ?? []) {
+      spawnPlacedExplorePickup(
+        {
+          drops: this.drops,
+          dropGroup: this.dropGroup,
+          allocateUid: () => this.allocateNextDropUid(),
+          createMesh: (p) => this.createExplorePickupMesh(p),
+        },
+        pickup,
+      );
     }
     this.updateDropVisibility();
-    if (showFeedback) {
-      this.showToast(`\u5730\u56fe\u4e0a\u6389\u843d $${rolled}`);
+  }
+
+  private createExplorePickupMesh(pickup: ExplorePickupPlacement): THREE.Group {
+    if (pickup.type === "money") {
+      const mesh = this.createMoneyDropMesh(Math.round(pickup.moneyAmount ?? 0));
+      mesh.scale.multiplyScalar(pickup.modelScale ?? 1);
+      return mesh;
     }
-    return true;
+
+    const group = new THREE.Group();
+    const core = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.38, 0),
+      new THREE.MeshStandardMaterial({ color: 0x66d7ff, emissive: 0x1d6c99, emissiveIntensity: 0.45, roughness: 0.36 }),
+    );
+    core.position.y = 0.38;
+    group.add(core);
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(0.46, 0.035, 8, 20),
+      new THREE.MeshBasicMaterial({ color: 0x9be7ff, transparent: true, opacity: 0.75 }),
+    );
+    ring.position.y = 0.38;
+    ring.rotation.x = Math.PI / 2;
+    group.add(ring);
+    group.scale.setScalar(pickup.modelScale ?? 1);
+    this.applyGeoPlayfieldSquashCompensation(group);
+    return group;
+  }
+
+  private collectAuthoredExplorePickup(drop: MoneyDrop): void {
+    const pickup = drop.pickup;
+    if (!pickup || pickup.type === "money") {
+      const amount = Math.round(pickup?.moneyAmount ?? drop.amount);
+      this.economy.grantExploreResourcePickup(amount, 0);
+      this.showToast(`拾取城市算力资金 +$${amount}`);
+      return;
+    }
+
+    const item: InventoryItem = {
+      id: pickup.itemId || `pickup-${pickup.id}-${Date.now()}`,
+      name: pickup.itemName || pickup.name || "AI 记忆碎片",
+      quantity: pickup.quantity ?? 1,
+      type: pickup.itemType ?? "material",
+      icon: pickup.itemIcon || "AI",
+      collectedAt: Date.now(),
+    };
+    this.addInventoryItem(item);
+    this.showToast(`拾取 ${item.icon}${item.name} ×${item.quantity}`);
   }
 
   private spawnMoneyDropAt(position: THREE.Vector3, amount: number, autoCollect: boolean): void {
@@ -2553,14 +2657,13 @@ export class TowerDefenseGame {
   }
 
   private createMoneyDropMesh(amount: number): THREE.Group {
-    // Do NOT apply GEO squash compensation here: drops live in dropGroup which
-    // already has scale (playfieldScale, 1, playfieldScale). Compensating Y
-    // would make coins 20x taller than intended on GEO maps.
-    return createRenderedMoneyDropMesh({
+    const mesh = createRenderedMoneyDropMesh({
       amount,
       customDropModel: this.modelCustomization.customDropModel,
       getClampedUserScale: (target) => this.modelCustomization.getClampedScale(target),
     });
+    this.applyGeoPlayfieldSquashCompensation(mesh);
+    return mesh;
   }
 
   private updateDrops(dt: number): void {

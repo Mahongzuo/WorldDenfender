@@ -30,7 +30,7 @@ import { mergeExploreGameplayDisplay, readExploreGameplayRawFromDomSection } fro
 import { markerHtml, themeColorInput, findBoardImageLayerById } from './editor/html-builders.js';
 import { parseFetchErrorBody } from './editor/fetch-utils.js';
 import { ensureWorldOffset, mergeGameplayEntryList } from './editor/level-mutators.js';
-import { renderBoardImagesPanel, ensureBoardImagesPanelDelegated, tryConsumeBoardImageFileDrop, bindBoardImageGlobalHandlers, clearBoardImageInteractionState } from './editor/board-images.js';
+import { renderBoardImagesPanel, ensureBoardImagesPanelDelegated, tryConsumeBoardImageFileDrop, bindBoardImageGlobalHandlers, clearBoardImageInteractionState, addBoardImageLayerFromUrl } from './editor/board-images.js';
 import { renderLevelAudioFields, renderGlobalAudioPanel, bindLevelAudioUi, bindGlobalAudioUi } from './editor/audio.js';
 import {
     refreshGlobalSettingsWorkbench as _refreshGlobalSettingsWorkbench,
@@ -84,6 +84,10 @@ import {
     renderCutsceneEditor as _renderCutsceneEditor,
     bindCutsceneEditorEvents as _bindCutsceneEditorEvents
 } from './editor/theme-cutscene-workbench.js';
+import {
+    renderThemeBoardImageWorkbench as _renderThemeBoardImageWorkbench,
+    bindThemeBoardImageWorkbenchEvents as _bindThemeBoardImageWorkbenchEvents
+} from './editor/theme-board-image-workbench.js';
 
     var state = null;
     var selectedLevelId = new URLSearchParams(window.location.search).get('levelId') || '';
@@ -95,10 +99,19 @@ import {
     var activeGlobalSettingsTab = 'levels';
     var globalCutsceneEditLevelId = '';
     var activeThemeScope = 'defense';
-    /** @type {'colors'|'cutscenes'} */
+    /** @type {'colors'|'cutscenes'|'ai-board'} */
     var activeThemeWorkbenchTab = 'colors';
     var themeEditorCacheKey = '';
     var themeBoardUrlDebounce = 0;
+    var themeBoardImageState = {
+        contextKey: '',
+        prompt: '',
+        lastPresetId: '',
+        generating: false,
+        statusText: '',
+        statusTone: 'idle',
+        lastResult: null
+    };
     var activeEditorMode = 'defense';
     var activeGameplayTab = 'enemies';
     var selectedGameplayEntryId = '';
@@ -178,7 +191,18 @@ import {
         gameplayTaxonomyPanel: document.getElementById('gameplayTaxonomyPanel'),
         gameplayInspectorMeta: document.getElementById('gameplayInspectorMeta'),
         gameplaySelectionMeta: document.getElementById('gameplaySelectionMeta'),
-        gameplayAssetUpload: document.getElementById('gameplayAssetUpload'),
+        gameplayTowerPreviewActions: document.getElementById('gameplayTowerPreviewActions'),
+        gameplayAiModelImageUpload: document.getElementById('gameplayAiModelImageUpload'),
+        gameplayAiModelStatus: document.getElementById('gameplayAiModelStatus'),
+        gameplayTowerModelUpload: document.getElementById('gameplayTowerModelUpload'),
+        btnClearGameplayTowerModel: document.getElementById('btnClearGameplayTowerModel'),
+        btnOpenGameplayTowerModelLocation: document.getElementById('btnOpenGameplayTowerModelLocation'),
+        gameplayTowerModelPickModal: document.getElementById('gameplayTowerModelPickModal'),
+        gameplayTowerModelPickFilter: document.getElementById('gameplayTowerModelPickFilter'),
+        gameplayTowerModelPickList: document.getElementById('gameplayTowerModelPickList'),
+        btnCancelGameplayTowerModelPick: document.getElementById('btnCancelGameplayTowerModelPick'),
+        btnCloseGameplayTowerModelPick: document.getElementById('btnCloseGameplayTowerModelPick'),
+        btnPickGameplayTowerProjectModel: document.getElementById('btnPickGameplayTowerProjectModel'),
         gameplayAssetName: document.getElementById('gameplayAssetName'),
         gameplayAssetType: document.getElementById('gameplayAssetType'),
         gameplayAssetList: document.getElementById('gameplayAssetList'),
@@ -265,6 +289,18 @@ import {
         themeWorkbench: document.getElementById('themeWorkbench'),
         themeWorkbenchTitle: document.getElementById('themeWorkbenchTitle'),
         themeWorkbenchMeta: document.getElementById('themeWorkbenchMeta'),
+        themeBoardAiPanel: document.getElementById('themeBoardAiPanel'),
+        themeBoardAiContext: document.getElementById('themeBoardAiContext'),
+        themeBoardAiPromptPresets: document.getElementById('themeBoardAiPromptPresets'),
+        themeBoardAiPrompt: document.getElementById('themeBoardAiPrompt'),
+        themeBoardAiGenerate: document.getElementById('themeBoardAiGenerate'),
+        themeBoardAiOpenLocation: document.getElementById('themeBoardAiOpenLocation'),
+        themeBoardAiFocusLayout: document.getElementById('themeBoardAiFocusLayout'),
+        themeBoardAiStatus: document.getElementById('themeBoardAiStatus'),
+        themeBoardAiResultCard: document.getElementById('themeBoardAiResultCard'),
+        themeBoardAiResultImage: document.getElementById('themeBoardAiResultImage'),
+        themeBoardAiResultTitle: document.getElementById('themeBoardAiResultTitle'),
+        themeBoardAiResultMeta: document.getElementById('themeBoardAiResultMeta'),
         globalSettingsWorkbench: document.getElementById('globalSettingsWorkbench'),
         globalSettingsInspectorWorkspace: document.getElementById('globalSettingsInspectorWorkspace'),
         globalSettingsSubTabs: document.getElementById('globalSettingsSubTabs'),
@@ -1198,7 +1234,12 @@ import {
 
     function applyThemeWorkbenchTabUi() {
         if (activeWorkbench !== 'theme') return;
-        var tab = activeThemeWorkbenchTab === 'cutscenes' ? 'cutscenes' : 'colors';
+        var tab =
+            activeThemeWorkbenchTab === 'cutscenes'
+                ? 'cutscenes'
+                : activeThemeWorkbenchTab === 'ai-board'
+                    ? 'ai-board'
+                    : 'colors';
         activeThemeWorkbenchTab = tab;
         var tabsRoot = document.getElementById('themeWorkbenchSubTabs');
         if (tabsRoot) {
@@ -1210,6 +1251,7 @@ import {
         }
         var colorsPanel = document.getElementById('themeTabPanelColors');
         var cutPanel = document.getElementById('themeTabPanelCutscenes');
+        var aiPanel = document.getElementById('themeTabPanelBoardAi');
         if (colorsPanel) {
             var showColors = tab === 'colors';
             colorsPanel.classList.toggle('view-hidden', !showColors);
@@ -1220,12 +1262,18 @@ import {
             cutPanel.classList.toggle('view-hidden', !showCut);
             cutPanel.setAttribute('aria-hidden', showCut ? 'false' : 'true');
         }
+        if (aiPanel) {
+            var showAi = tab === 'ai-board';
+            aiPanel.classList.toggle('view-hidden', !showAi);
+            aiPanel.setAttribute('aria-hidden', showAi ? 'false' : 'true');
+        }
         if (tab === 'cutscenes') renderCutsceneEditor();
+        else if (tab === 'ai-board') renderThemeBoardImageWorkbench();
         else syncThemeColorSwatches();
     }
 
     function setThemeWorkbenchTab(tabId) {
-        activeThemeWorkbenchTab = tabId === 'cutscenes' ? 'cutscenes' : 'colors';
+        activeThemeWorkbenchTab = tabId === 'cutscenes' ? 'cutscenes' : tabId === 'ai-board' ? 'ai-board' : 'colors';
         applyThemeWorkbenchTabUi();
     }
 
@@ -1320,6 +1368,130 @@ import {
         };
     }
 
+    function getBoardImageStorageContext(level) {
+        var levelCtx = level || getLevel();
+        var cityContext = levelVideoCityContext(levelCtx) || getGameplayCityContext();
+        if (cityContext) return cityContext;
+        var fallbackName = String(levelCtx && (levelCtx.name || levelCtx.id) || '未命名关卡').trim() || '未命名关卡';
+        return {
+            cityCode: slugify(fallbackName || 'level'),
+            cityName: fallbackName,
+            key: slugify(fallbackName || 'level')
+        };
+    }
+
+    function getBoardImageDirectoryHint(level) {
+        var ctxInfo = getBoardImageStorageContext(level);
+        return 'public/Arts/Maps/' + String(ctxInfo.cityName || '未命名城市') + '/';
+    }
+
+    async function generateBoardImageAsset(prompt, levelArg) {
+        var level = levelArg || getLevel();
+        if (!level || !level.map || !level.map.grid) throw new Error('当前关卡缺少棋盘数据');
+        var promptText = String(prompt || '').trim();
+        if (!promptText) throw new Error('请先输入提示词');
+        var cityContext = getBoardImageStorageContext(level);
+        var requestBody = {
+            prompt: promptText,
+            cityCode: cityContext.cityCode,
+            cityName: cityContext.cityName,
+            countryName: String(level.location && level.location.countryName || ''),
+            levelId: String(level.id || ''),
+            levelName: String(level.name || ''),
+            scope: activeThemeScope,
+            gridCols: Number(level.map.grid.cols) || 0,
+            gridRows: Number(level.map.grid.rows) || 0
+        };
+        var res = await fetch('/api/generate-board-image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody)
+        });
+        var resText = await res.text();
+        if (!res.ok) throw new Error(parseFetchErrorBody(res.status, resText));
+        var payload = {};
+        try {
+            payload = JSON.parse(resText);
+        } catch (e) {
+            throw new Error('服务器返回非 JSON');
+        }
+        _rememberEditorAsset(gameAssetEnv(), payload, 'board-image');
+        if (!payload.publicUrl) throw new Error('生图接口未返回有效图片 URL');
+        return payload;
+    }
+
+    async function generateBoardImageForCurrentLevel(prompt) {
+        var level = getLevel();
+        if (!level) throw new Error('请先选择关卡');
+        var generated = await generateBoardImageAsset(prompt, level);
+        var selectedBoardLayer = selectedObject && selectedObject.kind === 'boardImage'
+            ? findBoardImageLayerById(level, selectedObject.id)
+            : null;
+        var appliedLayer = await addBoardImageLayerFromUrl(
+            level,
+            String(generated.publicUrl || ''),
+            selectedBoardLayer
+                ? {
+                    replaceLayerId: selectedBoardLayer.id,
+                    centerX: selectedBoardLayer.centerX,
+                    centerY: selectedBoardLayer.centerY,
+                    widthPct: selectedBoardLayer.widthPct,
+                    opacity: selectedBoardLayer.opacity,
+                    order: selectedBoardLayer.order
+                }
+                : {
+                    cover: true,
+                    opacity: 1
+                }
+        );
+        selectedObject = { kind: 'boardImage', id: appliedLayer.id };
+        markDirty(selectedBoardLayer ? '已替换棋盘配图' : '已生成棋盘配图');
+        renderSelectionInspector();
+        renderMap();
+        renderBoardImagesPanel(refs, boardImagesEnv());
+        schedulePreviewRefresh();
+        setStatus(selectedBoardLayer ? '棋盘图片已生成并替换当前图层' : '棋盘图片已生成并写入当前关卡', 'success');
+        return {
+            publicUrl: String(generated.publicUrl || ''),
+            projectPath: String(generated.projectPath || ''),
+            fileName: String(generated.fileName || ''),
+            replaced: !!selectedBoardLayer,
+            boardImageId: appliedLayer.id
+        };
+    }
+
+    function focusGeneratedBoardImageLayout() {
+        activeWorkbench = 'level';
+        wireViewportViewMode('board');
+        activateBoardImageTool();
+        renderAll();
+    }
+
+    function themeBoardImageWorkbenchEnv() {
+        return {
+            getLevel: getLevel,
+            getActiveThemeScope: function () {
+                return activeThemeScope;
+            },
+            getThemeBoardImageState: function () {
+                return themeBoardImageState;
+            },
+            getBoardImageDirectoryHint: getBoardImageDirectoryHint,
+            generateBoardImageForCurrentLevel: generateBoardImageForCurrentLevel,
+            revealProjectPathInExplorer: revealProjectPathInExplorer,
+            focusGeneratedBoardImageLayout: focusGeneratedBoardImageLayout,
+            setStatus: setStatus
+        };
+    }
+
+    function renderThemeBoardImageWorkbench() {
+        _renderThemeBoardImageWorkbench(refs, themeBoardImageWorkbenchEnv());
+    }
+
+    function bindThemeBoardImageWorkbenchEvents() {
+        _bindThemeBoardImageWorkbenchEvents(refs, themeBoardImageWorkbenchEnv());
+    }
+
     function renderCutsceneEditor() {
         _renderCutsceneEditor(refs, { getLevel: getLevel });
     }
@@ -1398,6 +1570,7 @@ import {
         }
         if (refs.themeScopeSelect) refs.themeScopeSelect.value = activeThemeScope;
         applyThemeWorkbenchTabUi();
+        renderThemeBoardImageWorkbench();
     }
 
     function renderGameplayEditor() {
@@ -2328,6 +2501,9 @@ import {
         if (!level || !selectedObject) return;
         var layout = ensureExplorationLayout(level.map);
         if (selectedObject.kind === 'actor') level.map.actors = level.map.actors.filter(function (item) { return item.id !== selectedObject.id; });
+        if (selectedObject.kind === 'exploreBoss' && Array.isArray(level.map.exploreBosses)) level.map.exploreBosses = level.map.exploreBosses.filter(function (item) { return item.id !== selectedObject.id; });
+        if (selectedObject.kind === 'exploreSpawner' && Array.isArray(level.map.exploreSpawners)) level.map.exploreSpawners = level.map.exploreSpawners.filter(function (item) { return item.id !== selectedObject.id; });
+        if (selectedObject.kind === 'explorePickup' && Array.isArray(level.map.explorePickups)) level.map.explorePickups = level.map.explorePickups.filter(function (item) { return item.id !== selectedObject.id; });
         if (selectedObject.kind === 'spawn') {
             if (activeEditorMode === 'explore' && layout.startPoint && layout.startPoint.id === selectedObject.id) layout.startPoint = null;
             else level.map.spawnPoints = level.map.spawnPoints.filter(function (item) { return item.id !== selectedObject.id; });
@@ -2581,6 +2757,9 @@ import {
         var layout = ensureExplorationLayout(level.map);
         var item = null;
         if (selectedObject.kind === 'actor') item = level.map.actors.find(byId(selectedObject.id));
+        if (selectedObject.kind === 'exploreBoss') item = (level.map.exploreBosses || []).find(byId(selectedObject.id));
+        if (selectedObject.kind === 'exploreSpawner') item = (level.map.exploreSpawners || []).find(byId(selectedObject.id));
+        if (selectedObject.kind === 'explorePickup') item = (level.map.explorePickups || []).find(byId(selectedObject.id));
         if (selectedObject.kind === 'spawn') item = activeEditorMode === 'explore' ? layout.startPoint : level.map.spawnPoints.find(byId(selectedObject.id));
         if (selectedObject.kind === 'explorePoint') item = level.map.explorationPoints.find(byId(selectedObject.id));
         if (selectedObject.kind === 'objective') item = activeEditorMode === 'explore' ? layout.exitPoint : level.map.objectivePoint;
@@ -2850,6 +3029,7 @@ import {
                 renderAll();
             },
             bindCutsceneEditorEvents: bindCutsceneEditorEvents,
+            bindThemeBoardImageWorkbenchEvents: bindThemeBoardImageWorkbenchEvents,
             bindGameplayUi: bindGameplayUi,
             setActiveModelCategory: function (value) {
                 activeModelCategory = value || 'all';
@@ -3034,7 +3214,11 @@ import {
             setStatus: setStatus,
             renderExploreGameplayPanels: renderExploreGameplayPanels,
             ensureGameplayAssetPreview: ensureGameplayAssetPreview,
-            disposeGameplayAssetPreview: disposeGameplayAssetPreview
+            disposeGameplayAssetPreview: disposeGameplayAssetPreview,
+            uploadFileToProjectUrl: uploadFileToProjectUrl,
+            revealProjectPathInExplorer: revealProjectPathInExplorer,
+            getBrowsableModelAssets: getBrowsableModelAssets,
+            refreshGameModelsCatalog: refreshGameModelsCatalog
         };
     }
 

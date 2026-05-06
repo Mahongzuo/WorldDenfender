@@ -30,6 +30,10 @@ export var TOOL_LABELS = {
     buildSlot: '塔位',
     objective: '防守目标',
     explorePoint: '探索点',
+    exploreBoss: 'AI Boss',
+    exploreSpawner: 'AI 刷怪点',
+    exploreMoney: '金币',
+    exploreItem: '道具',
     safeZone: '安全区',
     actor: '模型 Actor',
     erase: '橡皮擦',
@@ -44,6 +48,10 @@ export var LEVEL_CONTENT_BROWSER_FILTER_ORDER = [
     'buildSlot',
     'objective',
     'explorePoint',
+    'exploreBoss',
+    'exploreSpawner',
+    'exploreMoney',
+    'exploreItem',
     'safeZone',
     'actor'
 ];

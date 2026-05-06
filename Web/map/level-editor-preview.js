@@ -703,7 +703,6 @@ export function createPreview(options) {
     geoTilesKey = key;
     geoTiles = new TilesRenderer();
     geoTiles.errorTarget = 8;
-    geoTiles.errorThreshold = 40;
     geoTiles.maxTilesProcessed = 24;
     geoTiles.lruCache.minSize = 80;
     geoTiles.lruCache.maxSize = 220;
@@ -889,15 +888,28 @@ export function createPreview(options) {
           var aspect = 1;
           if (Number.isFinite(Number(layer.aspect)) && Number(layer.aspect) > 0) aspect = Number(layer.aspect);
           if (tex.image && tex.image.width > 0) aspect = tex.image.height / tex.image.width;
-          var widthPct = decorClampPctPreview(layer.widthPct, 45);
-          var planeW = (widthPct / 100) * spanX;
-          var planeH = planeW * aspect;
-          var leftPct = decorClampPctPreview(layer.centerX, 0);
-          var topPct = decorClampPctPreview(layer.centerY, 0);
-          var wx0 = -spanX / 2 + (leftPct / 100) * spanX;
-          var wz0 = -spanZ / 2 + (topPct / 100) * spanZ;
-          var cx = wx0 + planeW / 2;
-          var cz = wz0 + planeH / 2;
+          var rawWp = Number(layer.widthPct);
+          var widthPctClamped = decorClampPctPreview(layer.widthPct, 45);
+          var stretchFillGrid = Number.isFinite(rawWp) && rawWp >= 100;
+          var planeW;
+          var planeH;
+          var cx;
+          var cz;
+          if (stretchFillGrid) {
+            planeW = spanX;
+            planeH = spanZ;
+            cx = 0;
+            cz = 0;
+          } else {
+            planeW = (widthPctClamped / 100) * spanX;
+            planeH = planeW * aspect;
+            var leftPct = decorClampPctPreview(layer.centerX, 0);
+            var topPct = decorClampPctPreview(layer.centerY, 0);
+            var wx0 = -spanX / 2 + (leftPct / 100) * spanX;
+            var wz0 = -spanZ / 2 + (topPct / 100) * spanZ;
+            cx = wx0 + planeW / 2;
+            cz = wz0 + planeH / 2;
+          }
           var opacity = decorClamp01Preview(layer.opacity != null ? layer.opacity : 1, 1);
           var mesh = new THREE.Mesh(
             new THREE.PlaneGeometry(planeW, planeH),

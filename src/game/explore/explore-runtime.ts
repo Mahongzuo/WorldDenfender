@@ -83,7 +83,8 @@ export function collectExploreDrops(options: {
   const { drops, playerPosition, dropGroup, onCollect } = options;
   const nextDrops: MoneyDrop[] = [];
   for (const drop of drops) {
-    if (drop.source === "explore" && distanceXZ(playerPosition, drop.mesh.position) <= 1.25) {
+    const radius = drop.pickup?.collectRadius ?? 1.25;
+    if (drop.source === "explore" && distanceXZ(playerPosition, drop.mesh.position) <= radius) {
       onCollect(drop);
       dropGroup.remove(drop.mesh);
     } else {

@@ -4,12 +4,24 @@ import type { ExploreInventory } from "./explore-inventory";
 import type { ExplorePlayerProgress } from "./explore-player-progress";
 import { cellKey, distanceXZ, worldToCell } from "../core/runtime-grid";
 import type {
+  ExploreBossPlacement,
+  ExploreElement,
   ExploreEnemy,
   ExploreGameplaySettings,
   ExploreProjectile,
+  ExploreRewardSpec,
+  ExploreSpawnerPlacement,
   GridCell,
   InventoryItem,
 } from "../core/types";
+import { computeElementMultiplier } from "../defense/defense-taxonomy";
+import {
+  DEFAULT_EXPLORE_BOSSES,
+  EXPLORE_ELEMENT_COLORS,
+  EXPLORE_ELEMENT_LABELS,
+  EXPLORE_PLAYER_ELEMENTS,
+  getDefaultExploreBoss,
+} from "./explore-rpg-content";
 import { resolveExploreGameplay } from "./explore-gameplay-settings";
 
 export interface ExploreCombatHost {
@@ -24,8 +36,17 @@ export interface ExploreCombatHost {
   allocateUid(): number;
   showToast(text: string, important?: boolean): void;
   damageExplorePlayer(amount: number): void;
+  grantExploreMoney(amount: number): void;
   onExploreBasicAttackFired?(): void;
   onExploreEnemyKilled?(): void;
+  /** 异步加载关卡里配置的 GLB；失败返回 null（会保留程序化占位体）。 */
+  loadExploreGltfScene?(url: string): Promise<THREE.Object3D | null>;
+}
+
+interface RuntimeSpawnerState {
+  placement: ExploreSpawnerPlacement;
+  timer: number;
+  spawnedTotal: number;
 }
 
 export class ExploreCombatRuntime {
@@ -37,11 +58,14 @@ export class ExploreCombatRuntime {
 
   private readonly enemies: ExploreEnemy[] = [];
   private readonly projectiles: ExploreProjectile[] = [];
+  private bossPlacements: ExploreBossPlacement[] = [];
+  private spawnerStates: RuntimeSpawnerState[] = [];
+  private defeatedBossIds = new Set<string>();
+  private playerElement: ExploreElement = "electric";
 
   private attackCooldown = 0;
   private skillECooldown = 0;
   private skillRCooldown = 0;
-  private enemySpawnTimer = 0;
   /** 由关卡 explorationLayout.gameplay / MapDefinition.exploreGameplay 同步 */
   private gameplay = resolveExploreGameplay(undefined);
 
@@ -62,6 +86,62 @@ export class ExploreCombatRuntime {
   /** 载入或切换地图时由宿主调用 */
   syncGameplay(settings?: ExploreGameplaySettings | undefined): void {
     this.gameplay = resolveExploreGameplay(settings ?? undefined);
+  }
+
+  syncMapContent(options: {
+    bosses?: ExploreBossPlacement[];
+    spawners?: ExploreSpawnerPlacement[];
+  }): void {
+    this.bossPlacements = [...(options.bosses ?? [])];
+    this.defeatedBossIds.clear();
+    this.spawnerStates = (options.spawners ?? []).map((placement) => ({
+      placement,
+      timer: Math.max(0.2, placement.spawnIntervalSec * 0.35),
+      spawnedTotal: 0,
+    }));
+  }
+
+  getPlayerElement(): ExploreElement {
+    return this.playerElement;
+  }
+
+  getPlayerElementLabel(): string {
+    return EXPLORE_ELEMENT_LABELS[this.playerElement];
+  }
+
+  setPlayerElement(element: ExploreElement): void {
+    this.playerElement = element;
+    this.host.showToast(`玩家属性切换：${EXPLORE_ELEMENT_LABELS[element]} · ${this.playerKit().label}`);
+  }
+
+  cyclePlayerElement(step: number): void {
+    const current = EXPLORE_PLAYER_ELEMENTS.indexOf(this.playerElement);
+    const next = (current + step + EXPLORE_PLAYER_ELEMENTS.length) % EXPLORE_PLAYER_ELEMENTS.length;
+    this.setPlayerElement(EXPLORE_PLAYER_ELEMENTS[next]);
+  }
+
+  private playerKit(): {
+    label: string;
+    attackCooldownMult: number;
+    basicDamageMult: number;
+    orbDamageMult: number;
+    burstDamageMult: number;
+    burstRadiusMult: number;
+  } {
+    switch (this.playerElement) {
+      case "force":
+        return { label: "近战破甲", attackCooldownMult: 1.08, basicDamageMult: 1.18, orbDamageMult: 0.9, burstDamageMult: 1.25, burstRadiusMult: 0.9 };
+      case "thermal":
+        return { label: "范围灼烧", attackCooldownMult: 1, basicDamageMult: 1, orbDamageMult: 1.08, burstDamageMult: 1.15, burstRadiusMult: 1.18 };
+      case "light":
+        return { label: "远程爆发", attackCooldownMult: 1.05, basicDamageMult: 1.08, orbDamageMult: 1.24, burstDamageMult: 0.95, burstRadiusMult: 1 };
+      case "electric":
+        return { label: "高频机动", attackCooldownMult: 0.78, basicDamageMult: 0.88, orbDamageMult: 1, burstDamageMult: 1, burstRadiusMult: 0.95 };
+      case "sound":
+        return { label: "控场易伤", attackCooldownMult: 0.95, basicDamageMult: 0.95, orbDamageMult: 1.05, burstDamageMult: 1.05, burstRadiusMult: 1.28 };
+      default:
+        return { label: "均衡", attackCooldownMult: 1, basicDamageMult: 1, orbDamageMult: 1, burstDamageMult: 1, burstRadiusMult: 1 };
+    }
   }
 
   getAttackCooldown(): number {
@@ -98,7 +178,11 @@ export class ExploreCombatRuntime {
       this.projectileGroup.remove(proj.mesh);
     }
     this.projectiles.length = 0;
-    this.enemySpawnTimer = this.gameplay.exploreEnemySpawnIntervalSec;
+    for (const spawner of this.spawnerStates) {
+      spawner.timer = Math.max(0.2, spawner.placement.spawnIntervalSec * 0.35);
+      spawner.spawnedTotal = 0;
+    }
+    this.spawnPlacedBosses();
     this.attackCooldown = 0;
     this.skillECooldown = 0;
     this.skillRCooldown = 0;
@@ -125,19 +209,15 @@ export class ExploreCombatRuntime {
 
     this.updateProjectiles(dt);
     this.updateEnemies(dt);
-
-    this.enemySpawnTimer -= dt;
-    if (this.enemySpawnTimer <= 0) {
-      this.spawnEnemy();
-      this.enemySpawnTimer = this.gameplay.exploreEnemySpawnIntervalSec;
-    }
+    this.tickSpawners(dt);
   }
 
   fireBasicAttack(): void {
     if (this.attackCooldown > 0) {
       return;
     }
-    this.attackCooldown = this.gameplay.attackCooldownSec;
+    const kit = this.playerKit();
+    this.attackCooldown = this.gameplay.attackCooldownSec * kit.attackCooldownMult;
 
     const playerPos = this.host.getPlayerPosition();
     const HOMING_RANGE = 10;
@@ -163,8 +243,9 @@ export class ExploreCombatRuntime {
       velocity = forward.multiplyScalar(18);
     }
 
+    const color = EXPLORE_ELEMENT_COLORS[this.playerElement];
     const geo = new THREE.SphereGeometry(0.15, 8, 6);
-    const mat = new THREE.MeshStandardMaterial({ color: 0xffec6e, emissive: 0xffaa00, emissiveIntensity: 1.2 });
+    const mat = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 1.2 });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.copy(playerPos);
     mesh.position.y = 0.75;
@@ -173,10 +254,11 @@ export class ExploreCombatRuntime {
     this.projectiles.push({
       mesh,
       velocity,
-      damage: 25 + this.progress.level * 3,
+      damage: (25 + this.progress.level * 3) * kit.basicDamageMult,
       lifetime: 2.2,
       type: "basic",
       target: nearestEnemy,
+      element: this.playerElement,
     });
     this.host.onExploreBasicAttackFired?.();
   }
@@ -206,15 +288,12 @@ export class ExploreCombatRuntime {
     this.skillECooldown = this.gameplay.skillECooldownSec;
 
     const targetPos = nearestEnemy.mesh.position.clone();
-    const damage = 120 + this.progress.level * 15;
-    nearestEnemy.hp -= damage;
-    if (nearestEnemy.hp <= 0) {
-      this.killEnemy(nearestEnemy);
-    }
+    const damage = this.resolveDamageAgainstEnemy(nearestEnemy, (120 + this.progress.level * 15) * this.playerKit().orbDamageMult, this.playerElement);
+    this.damageEnemy(nearestEnemy, damage);
 
     const push = (mesh: THREE.Mesh, velocity: THREE.Vector3, lifetime: number, type: "lightning" | "spark" | "blast") => {
       this.projectileGroup.add(mesh);
-      this.projectiles.push({ mesh, velocity, damage: 0, lifetime, type, target: null });
+      this.projectiles.push({ mesh, velocity, damage: 0, lifetime, type, target: null, element: this.playerElement });
     };
 
     const boltHeight = 22;
@@ -283,24 +362,22 @@ export class ExploreCombatRuntime {
     this.skillRCooldown = this.gameplay.skillRCooldownSec;
 
     const playerPos = this.host.getPlayerPosition();
-    const blastRadius = 5;
+    const kit = this.playerKit();
+    const blastRadius = 5 * kit.burstRadiusMult;
     let hitCount = 0;
     for (const enemy of this.enemies) {
       if (enemy.dead) {
         continue;
       }
       if (playerPos.distanceTo(enemy.mesh.position) <= blastRadius) {
-        enemy.hp -= 180 + this.progress.level * 20;
+        this.damageEnemy(enemy, this.resolveDamageAgainstEnemy(enemy, (180 + this.progress.level * 20) * kit.burstDamageMult, this.playerElement));
         hitCount++;
-        if (enemy.hp <= 0) {
-          this.killEnemy(enemy);
-        }
       }
     }
 
     const ringGeo = new THREE.RingGeometry(0.2, blastRadius, 36);
     const ringMat = new THREE.MeshBasicMaterial({
-      color: 0xff6b9d,
+      color: EXPLORE_ELEMENT_COLORS[this.playerElement],
       transparent: true,
       opacity: 0.65,
       side: THREE.DoubleSide,
@@ -317,79 +394,168 @@ export class ExploreCombatRuntime {
       lifetime: 0.55,
       type: "blast",
       target: null,
+      element: this.playerElement,
     });
 
     this.host.showToast(`\u51b2\u51fb\u7206\u53d1\uff01\u547d\u4e2d ${hitCount} \u4e2a\u654c\u4eba`);
     this.pruneDeadEnemies();
   }
 
-  private spawnEnemy(): void {
-    if (this.enemies.length >= this.gameplay.enemyMaxConcurrent) {
-      return;
-    }
-    const { cols, rows } = this.host.getMapGridSize();
-    const obstacleKeys = this.host.getObstacleCellKeys();
-    const playerPos = this.host.getPlayerPosition();
-    let attempts = 0;
-    let spawnPos: THREE.Vector3 | null = null;
-    while (attempts < 25 && !spawnPos) {
-      const col = Math.floor(Math.random() * cols);
-      const row = Math.floor(Math.random() * rows);
-      const pos = this.host.worldCellToWorld({ col, row });
-      if (!obstacleKeys.has(cellKey({ col, row })) && pos.distanceTo(playerPos) >= 6) {
-        spawnPos = pos;
+  private spawnPlacedBosses(): void {
+    for (const placement of this.bossPlacements) {
+      if (!placement.respawn && this.defeatedBossIds.has(placement.id)) {
+        continue;
       }
-      attempts++;
-    }
-    if (!spawnPos) {
-      return;
-    }
+      const bossDef = getDefaultExploreBoss(placement.bossId);
+      const element = placement.element ?? bossDef.element;
+      const level = Math.max(1, placement.level ?? 1);
+      const maxHp = placement.overrideStats?.maxHp && placement.overrideStats.maxHp > 0
+        ? placement.overrideStats.maxHp
+        : bossDef.maxHp + (level - 1) * 140;
+      const attack = placement.overrideStats?.attack && placement.overrideStats.attack > 0
+        ? placement.overrideStats.attack
+        : bossDef.attack + (level - 1) * 4;
+      const speed = placement.overrideStats?.speed && placement.overrideStats.speed > 0
+        ? placement.overrideStats.speed
+        : bossDef.speed ?? 1.5;
+      const rewardMoney = placement.overrideStats?.rewardMoney && placement.overrideStats.rewardMoney > 0
+        ? placement.overrideStats.rewardMoney
+        : bossDef.rewards?.[0]?.money ?? 200;
+      const rewardXp = placement.overrideStats?.rewardXp && placement.overrideStats.rewardXp > 0
+        ? placement.overrideStats.rewardXp
+        : bossDef.rewards?.[0]?.xp ?? 80;
 
+      const outerScale = placement.modelScale ?? bossDef.modelScale ?? 1.8;
+      const visual = this.createEnemyVisual(element, true, outerScale);
+      visual.group.position.copy(this.host.worldCellToWorld(placement));
+      this.enemyGroup.add(visual.group);
+      void this.trySwapProceduralForGltf(
+        visual.group,
+        visual.proceduralRoot,
+        placement.modelPath?.trim() || bossDef.modelPath?.trim(),
+        true,
+      );
+      this.enemies.push({
+        id: `boss-${placement.id}`,
+        name: placement.name || bossDef.name,
+        mesh: visual.group,
+        hpBar: visual.hpBar,
+        hp: maxHp,
+        maxHp,
+        element,
+        resistances: bossDef.resistances,
+        boss: true,
+        placementId: placement.id,
+        rewardMoney,
+        rewardXp,
+        rewardItems: bossDef.rewards,
+        speed,
+        attackDamage: attack,
+        aggroRange: placement.triggerRadius ?? bossDef.aggroRange ?? 11,
+        attackCooldown: bossDef.attackCooldown ?? 1.5,
+        attackTimer: 0,
+        skillTimer: bossDef.skills[0]?.cooldownSec ?? 6,
+        visualRadius: 1.55,
+        dead: false,
+      });
+      if (bossDef.dialogueHint) {
+        this.host.showToast(`${bossDef.name}：${bossDef.dialogueHint}`, true);
+      }
+    }
+  }
+
+  private createEnemyVisual(
+    element: ExploreElement,
+    boss: boolean,
+    scale: number,
+  ): { group: THREE.Group; hpBar: THREE.Mesh; proceduralRoot: THREE.Group } {
+    const color = EXPLORE_ELEMENT_COLORS[element];
     const group = new THREE.Group();
-    const bodyGeo = new THREE.BoxGeometry(0.75, 1.5, 0.75);
-    const bodyMat = new THREE.MeshStandardMaterial({ color: 0xe55c5c });
+    const proceduralRoot = new THREE.Group();
+    proceduralRoot.name = "explore-procedural-body";
+    const bodyGeo = boss ? new THREE.IcosahedronGeometry(0.85, 1) : new THREE.BoxGeometry(0.72, 1.35, 0.72);
+    const bodyMat = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: boss ? 0.32 : 0.12 });
     const body = new THREE.Mesh(bodyGeo, bodyMat);
-    body.position.y = 0.75;
-    group.add(body);
+    body.position.y = boss ? 1.0 : 0.68;
+    proceduralRoot.add(body);
+    if (boss) {
+      const ring = new THREE.Mesh(
+        new THREE.TorusGeometry(0.92, 0.035, 8, 28),
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.7 }),
+      );
+      ring.rotation.x = Math.PI / 2;
+      ring.position.y = 1.0;
+      proceduralRoot.add(ring);
+    }
+    group.add(proceduralRoot);
 
-    const hpBarBgGeo = new THREE.PlaneGeometry(1, 0.1);
-    const hpBarBgMat = new THREE.MeshBasicMaterial({ color: 0x333333, depthTest: false });
-    const hpBarBg = new THREE.Mesh(hpBarBgGeo, hpBarBgMat);
-    hpBarBg.position.y = 1.9;
+    const barWidth = boss ? 1.7 : 1;
+    const hpBarBg = new THREE.Mesh(
+      new THREE.PlaneGeometry(barWidth, 0.1),
+      new THREE.MeshBasicMaterial({ color: 0x333333, depthTest: false }),
+    );
+    hpBarBg.position.y = boss ? 2.35 : 1.9;
     hpBarBg.rotation.x = -Math.PI / 8;
     group.add(hpBarBg);
 
-    const hpBarGeo = new THREE.PlaneGeometry(1, 0.1);
-    const hpBarMat = new THREE.MeshBasicMaterial({ color: 0x44cc44, depthTest: false });
-    const hpBar = new THREE.Mesh(hpBarGeo, hpBarMat);
-    hpBar.position.y = 1.9;
+    const hpBar = new THREE.Mesh(
+      new THREE.PlaneGeometry(barWidth, 0.1),
+      new THREE.MeshBasicMaterial({ color: 0x44cc44, depthTest: false }),
+    );
+    hpBar.position.y = hpBarBg.position.y;
     hpBar.position.z = 0.005;
     hpBar.rotation.x = -Math.PI / 8;
     group.add(hpBar);
 
-    group.position.copy(spawnPos);
-    this.enemyGroup.add(group);
+    group.scale.setScalar(scale);
+    return { group, hpBar, proceduralRoot };
+  }
 
-    const maxHp =
-      this.gameplay.enemyBaseHp +
-      this.progress.level * this.gameplay.enemyHpPerLevel;
-    this.enemies.push({
-      id: `ee-${this.host.allocateUid()}`,
-      mesh: group,
-      hpBar,
-      hp: maxHp,
-      maxHp,
-      speed:
-        this.gameplay.enemyBaseSpeed +
-        this.progress.level * this.gameplay.enemySpeedPerLevel,
-      attackDamage:
-        this.gameplay.enemyBaseDamage +
-        this.progress.level * this.gameplay.enemyDamagePerLevel,
-      aggroRange: this.gameplay.enemyAggroRange,
-      attackCooldown: this.gameplay.enemyAttackCooldown,
-      attackTimer: 0,
-      dead: false,
+  /** 将模型缩放到与程序化体相近的屏幕占比，足底对齐本地 y=0，并居中 XZ。 */
+  private fitExploreImportedModel(root: THREE.Object3D, boss: boolean): void {
+    const box = new THREE.Box3().setFromObject(root);
+    const size = box.getSize(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z, 0.001);
+    const target = boss ? 2.1 : 1.45;
+    root.scale.multiplyScalar(target / maxDim);
+    root.updateMatrixWorld(true);
+    const b2 = new THREE.Box3().setFromObject(root);
+    const cx = (b2.min.x + b2.max.x) / 2;
+    const cz = (b2.min.z + b2.max.z) / 2;
+    root.position.x -= cx;
+    root.position.z -= cz;
+    root.position.y -= b2.min.y;
+    root.traverse((child) => {
+      const mesh = child as THREE.Mesh;
+      if (mesh.isMesh) {
+        mesh.castShadow = true;
+      }
     });
+  }
+
+  private async trySwapProceduralForGltf(
+    enemyGroup: THREE.Group,
+    proceduralRoot: THREE.Group,
+    url: string | undefined,
+    boss: boolean,
+  ): Promise<void> {
+    const trimmed = url?.trim();
+    const loader = this.host.loadExploreGltfScene;
+    if (!trimmed || !loader) {
+      return;
+    }
+    try {
+      const model = await loader(trimmed);
+      if (!model || enemyGroup.parent !== this.enemyGroup) {
+        return;
+      }
+      proceduralRoot.removeFromParent();
+      this.fitExploreImportedModel(model, boss);
+      model.name = "explore-gltf-body";
+      enemyGroup.add(model);
+    } catch (e) {
+      console.warn("[ExploreCombat] GLTF 加载失败:", trimmed, e);
+    }
   }
 
   private killEnemy(enemy: ExploreEnemy): void {
@@ -397,27 +563,130 @@ export class ExploreCombatRuntime {
     this.enemyGroup.remove(enemy.mesh);
     this.host.onExploreEnemyKilled?.();
 
-    const itemPool = [
-      { name: "\u91d1\u5c5e\u788e\u7247", icon: "\ud83d\udd29" },
-      { name: "\u80fd\u91cf\u6676\u4f53", icon: "\ud83d\udc8e" },
-      { name: "\u6570\u636e\u82af\u7247", icon: "\ud83d\udcbe" },
-      { name: "\u5408\u91d1\u9f7f\u8f6e", icon: "\u2699\ufe0f" },
-      { name: "AI\u6838\u5fc3", icon: "\ud83e\udd16" },
-    ];
-    const pick = itemPool[Math.floor(Math.random() * itemPool.length)];
+    if (enemy.placementId) {
+      this.defeatedBossIds.add(enemy.placementId);
+    }
+    if (enemy.rewardMoney && enemy.rewardMoney > 0) {
+      this.host.grantExploreMoney(Math.round(enemy.rewardMoney));
+    }
+    for (const reward of enemy.rewardItems ?? []) {
+      this.grantRewardItem(reward);
+    }
+    const xp = enemy.rewardXp && enemy.rewardXp > 0 ? enemy.rewardXp : 15 + this.progress.level * 5;
+    const toasts = this.progress.addXp(xp);
+    for (const t of toasts) {
+      this.host.showToast(t, true);
+    }
+    this.host.showToast(enemy.boss ? `AI 化身已回收：${enemy.name || enemy.id}` : `已清理 ${enemy.name || "低阶 AI"}`);
+  }
+
+  private grantRewardItem(reward: ExploreRewardSpec): void {
+    if (!reward.itemName) {
+      return;
+    }
     const loot: InventoryItem = {
-      id: `item-${this.host.allocateUid()}`,
-      name: pick.name,
-      quantity: 1 + Math.floor(Math.random() * 3),
-      type: "material",
-      icon: pick.icon,
+      id: reward.itemId || `item-${this.host.allocateUid()}`,
+      name: reward.itemName,
+      quantity: Math.max(1, Math.round(reward.quantity ?? 1)),
+      type: reward.itemType ?? "material",
+      icon: reward.itemIcon || "AI",
       collectedAt: Date.now(),
     };
     this.inventory.mergeAdd(loot);
+  }
 
-    const toasts = this.progress.addXpFromKillContribution(this.progress.level);
-    for (const t of toasts) {
-      this.host.showToast(t, true);
+  private tickSpawners(dt: number): void {
+    const playerPos = this.host.getPlayerPosition();
+    const obstacleKeys = this.host.getObstacleCellKeys();
+    for (const state of this.spawnerStates) {
+      const p = state.placement;
+      if (p.disableWhenBossDefeated && this.defeatedBossIds.size > 0) {
+        continue;
+      }
+      if (p.totalLimit && state.spawnedTotal >= p.totalLimit) {
+        continue;
+      }
+      const origin = this.host.worldCellToWorld(p);
+      const dist = distanceXZ(playerPos, origin);
+      if (dist > p.triggerRadius) {
+        state.timer = Math.min(state.timer, p.spawnIntervalSec);
+        continue;
+      }
+      state.timer -= dt;
+      if (state.timer > 0) {
+        continue;
+      }
+      state.timer = p.spawnIntervalSec;
+      const activeCount = this.enemies.filter((enemy) => !enemy.dead && enemy.sourceSpawnerId === p.id).length;
+      const budget = Math.max(0, p.maxConcurrent - activeCount);
+      const count = Math.min(budget, p.spawnCount, p.totalLimit ? p.totalLimit - state.spawnedTotal : p.spawnCount);
+      for (let i = 0; i < count; i += 1) {
+        if (this.spawnSpawnerEnemy(state, obstacleKeys)) {
+          state.spawnedTotal += 1;
+        }
+      }
+    }
+  }
+
+  private spawnSpawnerEnemy(state: RuntimeSpawnerState, obstacleKeys: ReadonlySet<string>): boolean {
+    if (this.enemies.length >= this.gameplay.enemyMaxConcurrent + this.bossPlacements.length) {
+      return false;
+    }
+    const p = state.placement;
+    let spawnCell: GridCell | null = null;
+    for (let attempt = 0; attempt < 18 && !spawnCell; attempt += 1) {
+      const range = Math.max(1, Math.ceil(Math.min(5, p.activeRadius / 3)));
+      const col = p.col + Math.floor(Math.random() * (range * 2 + 1)) - range;
+      const row = p.row + Math.floor(Math.random() * (range * 2 + 1)) - range;
+      const cell = { col, row };
+      if (this.host.isInsideGrid(cell) && !obstacleKeys.has(cellKey(cell))) {
+        spawnCell = cell;
+      }
+    }
+    if (!spawnCell) {
+      return false;
+    }
+    const element = p.element ?? "electric";
+    const visual = this.createEnemyVisual(element, false, p.modelScale ?? 1);
+    visual.group.position.copy(this.host.worldCellToWorld(spawnCell));
+    this.enemyGroup.add(visual.group);
+    void this.trySwapProceduralForGltf(visual.group, visual.proceduralRoot, p.modelPath?.trim(), false);
+    const maxHp = this.gameplay.enemyBaseHp + this.progress.level * this.gameplay.enemyHpPerLevel;
+    this.enemies.push({
+      id: `ee-${this.host.allocateUid()}`,
+      name: p.name,
+      mesh: visual.group,
+      hpBar: visual.hpBar,
+      hp: maxHp,
+      maxHp,
+      element,
+      sourceSpawnerId: p.id,
+      rewardMoney: p.rewards?.[0]?.money ?? 12,
+      rewardXp: p.rewards?.[0]?.xp ?? 10,
+      rewardItems: p.rewards?.filter((reward) => reward.itemName),
+      speed: this.gameplay.enemyBaseSpeed + this.progress.level * this.gameplay.enemySpeedPerLevel,
+      attackDamage: this.gameplay.enemyBaseDamage + this.progress.level * this.gameplay.enemyDamagePerLevel,
+      aggroRange: this.gameplay.enemyAggroRange,
+      attackCooldown: this.gameplay.enemyAttackCooldown,
+      attackTimer: 0,
+      visualRadius: 0.9,
+      dead: false,
+    });
+    return true;
+  }
+
+  private resolveDamageAgainstEnemy(enemy: ExploreEnemy, baseDamage: number, element?: ExploreElement): number {
+    return Math.max(0, baseDamage * computeElementMultiplier(element, enemy.element, enemy.resistances));
+  }
+
+  private resolveDamageAgainstPlayer(baseDamage: number, element?: ExploreElement): number {
+    return Math.max(0, baseDamage * computeElementMultiplier(element, this.playerElement));
+  }
+
+  private damageEnemy(enemy: ExploreEnemy, damage: number): void {
+    enemy.hp -= damage;
+    if (enemy.hp <= 0) {
+      this.killEnemy(enemy);
     }
   }
 
@@ -435,6 +704,13 @@ export class ExploreCombatRuntime {
       const dist = playerPos.distanceTo(enemy.mesh.position);
 
       if (!playerInSafeZone && dist < enemy.aggroRange) {
+        if (enemy.boss) {
+          enemy.skillTimer = Math.max(0, (enemy.skillTimer ?? 0) - dt);
+          if (enemy.skillTimer <= 0) {
+            this.castBossSkill(enemy, dist);
+            enemy.skillTimer = Math.max(4, getDefaultExploreBoss(enemy.placementId ? this.bossPlacements.find((p) => p.id === enemy.placementId)?.bossId ?? "" : "").skills[0]?.cooldownSec ?? 6);
+          }
+        }
         const dir = playerPos.clone().sub(enemy.mesh.position).setY(0);
         if (dir.lengthSq() > 0.001) {
           dir.normalize();
@@ -457,11 +733,11 @@ export class ExploreCombatRuntime {
           enemy.mesh.position.z = playerPos.z + away.z * 1.1;
         }
 
-        if (dist < 1.4) {
+        if (dist < (enemy.visualRadius ?? 0.9) + 0.55) {
           enemy.attackTimer -= dt;
           if (enemy.attackTimer <= 0) {
             enemy.attackTimer = enemy.attackCooldown;
-            this.host.damageExplorePlayer(enemy.attackDamage);
+            this.host.damageExplorePlayer(this.resolveDamageAgainstPlayer(enemy.attackDamage, enemy.element));
           }
         }
       } else {
@@ -476,6 +752,41 @@ export class ExploreCombatRuntime {
       );
     }
     this.pruneDeadEnemies();
+  }
+
+  private castBossSkill(enemy: ExploreEnemy, distToPlayer: number): void {
+    const element = (enemy.element ?? "electric") as ExploreElement;
+    const bossDef = enemy.placementId
+      ? getDefaultExploreBoss(this.bossPlacements.find((p) => p.id === enemy.placementId)?.bossId ?? "")
+      : DEFAULT_EXPLORE_BOSSES.find((boss) => boss.element === element) ?? DEFAULT_EXPLORE_BOSSES[0];
+    const skill = bossDef.skills[Math.floor(Math.random() * Math.max(1, bossDef.skills.length))];
+    const radius = skill.radius ?? 3.5;
+    const range = skill.range ?? radius;
+    const baseDamage = skill.damage ?? enemy.attackDamage * 1.6;
+    const color = EXPLORE_ELEMENT_COLORS[element];
+
+    if (distToPlayer <= Math.max(radius, range)) {
+      this.host.damageExplorePlayer(this.resolveDamageAgainstPlayer(baseDamage, element));
+    }
+
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.25, Math.max(0.8, radius), 32),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.68, side: THREE.DoubleSide }),
+    );
+    ring.position.copy(enemy.mesh.position);
+    ring.position.y = 0.14;
+    ring.rotation.x = -Math.PI / 2;
+    this.projectileGroup.add(ring);
+    this.projectiles.push({
+      mesh: ring,
+      velocity: new THREE.Vector3(),
+      damage: 0,
+      lifetime: 0.55,
+      type: "blast",
+      target: null,
+      element,
+    });
+    this.host.showToast(`${enemy.name || bossDef.name} 释放 ${skill.name}`);
   }
 
   private updateProjectiles(dt: number): void {
@@ -515,10 +826,7 @@ export class ExploreCombatRuntime {
           }
           const hitRadius = proj.type === "orb" ? 1.6 : 0.9;
           if (distanceXZ(proj.mesh.position, enemy.mesh.position) < hitRadius) {
-            enemy.hp -= proj.damage;
-            if (enemy.hp <= 0) {
-              this.killEnemy(enemy);
-            }
+            this.damageEnemy(enemy, this.resolveDamageAgainstEnemy(enemy, proj.damage, proj.element));
             proj.lifetime = 0;
             break;
           }

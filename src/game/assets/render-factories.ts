@@ -265,14 +265,18 @@ export function createMoneyDropMesh(options: {
     roughness: 0.35,
     metalness: 0.2,
   });
-  const coin = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.36, 0.12, 20), material);
-  coin.rotation.x = Math.PI / 2;
+  /** 圆柱轴向为 Y（圆盘在 XZ）；若 rotate.x = π/2，厚度倒在水平向，在 GEO 棋盘放大后会像纸片 */
+  const coinThick = 0.16;
+  const coinRadius = 0.36;
+  const coin = new THREE.Mesh(new THREE.CylinderGeometry(coinRadius, coinRadius, coinThick, 20), material);
+  coin.position.y = coinThick / 2;
   coin.castShadow = true;
   const glow = new THREE.Mesh(
     new THREE.TorusGeometry(0.56, 0.035, 8, 28),
     new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.45 }),
   );
   glow.rotation.x = Math.PI / 2;
+  glow.position.y = coinThick + 0.02;
   group.add(coin, glow);
   group.scale.setScalar(amount >= 200 ? 1.22 : amount >= 100 ? 1.08 : 1);
   return group;

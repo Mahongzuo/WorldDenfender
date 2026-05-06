@@ -70,8 +70,10 @@ npm install
 
 # 配置环境变量
 cp .env.example .env
-# 编辑 .env，填入你的 Cesium Ion Token：
+# 编辑 .env，填入你的 Cesium Ion Token 和火山引擎图片 Key：
 # VITE_CESIUM_ION_TOKEN=your_token_here
+# VOLCENGINE_ARK_API_KEY=your_ark_key_here
+# MESHY_API_KEY=your_meshy_key_here
 
 # 启动开发服务器
 npm run dev
@@ -86,6 +88,32 @@ npm run dev
 3. 填入 `.env` 文件中的 `VITE_CESIUM_ION_TOKEN`
 
 > ⚠️ 请勿将 `.env` 文件提交到 Git，Token 已通过 `.gitignore` 自动排除。
+
+### 配置火山引擎图片生成 Key
+
+关卡编辑器里的“棋盘主题 → AI 棋盘图”会通过本地开发服务器调用火山引擎图片生成接口，并把结果保存到 `public/Arts/Maps/城市名/`。
+
+请在 `.env.local` 或 `.env` 中添加：
+
+```bash
+VOLCENGINE_ARK_API_KEY=your_ark_key_here
+# 可选：覆盖默认模型
+VOLCENGINE_ARK_IMAGE_MODEL=doubao-seedream-5-0-260128
+```
+
+这个 Key 不会写入前端代码，也不会出现在关卡 JSON 中。
+
+### 配置 Meshy 3D 生成 Key
+
+玩法编辑器里的敌人 / 防御塔 / 道具 / 角色预览区新增了“上传照片，AI生成3D”。它会通过本地开发服务器创建 Meshy 任务、轮询进度，并在成功后把 `.glb` 写入 `public/GameModels/<分类>/`，然后自动替换当前城市玩法条目的模型绑定。
+
+请在 `.env.local` 或 `.env` 中添加：
+
+```bash
+MESHY_API_KEY=your_meshy_key_here
+```
+
+修改环境变量后需要重启 `npm run dev`，这样本地 middleware 才会重新读取 Key。
 
 ### 构建生产包
 

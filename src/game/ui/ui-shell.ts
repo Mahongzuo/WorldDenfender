@@ -101,7 +101,7 @@ export function renderGameUiShell(app: HTMLElement, requiredElement: RequiredEle
           </header>
           <h1>AI入侵作战终端</h1>
           <p>塔防模式：左键建造，右键点按拆除；按 Q/W/E/R/T/Y 选塔。WASD 移动镜头，Z 切换视角，右键拖拽或 J/L 旋转。</p>
-          <p>自由探索：默认奔跑；Ctrl 在慢走与奔跑之间切换。5 张第三人称资源区，每 5 秒至少刷新 5 个随机金额道具；拾取金钱实时进入同一个资金池。单位与角色模型请在「关卡编辑器」右侧配置。</p>
+          <p>自由探索：默认奔跑；Ctrl 在慢走与奔跑之间切换。探索奖励、AI Boss 与刷怪点由「关卡编辑器」放置；1-5 切换力/热/光/电/声属性形态。</p>
           <p id="selectedValue">当前：机枪塔</p>
           <section class="stellar-skill-panel" id="selectedUnitPanel" style="display:none;">
             <span class="section-kicker">已选中干员</span>
