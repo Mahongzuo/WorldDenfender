@@ -7,6 +7,9 @@ import {
 } from "../fx/effects-runtime";
 import { TILE_SIZE, cellToWorld, distanceXZ } from "../core/runtime-grid";
 import type { BuildId, Building, Enemy, TimedEffect } from "../core/types";
+import type { DefenseDamageSource } from "../core/defense-types";
+import { buildDefenseDamageSource } from "./defense-damage";
+import { applyBuildingEffectsToEnemy } from "./defense-status";
 
 /** 与各塔 procedural 网格大致匹配的炮口局部偏移 */
 const PRESET_TOWER_MUZZLE_LOCAL: Partial<Record<BuildId, THREE.Vector3>> = {
@@ -25,7 +28,7 @@ export interface TowerDefenseCombatTickDeps {
   fxGroup: THREE.Group;
   elapsed: number;
   aimWorldCenter: (enemy: Enemy) => THREE.Vector3;
-  damageEnemy(enemy: Enemy, damage: number): void;
+  damageEnemy(enemy: Enemy, damage: number, source?: DefenseDamageSource): void;
   addBeam(from: THREE.Vector3, to: THREE.Vector3, color: number): void;
   onTowerFired?(building: Building): void;
 }
@@ -37,16 +40,12 @@ function towerProjectileMuzzleWorld(building: Building): THREE.Vector3 {
   return building.mesh.localToWorld(local);
 }
 
-function applyTowerDebuff(
+function applyTowerEffects(
   deps: Pick<TowerDefenseCombatTickDeps, "effects" | "fxGroup" | "elapsed">,
   building: Building,
   enemy: Enemy,
 ): void {
-  if (!building.spec.slowFactor || !building.spec.slowDuration) {
-    return;
-  }
-  enemy.slowFactor = building.spec.slowFactor;
-  enemy.slowUntil = deps.elapsed + building.spec.slowDuration;
+  applyBuildingEffectsToEnemy(building, enemy, deps.elapsed);
 
   if (building.spec.id === "frost" || building.spec.id === "liqingzhao") {
     addStatusOutlineEffect(deps.effects, deps.fxGroup, enemy.mesh, 0x00e5ff, 0.4);
@@ -72,19 +71,20 @@ function fireAt(deps: TowerDefenseCombatTickDeps, building: Building, target: En
   );
 
   deps.onTowerFired?.(building);
+  const damageSource = buildDefenseDamageSource(building.spec);
   if (splashRadiusWorld) {
     const anchor = target.mesh.position;
     for (const enemy of [...deps.enemies]) {
       if (distanceXZ(anchor, enemy.mesh.position) <= splashRadiusWorld) {
-        applyTowerDebuff(deps, building, enemy);
-        deps.damageEnemy(enemy, building.spec.damage ?? 0);
+        applyTowerEffects(deps, building, enemy);
+        deps.damageEnemy(enemy, building.spec.damage ?? 0, damageSource);
       }
     }
     return;
   }
 
-  applyTowerDebuff(deps, building, target);
-  deps.damageEnemy(target, building.spec.damage ?? 0);
+  applyTowerEffects(deps, building, target);
+  deps.damageEnemy(target, building.spec.damage ?? 0, damageSource);
 }
 
 export function tickTowerDefenseCombat(dt: number, deps: TowerDefenseCombatTickDeps): void {
@@ -98,8 +98,10 @@ export function tickTowerDefenseCombat(dt: number, deps: TowerDefenseCombatTickD
       if (building.cooldown <= 0 && building.blockingEnemies.length > 0) {
         building.blockingEnemies = building.blockingEnemies.filter((e) => e.hp > 0);
         let dealt = false;
+        const damageSource = buildDefenseDamageSource(building.spec);
         for (const e of building.blockingEnemies) {
-          deps.damageEnemy(e, building.spec.damage ?? 0);
+          applyBuildingEffectsToEnemy(building, e, deps.elapsed);
+          deps.damageEnemy(e, building.spec.damage ?? 0, damageSource);
           dealt = true;
         }
         if (dealt) {

@@ -2674,6 +2674,84 @@ input[type="range"].audio-volume-slider {
     gap: 6px;
 }
 
+.gameplay-checkbox-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 28px;
+    padding: 4px 8px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 999px;
+    color: var(--editor-muted);
+    background: rgba(255, 255, 255, 0.05);
+    font-size: 12px;
+}
+
+.gameplay-checkbox-chip input {
+    accent-color: var(--editor-cyan);
+}
+
+#gameplayTaxonomyPanel.gameplay-taxonomy-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    margin-top: 14px;
+    padding: 12px 14px;
+    border: 1px solid var(--editor-line);
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.18);
+}
+
+.gameplay-taxonomy-row {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.gameplay-taxonomy-row + .gameplay-taxonomy-row {
+    padding-top: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.gameplay-taxonomy-label {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--editor-text);
+    letter-spacing: 0.02em;
+}
+
+.gameplay-taxonomy-hint {
+    margin: 0;
+    font-size: 11px;
+    line-height: 1.45;
+    color: var(--editor-muted);
+    max-width: 52em;
+}
+
+.gameplay-taxonomy-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: flex-start;
+}
+
+.gameplay-effect-duration {
+    margin-top: 4px;
+    max-width: 220px;
+}
+
+.gameplay-effect-duration span {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 12px;
+    color: var(--editor-muted);
+}
+
+.gameplay-effect-duration input {
+    width: 100%;
+    min-height: 32px;
+}
+
 .upload-button {
     position: relative;
     overflow: hidden;

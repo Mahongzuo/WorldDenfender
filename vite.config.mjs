@@ -140,6 +140,7 @@ function buildRuntimeCityGameplaySeeds(source) {
         characters: [],
         skills: [],
         enemies: [],
+        items: [],
         updatedAt: "",
       };
     }
@@ -151,6 +152,10 @@ function buildRuntimeCityGameplaySeeds(source) {
       tags: [cityName, spec.role, spec.rank].filter(Boolean),
       rarity: String(spec.rank || "common"),
       placement: spec.id === "mine" || spec.id === "qinqiong" ? "road" : "roadside",
+      element: String(spec.element || ""),
+      functionTags: Array.isArray(spec.functionTags) ? spec.functionTags.map(String) : [],
+      effects: Array.isArray(spec.effects) ? spec.effects.map((effect) => String(effect.statusId || "")).filter(Boolean) : [],
+      cleanseEffects: [],
       stats: {
         hp: Number(spec.maxHp) || 100,
         attack: Number(spec.damage) || 0,
@@ -175,6 +180,10 @@ function buildRuntimeCityGameplaySeeds(source) {
         summary: String(spec.activeSkill.description || ""),
         tags: [cityName, String(spec.name || "")].filter(Boolean),
         rarity: String(spec.rank || "common"),
+        element: String(spec.element || ""),
+        functionTags: Array.isArray(spec.functionTags) ? spec.functionTags.map(String) : [],
+        effects: Array.isArray(spec.effects) ? spec.effects.map((effect) => String(effect.statusId || "")).filter(Boolean) : [],
+        cleanseEffects: [],
         stats: {
           cooldown: Number(spec.activeSkill.cooldown) || 0,
           cost: Number(spec.cost) || 0,

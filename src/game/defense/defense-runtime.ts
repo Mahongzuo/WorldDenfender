@@ -2,6 +2,7 @@ import * as THREE from "three";
 
 import { TILE_SIZE, cellToWorld, distanceXZ } from "../core/runtime-grid";
 import type { Building, Enemy, EnemyType } from "../core/types";
+import { getDefenseEnemyArchetypeSpec } from "./defense-enemy-archetypes";
 
 export function createEnemyForWave(options: {
   uid: number;
@@ -56,6 +57,7 @@ export function createEnemyForWave(options: {
   }
 
   reward = Math.round(reward);
+  const archetype = getDefenseEnemyArchetypeSpec(type);
 
   const healthBar = new THREE.Mesh(
     new THREE.BoxGeometry(1.18 * scale, 0.12, 0.1),
@@ -81,6 +83,8 @@ export function createEnemyForWave(options: {
     healthBar,
     hp,
     maxHp: hp,
+    element: archetype.element,
+    resistances: archetype.resistances,
     speed,
     reward,
     segment: 0,

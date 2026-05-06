@@ -1,4 +1,4 @@
-import { CITY_GEO_CONFIGS, DEFAULT_CESIUM_ION_3D_TILES_ASSET_ID, JINAN_MAP_TEXTURE_URL } from './editor/city-geo-configs.js';
+﻿import { CITY_GEO_CONFIGS, DEFAULT_CESIUM_ION_3D_TILES_ASSET_ID, JINAN_MAP_TEXTURE_URL } from './editor/city-geo-configs.js';
 import { BUILT_IN_CITY_LAYOUTS, matchBuiltInCity } from './editor/built-in-layouts.js';
 import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, slugify, updatePath, cellsRect, toggleCell, removeCell, hasCell, cloneCells, atCell, notAtCell, inBounds, byId, editorVol01, editorPctFromVol01, readDragPayload, fileToBase64 } from './editor/utils.js';
 import { splitRegion, buildRegionLabel, inferCountryCode, normalizeCell, normalizeCells, normalizePoint, defaultObjectivePoint, normalizeStatus, normalizeLocation, normalizeEnvironment, normalizeBoardImageLayers, normalizeStats, normalizeActorTemplate, normalizeActors, normalizeEnemyTypes, normalizeWaveRules, normalizeModeProfiles, normalizeSpawnPoints, normalizeExplorePoints, EXPLORE_GAMEPLAY_STORE_KEYS, normalizeExploreGameplayNormalized, normalizeGeoConfig, makeGeoConfig, visitCoordinatePairs, geometryCenter, fetchCountryCapitalCoords, countryGeoFromFeature, geoFromLonLatArray, normalizeEditorThemeColorHex, normalizeTheme, normalizeEnemyPaths, normalizeExplorationLayout, normalizeCatalog, normalizeCatalogItem, normalizeEditorAssetsCatalog, defaultGlobalAudio, normalizeGlobalAudio, normalizeLevelAudioSource, defaultGlobalScreenUi, normalizeGlobalScreenUi, normalizeGameAssetConfig, mergeDistinctStrings, normalizeGameplayPlacement, normalizeGameplayEntries, normalizeCityGameplayConfigs, createDefaultMap, trimMapToBounds, normalizeMap, normalizeLevel, sortLevels, normalizeState } from './editor/normalizers.js';
@@ -175,6 +175,7 @@ import {
         gameplayRarity: document.getElementById('gameplayRarity'),
         gameplaySummary: document.getElementById('gameplaySummary'),
         gameplayStatGrid: document.getElementById('gameplayStatGrid'),
+        gameplayTaxonomyPanel: document.getElementById('gameplayTaxonomyPanel'),
         gameplayInspectorMeta: document.getElementById('gameplayInspectorMeta'),
         gameplaySelectionMeta: document.getElementById('gameplaySelectionMeta'),
         gameplayAssetUpload: document.getElementById('gameplayAssetUpload'),
@@ -2394,7 +2395,7 @@ import {
             target.cityCode = target.cityCode || runtimeConfig.cityCode;
             target.cityName = target.cityName || runtimeConfig.cityName;
             target.aliases = mergeDistinctStrings(target.aliases || [], runtimeConfig.aliases || [], [target.cityCode, target.cityName, runtimeConfig.cityCode, runtimeConfig.cityName]);
-            ['enemies', 'characters', 'skills', 'towers', 'cards'].forEach(function (kind) {
+            ['enemies', 'characters', 'skills', 'towers', 'cards', 'items'].forEach(function (kind) {
                 imported += mergeGameplayEntryList(target[kind], runtimeConfig[kind]);
             });
         });

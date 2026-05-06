@@ -213,7 +213,7 @@ export function pickPreferredGameplayTab(config, currentTab) {
     if (!config) return currentTab;
     if (Array.isArray(config[currentTab])) return currentTab;
     return (
-        ['cards', 'towers', 'characters', 'skills', 'enemies'].find(function (tab) {
+        ['cards', 'items', 'towers', 'characters', 'skills', 'enemies'].find(function (tab) {
             return Array.isArray(config[tab]) && config[tab].length;
         }) || currentTab
     );

@@ -68,6 +68,7 @@ export function ensureWorldOffset(actor) {
  */
 export function mergeGameplayEntryList(target, source) {
     var added = 0;
+    if (!Array.isArray(target) || !Array.isArray(source)) return added;
     source.forEach(function (entry) {
         var existing = target.find(function (item) { return item.id === entry.id; });
         if (!existing) {
@@ -78,6 +79,15 @@ export function mergeGameplayEntryList(target, source) {
         if (!existing.summary) existing.summary = entry.summary;
         if (!existing.rarity) existing.rarity = entry.rarity;
         if (!existing.placement && entry.placement) existing.placement = entry.placement;
+        if (!existing.element && entry.element) existing.element = entry.element;
+        if (!existing.functionTags || !existing.functionTags.length) existing.functionTags = clone(entry.functionTags || []);
+        if (!existing.effects || !existing.effects.length) existing.effects = clone(entry.effects || []);
+        if (!existing.cleanseEffects || !existing.cleanseEffects.length) existing.cleanseEffects = clone(entry.cleanseEffects || []);
+        var existingDur = Number(existing.effectDurationSec);
+        if (!Number.isFinite(existingDur) || existingDur <= 0) {
+            var entryDur = Number(entry.effectDurationSec);
+            if (Number.isFinite(entryDur) && entryDur > 0) existing.effectDurationSec = entryDur;
+        }
         if (!existing.tags || !existing.tags.length) existing.tags = clone(entry.tags || []);
         if (!existing.assetRefs || !Object.keys(existing.assetRefs).length) existing.assetRefs = clone(entry.assetRefs || {});
         existing.stats = Object.assign({}, entry.stats || {}, existing.stats || {});

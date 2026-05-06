@@ -147,6 +147,32 @@ export var DEFAULT_TOWER_GAMEPLAY_STATS = {
     bianque: { cost: 240, hp: 260, attack: 90, range: 4.8, fireRate: 0.85, splash: 0 }
 };
 
+export var DEFENSE_ELEMENT_OPTIONS = [
+    { id: '', label: '未设置' },
+    { id: 'force', label: '力' },
+    { id: 'thermal', label: '热' },
+    { id: 'light', label: '光' },
+    { id: 'electric', label: '电' },
+    { id: 'sound', label: '声' }
+];
+
+export var DEFENSE_FUNCTION_OPTIONS = [
+    { id: 'singleTarget', label: '单体攻击' },
+    { id: 'areaAttack', label: '群体攻击' },
+    { id: 'paralysis', label: '瘫痪' },
+    { id: 'healing', label: '治疗' },
+    { id: 'damageOverTime', label: '持续 debuff' }
+];
+
+export var DEFENSE_STATUS_OPTIONS = [
+    { id: 'slow', label: '减速' },
+    { id: 'stun', label: '眩晕' },
+    { id: 'paralysis', label: '瘫痪' },
+    { id: 'electromagneticInterference', label: '电磁干扰' },
+    { id: 'thermalEffect', label: '热效应' },
+    { id: 'damageOverTime', label: '持续伤害' }
+];
+
 export var GAMEPLAY_RESOURCE_CONFIG = {
     enemies: {
         label: '敌人',
@@ -204,6 +230,16 @@ export var GAMEPLAY_RESOURCE_CONFIG = {
             { key: 'cooldown', label: '冷却', step: '0.1' },
             { key: 'unlockWave', label: '解锁波次', step: '1' },
             { key: 'maxCopies', label: '最大张数', step: '1' }
+        ]
+    },
+    items: {
+        label: '道具',
+        assetType: 'Items',
+        empty: '当前关卡还没有塔防道具配置。',
+        stats: [
+            { key: 'cost', label: '购买费用', step: '1' },
+            { key: 'cooldown', label: '使用冷却', step: '0.1' },
+            { key: 'maxCopies', label: '最大持有', step: '1' }
         ]
     }
 };

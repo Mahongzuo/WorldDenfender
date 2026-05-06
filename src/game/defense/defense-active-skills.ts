@@ -2,6 +2,9 @@ import * as THREE from "three";
 
 import { TILE_SIZE, cellToWorld, distanceXZ } from "../core/runtime-grid";
 import type { Building, Enemy } from "../core/types";
+import type { DefenseDamageSource } from "../core/defense-types";
+import { buildDefenseDamageSource } from "./defense-damage";
+import { applyDefenseEffectToEnemy } from "./defense-status";
 
 export interface DefenseActiveSkillHost {
   getSelectedBuilding(): Building | null;
@@ -12,7 +15,7 @@ export interface DefenseActiveSkillHost {
   getBuildings(): Building[];
   addExplosion(center: THREE.Vector3, radius: number, color: number): void;
   addBeam(from: THREE.Vector3, to: THREE.Vector3, color: number): void;
-  damageEnemy(enemy: Enemy, damage: number): void;
+  damageEnemy(enemy: Enemy, damage: number, source?: DefenseDamageSource): void;
   showToast(message: string, critical?: boolean): void;
   refreshUi(): void;
 }
@@ -36,6 +39,7 @@ export function tryCastDefenseActiveSkill(host: DefenseActiveSkillHost): void {
   const enemies = host.getEnemies();
   const buildings = host.getBuildings();
   const origin = cellToWorld(b.cell);
+  const damageSource = buildDefenseDamageSource(b.spec);
 
   if (b.spec.id === "stellar") {
     host.addExplosion(origin, 7 * TILE_SIZE, 0xff4fd8);
@@ -43,9 +47,8 @@ export function tryCastDefenseActiveSkill(host: DefenseActiveSkillHost): void {
     for (const enemy of [...enemies]) {
       hits += 1;
       host.addBeam(origin, enemy.mesh.position.clone(), 0xff4fd8);
-      enemy.slowUntil = elapsed + 4.5;
-      enemy.slowFactor = 0.22;
-      host.damageEnemy(enemy, 420);
+      applyDefenseEffectToEnemy(enemy, { statusId: "slow", duration: 4.5, magnitude: 0.22, element: b.spec.element }, elapsed);
+      host.damageEnemy(enemy, 420, damageSource);
     }
     host.showToast(`\u5929\u6cb3\u5ba1\u5224\u9501\u5b9a\u5168\u573a\uff0c\u547d\u4e2d ${hits} \u4e2a\u654c\u4eba`);
   } else if (b.spec.id === "qinqiong") {
@@ -58,8 +61,8 @@ export function tryCastDefenseActiveSkill(host: DefenseActiveSkillHost): void {
     for (const enemy of [...enemies]) {
       if (distanceXZ(origin, enemy.mesh.position) <= 3 * TILE_SIZE) {
         hits += 1;
-        enemy.stunUntil = elapsed + 2.5;
-        host.damageEnemy(enemy, 220);
+        applyDefenseEffectToEnemy(enemy, { statusId: "stun", duration: 2.5, element: b.spec.element }, elapsed);
+        host.damageEnemy(enemy, 220, damageSource);
       }
     }
     host.showToast(`\u4e0d\u52a8\u5982\u5c71\uff1a\u79e6\u743c\u6ee1\u8840\u51cf\u4f24\uff0c\u9707\u6151 ${hits} \u4e2a\u654c\u4eba`);
@@ -69,9 +72,8 @@ export function tryCastDefenseActiveSkill(host: DefenseActiveSkillHost): void {
     for (const enemy of [...enemies]) {
       if (distanceXZ(origin, enemy.mesh.position) <= 9 * TILE_SIZE) {
         hits += 1;
-        host.damageEnemy(enemy, 340);
-        enemy.slowUntil = elapsed + 5.0;
-        enemy.slowFactor = 0.16;
+        host.damageEnemy(enemy, 340, damageSource);
+        applyDefenseEffectToEnemy(enemy, { statusId: "slow", duration: 5.0, magnitude: 0.16, element: b.spec.element }, elapsed);
       }
     }
     host.showToast(`\u6f31\u7389\u5929\u6f6e\u547d\u4e2d ${hits} \u4e2a\u654c\u4eba\uff0c\u51b0\u5c01\u884c\u519b\u901f\u5ea6`);
@@ -86,7 +88,7 @@ export function tryCastDefenseActiveSkill(host: DefenseActiveSkillHost): void {
     for (const enemy of [...enemies]) {
       if (distanceXZ(origin, enemy.mesh.position) <= 7 * TILE_SIZE) {
         hits += 1;
-        host.damageEnemy(enemy, 180);
+        host.damageEnemy(enemy, 180, damageSource);
       }
     }
     host.showToast(`\u9752\u56ca\u6d4e\u4e16\uff1a\u5168\u4f53\u53cb\u519b\u56de\u6ee1\u5e76\u51cf\u4f24\uff0c\u836f\u6bd2\u53cd\u566c ${hits} \u4e2a\u654c\u4eba`);

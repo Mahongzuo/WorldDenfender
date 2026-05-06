@@ -7,7 +7,7 @@ import { DEFAULT_CESIUM_ION_3D_TILES_ASSET_ID } from './city-geo-configs.js';
 import { uid, slugify, clamp, clone, editorVol01, inBounds } from './utils.js';
 import {
     TOWER_MODEL_SPECS, DEFAULT_TOWER_GAMEPLAY_STATS, DEFAULT_ACTOR_TEMPLATES,
-    GAMEPLAY_RESOURCE_CONFIG, ENGINE_VERSION,
+    GAMEPLAY_RESOURCE_CONFIG, ENGINE_VERSION, DEFENSE_ELEMENT_OPTIONS, DEFENSE_FUNCTION_OPTIONS, DEFENSE_STATUS_OPTIONS,
     DEFAULT_GRID_COLS, DEFAULT_GRID_ROWS, DEFAULT_TILE_SIZE
 } from './content.js';
 
@@ -228,6 +228,8 @@ export function normalizeEnemyTypes(enemyTypes, seed) {
             modelId: String(enemy.modelId || ''),
             modelPath: String(enemy.modelPath || ''),
             modelScale: Number.isFinite(esc) && esc > 0 ? Math.min(Math.max(esc, 0.1), 8) : 1,
+            element: normalizeGameplayElement(enemy.element),
+            effects: normalizeGameplayOptionList(enemy.effects, DEFENSE_STATUS_OPTIONS),
             hp: Number(enemy.hp) || 100,
             speed: Number(enemy.speed) || 1,
             reward: Number(enemy.reward) || 20
@@ -810,6 +812,64 @@ var DEFAULT_RUNTIME_ENEMY_ARCHETYPE_META = {
     }
 };
 
+var DEFAULT_RUNTIME_ENEMY_ELEMENTS = {
+    basic: 'force',
+    scout: 'electric',
+    hacker: 'sound',
+    tank: 'thermal',
+    swarm: 'light'
+};
+
+var DEFAULT_TOWER_DEFENSE_META = {
+    machine: { element: 'force', functionTags: ['singleTarget'] },
+    cannon: { element: 'thermal', functionTags: ['areaAttack'] },
+    frost: { element: 'electric', functionTags: ['singleTarget', 'damageOverTime'], effects: ['slow'] },
+    mine: { element: 'force', functionTags: ['areaAttack'] },
+    beacon: { element: 'sound', functionTags: ['healing'] },
+    stellar: { element: 'light', functionTags: ['areaAttack', 'damageOverTime'], effects: ['slow'] },
+    qinqiong: { element: 'force', functionTags: ['singleTarget', 'paralysis'], effects: ['stun'] },
+    liqingzhao: { element: 'sound', functionTags: ['areaAttack', 'damageOverTime'], effects: ['slow'] },
+    bianque: { element: 'thermal', functionTags: ['healing'] }
+};
+
+var DEFAULT_DEFENSE_ITEM_ENTRIES = [
+    {
+        id: 'em-shield',
+        name: '电磁屏蔽器',
+        summary: '解除防御塔的电磁干扰与瘫痪。',
+        cleanseEffects: ['electromagneticInterference', 'paralysis', 'stun'],
+        stats: { cost: 45, cooldown: 0, maxCopies: 3 }
+    },
+    {
+        id: 'thermal-coolant',
+        name: '热效应冷却剂',
+        summary: '解除热效应与持续伤害。',
+        cleanseEffects: ['thermalEffect', 'damageOverTime'],
+        stats: { cost: 40, cooldown: 0, maxCopies: 3 }
+    },
+    {
+        id: 'stability-purifier',
+        name: '稳态净化器',
+        summary: '解除大多数塔防负面状态。',
+        cleanseEffects: ['electromagneticInterference', 'thermalEffect', 'damageOverTime', 'paralysis', 'stun', 'slow'],
+        stats: { cost: 75, cooldown: 0, maxCopies: 2 }
+    }
+];
+
+function normalizeGameplayOptionList(value, options) {
+    var allowed = new Set(options.map(function (item) { return item.id; }).filter(Boolean));
+    var source = Array.isArray(value) ? value : typeof value === 'string' ? value.split(',') : [];
+    return source.map(function (item) { return String(item || '').trim(); }).filter(function (item, index, arr) {
+        return allowed.has(item) && arr.indexOf(item) === index;
+    });
+}
+
+function normalizeGameplayElement(value) {
+    var allowed = new Set(DEFENSE_ELEMENT_OPTIONS.map(function (item) { return item.id; }).filter(Boolean));
+    var element = String(value || '').trim();
+    return allowed.has(element) ? element : '';
+}
+
 function wave1EnemyArchetypeStats(archId) {
     var wave = 1;
     var hp = 78 + wave * 22;
@@ -846,6 +906,11 @@ export function buildDefaultEnemyEntries(config) {
             tags: mergeDistinctStrings(cityName || '通用', 'enemy', 'runtime', archId),
             rarity: 'common',
             placement: '',
+            element: DEFAULT_RUNTIME_ENEMY_ELEMENTS[archId] || '',
+            functionTags: [],
+            effects: archId === 'hacker' ? ['electromagneticInterference'] : [],
+            cleanseEffects: [],
+            effectDurationSec: 2,
             stats: { hp: st.hp, attack: st.attack, speed: st.speed, reward: st.reward },
             assetRefs: {},
             cityCode: cityCode,
@@ -867,6 +932,11 @@ export function buildDefaultEnemyEntries(config) {
             tags: mergeDistinctStrings(cityName || '通用', 'enemy', 'legacy'),
             rarity: 'common',
             placement: '',
+            element: 'force',
+            functionTags: [],
+            effects: [],
+            cleanseEffects: [],
+            effectDurationSec: 2,
             stats: {
                 hp: Number(st.hp) || 100,
                 attack: Number(st.attack) || 0,
@@ -886,6 +956,7 @@ export function buildDefaultTowerEntries(config) {
     var cityName = config && config.cityName ? config.cityName : '';
     var cityCode = config && config.cityCode ? config.cityCode : '';
     return TOWER_MODEL_SPECS.map(function (spec) {
+        var meta = DEFAULT_TOWER_DEFENSE_META[spec.id] || {};
         return {
             id: spec.id,
             name: spec.name,
@@ -893,6 +964,11 @@ export function buildDefaultTowerEntries(config) {
             tags: [cityName || '通用', spec.key].filter(Boolean),
             rarity: spec.id === 'stellar' || spec.id === 'qinqiong' || spec.id === 'liqingzhao' || spec.id === 'bianque' ? 'S' : 'common',
             placement: spec.id === 'mine' || spec.id === 'qinqiong' ? 'road' : 'roadside',
+            element: meta.element || '',
+            functionTags: meta.functionTags || [],
+            effects: meta.effects || [],
+            cleanseEffects: [],
+            effectDurationSec: 2,
             stats: Object.assign({}, DEFAULT_TOWER_GAMEPLAY_STATS[spec.id] || {}),
             assetRefs: {},
             cityCode: cityCode,
@@ -913,6 +989,11 @@ export function buildDefaultCardEntries(config) {
             tags: mergeDistinctStrings(entry.tags || [], 'card'),
             rarity: entry.rarity || 'common',
             placement: entry.placement || '',
+            element: entry.element || '',
+            functionTags: entry.functionTags || [],
+            effects: entry.effects || [],
+            cleanseEffects: entry.cleanseEffects || [],
+            effectDurationSec: 2,
             stats: {
                 cost: Number(stats.cost) || 0,
                 weight: entry.rarity === 'S' ? 1 : 5,
@@ -928,6 +1009,37 @@ export function buildDefaultCardEntries(config) {
     });
 }
 
+function normalizeEffectDurationSec(value) {
+    var v = Number(value);
+    if (!Number.isFinite(v) || v <= 0) return 2;
+    return Math.round(Math.min(120, Math.max(0.1, v)) * 10) / 10;
+}
+
+export function buildDefaultDefenseItemEntries(config) {
+    var cityName = config && config.cityName ? config.cityName : '';
+    var cityCode = config && config.cityCode ? config.cityCode : '';
+    return DEFAULT_DEFENSE_ITEM_ENTRIES.map(function (entry) {
+        return {
+            id: entry.id,
+            name: entry.name,
+            summary: entry.summary,
+            tags: mergeDistinctStrings(cityName || '通用', 'item', 'cleanse'),
+            rarity: 'common',
+            placement: '',
+            element: '',
+            functionTags: [],
+            effects: [],
+            cleanseEffects: entry.cleanseEffects.slice(),
+            effectDurationSec: 2,
+            stats: Object.assign({}, entry.stats),
+            assetRefs: {},
+            cityCode: cityCode,
+            cityName: cityName,
+            updatedAt: ''
+        };
+    });
+}
+
 export function normalizeGameplayEntries(raw, kind) {
     return Array.isArray(raw) ? raw.map(function (item) {
         var next = item && typeof item === 'object' ? item : {};
@@ -937,7 +1049,12 @@ export function normalizeGameplayEntries(raw, kind) {
             summary: String(next.summary || ''),
             tags: Array.isArray(next.tags) ? next.tags.map(String) : [],
             rarity: String(next.rarity || 'common'),
-            placement: kind === 'characters' ? normalizeGameplayPlacement(next.placement || next.deployPlacement || next.placementType) : '',
+            placement: kind === 'characters' || kind === 'towers' ? normalizeGameplayPlacement(next.placement || next.deployPlacement || next.placementType) : '',
+            element: normalizeGameplayElement(next.element),
+            functionTags: normalizeGameplayOptionList(next.functionTags, DEFENSE_FUNCTION_OPTIONS),
+            effects: normalizeGameplayOptionList(next.effects, DEFENSE_STATUS_OPTIONS),
+            cleanseEffects: normalizeGameplayOptionList(next.cleanseEffects, DEFENSE_STATUS_OPTIONS),
+            effectDurationSec: normalizeEffectDurationSec(next.effectDurationSec),
             stats: next.stats && typeof next.stats === 'object' ? next.stats : {},
             assetRefs: next.assetRefs && typeof next.assetRefs === 'object' ? next.assetRefs : {},
             cityCode: String(next.cityCode || ''),
@@ -961,6 +1078,7 @@ export function normalizeCityGameplayConfigs(raw) {
             skills: normalizeGameplayEntries(item.skills, 'skills'),
             towers: normalizeGameplayEntries(item.towers, 'towers'),
             cards: normalizeGameplayEntries(item.cards, 'cards'),
+            items: normalizeGameplayEntries(item.items, 'items'),
             updatedAt: String(item.updatedAt || '')
         };
         if (!normalized[key].towers.length) {
@@ -971,6 +1089,9 @@ export function normalizeCityGameplayConfigs(raw) {
         }
         if (!normalized[key].enemies.length) {
             normalized[key].enemies = buildDefaultEnemyEntries(normalized[key]);
+        }
+        if (!normalized[key].items.length) {
+            normalized[key].items = buildDefaultDefenseItemEntries(normalized[key]);
         }
     });
     return normalized;

@@ -105,6 +105,7 @@ export var ctx = {
         gameplayRarity: null,
         gameplaySummary: null,
         gameplayStatGrid: null,
+        gameplayTaxonomyPanel: null,
         gameplayInspectorMeta: null,
         gameplaySelectionMeta: null,
         gameplayAssetUpload: null,

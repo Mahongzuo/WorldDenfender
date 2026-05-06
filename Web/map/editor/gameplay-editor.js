@@ -1,11 +1,13 @@
 import { escapeAttr, escapeHtml, fileToBase64, slugify, uid } from './utils.js';
 import { GAMEPLAY_RESOURCE_CONFIG } from './content.js';
+import { DEFENSE_ELEMENT_OPTIONS, DEFENSE_FUNCTION_OPTIONS, DEFENSE_STATUS_OPTIONS } from './content.js';
 import {
     normalizeGameplayPlacement,
     mergeDistinctStrings,
     buildDefaultEnemyEntries,
     buildDefaultTowerEntries,
-    buildDefaultCardEntries
+    buildDefaultCardEntries,
+    buildDefaultDefenseItemEntries
 } from './normalizers.js';
 import { gameplayPlacementLabel, isImageAssetPath, isModelAssetPath, pickPreferredGameplayTab, uniqueCatalogId } from './display-utils.js';
 import { uniqueGameplayEntryId } from './id-utils.js';
@@ -122,6 +124,89 @@ function setGameplayEntryActionButtons(refs, disabled, entries, entry) {
     if (refs.btnMoveGameplayDown) refs.btnMoveGameplayDown.disabled = disabled || index === -1 || index >= list.length - 1;
 }
 
+function renderGameplayOptionCheckboxes(options, selected, attrName, disabled) {
+    var active = new Set(Array.isArray(selected) ? selected : []);
+    return options.map(function (option) {
+        return [
+            '<label class="gameplay-checkbox-chip">',
+            '  <input type="checkbox" ' + attrName + '="' + escapeAttr(option.id) + '"' + (active.has(option.id) ? ' checked' : '') + (disabled ? ' disabled' : '') + '>',
+            '  <span>' + escapeHtml(option.label) + '</span>',
+            '</label>'
+        ].join('');
+    }).join('');
+}
+
+function getTaxonomyQueryRoot(refs) {
+    return refs.gameplayTaxonomyPanel || refs.gameplayStatGrid;
+}
+
+function renderGameplayElementField(activeTab, entry, disabled) {
+    var supportsElement = activeTab === 'enemies' || activeTab === 'towers' || activeTab === 'characters' || activeTab === 'skills';
+    if (!supportsElement) return '';
+    return [
+        '<label class="field-block">',
+        '  <span>属性</span>',
+        '  <select data-gameplay-element' + (disabled ? ' disabled' : '') + '>',
+        DEFENSE_ELEMENT_OPTIONS.map(function (option) {
+            var selected = (entry && entry.element || '') === option.id ? ' selected' : '';
+            return '<option value="' + escapeAttr(option.id) + '"' + selected + '>' + escapeHtml(option.label) + '</option>';
+        }).join(''),
+        '  </select>',
+        '</label>'
+    ].join('');
+}
+
+function renderGameplayTaxonomyPanel(activeTab, entry, disabled) {
+    var supportsFunctions = activeTab === 'towers' || activeTab === 'characters' || activeTab === 'skills';
+    var supportsEffects = activeTab === 'enemies' || activeTab === 'towers' || activeTab === 'characters' || activeTab === 'skills';
+    var supportsCleanse = activeTab === 'items';
+    if (!supportsFunctions && !supportsEffects && !supportsCleanse) return '';
+    var parts = [];
+    if (supportsFunctions) {
+        parts.push(
+            '<section class="gameplay-taxonomy-row">' +
+            '  <div class="gameplay-taxonomy-label">功能定位</div>' +
+            '  <p class="gameplay-taxonomy-hint">描述单位职能（单体/群体/治疗等）；同步到游戏后写入塔模板标签，主要用于元素与扩展逻辑，不改变默认索敌规则。</p>' +
+            '  <div class="gameplay-taxonomy-chips">' + renderGameplayOptionCheckboxes(DEFENSE_FUNCTION_OPTIONS, entry && entry.functionTags, 'data-gameplay-function-tag', disabled) + '</div>' +
+            '</section>'
+        );
+    }
+    if (supportsEffects) {
+        var durRaw = entry && entry.effectDurationSec;
+        var durNum = Number(durRaw);
+        var durVal = Number.isFinite(durNum) && durNum > 0 ? durNum : 2;
+        parts.push(
+            '<section class="gameplay-taxonomy-row">' +
+            '  <div class="gameplay-taxonomy-label">施加效果</div>' +
+            '  <p class="gameplay-taxonomy-hint">勾选的状态会在塔防战斗中对敌人施加对应负面效果；持续时间为每个已勾选效果在敌人身上的持续秒数。保存城市玩法并同步游戏后生效。</p>' +
+            '  <div class="gameplay-taxonomy-chips">' + renderGameplayOptionCheckboxes(DEFENSE_STATUS_OPTIONS, entry && entry.effects, 'data-gameplay-effect', disabled) + '</div>' +
+            '  <label class="field-block gameplay-effect-duration">' +
+            '    <span>效果持续时间（秒）</span>' +
+            '    <input type="number" data-gameplay-effect-duration min="0.1" max="120" step="0.1" value="' + escapeAttr(String(durVal)) + '"' + (disabled ? ' disabled' : '') + '>' +
+            '  </label>' +
+            '</section>'
+        );
+    }
+    if (supportsCleanse) {
+        parts.push(
+            '<section class="gameplay-taxonomy-row">' +
+            '  <div class="gameplay-taxonomy-label">可解除效果</div>' +
+            '  <p class="gameplay-taxonomy-hint">与塔防净化道具对应；保存并同步游戏后生效。</p>' +
+            '  <div class="gameplay-taxonomy-chips">' + renderGameplayOptionCheckboxes(DEFENSE_STATUS_OPTIONS, entry && entry.cleanseEffects, 'data-gameplay-cleanse-effect', disabled) + '</div>' +
+            '</section>'
+        );
+    }
+    return parts.join('');
+}
+
+function optionLabels(options, ids) {
+    var selected = Array.isArray(ids) ? ids : [];
+    return selected.map(function (id) {
+        var match = options.find(function (option) { return option.id === id; });
+        return match ? match.label : id;
+    }).filter(Boolean);
+}
+
 function getSelectedGameplayAsset(env, entry, assets) {
     if (!entry && !getSelectedGameplayAssetId(env)) return null;
     var state = getState(env);
@@ -187,6 +272,11 @@ function renderGameplayEntryList(refs, env, entries, cityContext) {
     }
     refs.gameplayEntryList.innerHTML = entries.map(function (entry) {
         var thumb = resolveGameplayEntryThumbnail(entry);
+        var element = DEFENSE_ELEMENT_OPTIONS.find(function (option) { return option.id === entry.element; });
+        var taxonomyLabels = []
+            .concat(element && element.id ? [element.label] : [])
+            .concat(optionLabels(DEFENSE_FUNCTION_OPTIONS, entry.functionTags))
+            .concat(optionLabels(DEFENSE_STATUS_OPTIONS, entry.cleanseEffects));
         return [
             '<div class="list-item gameplay-entry-card' + (entry.id === getSelectedGameplayEntryId(env) ? ' active' : '') + '">',
             thumb
@@ -212,6 +302,7 @@ function renderGameplayEntryList(refs, env, entries, cityContext) {
             '      <span class="gameplay-chip">' + escapeHtml(entry.rarity || 'common') + '</span>',
             '      <span class="gameplay-chip">' + escapeHtml((entry.tags || []).join(' / ') || cityContext.cityName) + '</span>',
             entry.placement ? '      <span class="gameplay-chip">' + escapeHtml(gameplayPlacementLabel(entry.placement)) + '</span>' : '',
+            taxonomyLabels.length ? '      <span class="gameplay-chip">' + escapeHtml(taxonomyLabels.slice(0, 3).join(' / ')) + '</span>' : '',
             '    </div>',
             '  </div>',
             '</div>'
@@ -234,7 +325,8 @@ function renderGameplayForm(refs, env, entries, cityContext) {
     });
     setGameplayEntryActionButtons(refs, disabled, entries, entry);
     if (refs.gameplayStatGrid) {
-        var statsHtml = GAMEPLAY_RESOURCE_CONFIG[getActiveGameplayTab(env)].stats.map(function (field) {
+        var activeTab = getActiveGameplayTab(env);
+        var statsHtml = GAMEPLAY_RESOURCE_CONFIG[activeTab].stats.map(function (field) {
             var value = entry && entry.stats ? entry.stats[field.key] : '';
             return [
                 '<label class="field-block">',
@@ -243,7 +335,7 @@ function renderGameplayForm(refs, env, entries, cityContext) {
                 '</label>'
             ].join('');
         }).join('');
-        var placementHtml = getActiveGameplayTab(env) === 'characters' || getActiveGameplayTab(env) === 'towers'
+        var placementHtml = activeTab === 'characters' || activeTab === 'towers'
             ? [
                 '<label class="field-block">',
                 '  <span>部署位置</span>',
@@ -254,7 +346,12 @@ function renderGameplayForm(refs, env, entries, cityContext) {
                 '</label>'
             ].join('')
             : '';
-        refs.gameplayStatGrid.innerHTML = statsHtml + placementHtml;
+        refs.gameplayStatGrid.innerHTML = statsHtml + placementHtml + renderGameplayElementField(activeTab, entry, disabled);
+    }
+    if (refs.gameplayTaxonomyPanel) {
+        var taxHtml = renderGameplayTaxonomyPanel(activeTab, entry, disabled);
+        refs.gameplayTaxonomyPanel.innerHTML = taxHtml;
+        refs.gameplayTaxonomyPanel.classList.toggle('view-hidden', !taxHtml);
     }
 }
 
@@ -275,8 +372,8 @@ function renderGameplayInspector(refs, env, cityContext, config, entries) {
         refs.gameplaySelectionMeta.innerHTML = cityContext
             ? [
                 '<div class="list-item"><strong>城市代码</strong><span>' + escapeHtml(cityContext.cityCode) + '</span></div>',
-                '<div class="gameplay-inspector-counts" role="group" aria-label="敌人、防御塔、卡片、角色、技能数量">',
-                [['敌人', config.enemies.length], ['防御塔', config.towers.length], ['卡片', config.cards.length], ['角色', config.characters.length], ['技能', config.skills.length]].map(function (pair) {
+                '<div class="gameplay-inspector-counts" role="group" aria-label="敌人、防御塔、卡片、角色、技能、道具数量">',
+                [['敌人', config.enemies.length], ['防御塔', config.towers.length], ['卡片', config.cards.length], ['角色', config.characters.length], ['技能', config.skills.length], ['道具', config.items.length]].map(function (pair) {
                     return '<span class="gic-chip"><strong>' + String(pair[1]) + '</strong><span>' + escapeHtml(pair[0]) + '</span></span>';
                 }).join(''),
                 '</div>',
@@ -379,6 +476,39 @@ function handleGameplayFormInput(refs, env, target) {
         renderGameplayEntryList(refs, env, getFilteredGameplayEntries(refs, env), getGameplayCityContext(env));
         return;
     }
+    if (target.hasAttribute('data-gameplay-element')) {
+        entry.element = String(target.value || '');
+        env.markDirty('已更新属性');
+        renderGameplayEntryList(refs, env, getFilteredGameplayEntries(refs, env), getGameplayCityContext(env));
+        return;
+    }
+    if (target.hasAttribute('data-gameplay-effect-duration')) {
+        var dv = Number(target.value);
+        entry.effectDurationSec = Number.isFinite(dv) ? Math.min(120, Math.max(0.1, Math.round(dv * 10) / 10)) : 2;
+        target.value = String(entry.effectDurationSec);
+        env.markDirty('已更新效果持续时间');
+        renderGameplayEditor(refs, env);
+        return;
+    }
+    var checkboxGroups = [
+        { attr: 'data-gameplay-function-tag', key: 'functionTags', message: '已更新功能定位' },
+        { attr: 'data-gameplay-effect', key: 'effects', message: '已更新效果' },
+        { attr: 'data-gameplay-cleanse-effect', key: 'cleanseEffects', message: '已更新可解除效果' }
+    ];
+    var taxRoot = getTaxonomyQueryRoot(refs);
+    for (var i = 0; i < checkboxGroups.length; i += 1) {
+        var group = checkboxGroups[i];
+        if (target.hasAttribute(group.attr)) {
+            entry[group.key] = taxRoot
+                ? Array.from(taxRoot.querySelectorAll('input[' + group.attr + ']:checked')).map(function (input) {
+                    return input.getAttribute(group.attr);
+                }).filter(Boolean)
+                : [];
+            env.markDirty(group.message);
+            renderGameplayEntryList(refs, env, getFilteredGameplayEntries(refs, env), getGameplayCityContext(env));
+            return;
+        }
+    }
     if (target.hasAttribute('data-gameplay-stat')) {
         var statKey = target.getAttribute('data-gameplay-stat');
         var numeric = Number(target.value);
@@ -466,6 +596,7 @@ export function ensureCityGameplayConfig(env, cityContext) {
             enemies: buildDefaultEnemyEntries(cityContext),
             towers: buildDefaultTowerEntries(cityContext),
             cards: buildDefaultCardEntries(cityContext),
+            items: buildDefaultDefenseItemEntries(cityContext),
             characters: [],
             skills: [],
             updatedAt: ''
@@ -484,6 +615,9 @@ export function ensureCityGameplayConfig(env, cityContext) {
     }
     if (!Array.isArray(state.cityGameplayConfigs[resolvedKey].cards)) {
         state.cityGameplayConfigs[resolvedKey].cards = buildDefaultCardEntries(state.cityGameplayConfigs[resolvedKey]);
+    }
+    if (!Array.isArray(state.cityGameplayConfigs[resolvedKey].items)) {
+        state.cityGameplayConfigs[resolvedKey].items = buildDefaultDefenseItemEntries(state.cityGameplayConfigs[resolvedKey]);
     }
     if (!Array.isArray(state.cityGameplayConfigs[resolvedKey].enemies)) state.cityGameplayConfigs[resolvedKey].enemies = [];
     if (!state.cityGameplayConfigs[resolvedKey].enemies.length) {
@@ -584,6 +718,11 @@ export function createGameplayEntry(refs, env) {
         tags: [cityContext.cityName],
         rarity: 'common',
         placement: activeTab === 'characters' || activeTab === 'towers' ? 'roadside' : '',
+        element: '',
+        functionTags: [],
+        effects: [],
+        cleanseEffects: activeTab === 'items' ? ['electromagneticInterference'] : [],
+        effectDurationSec: 2,
         stats: {},
         assetRefs: {},
         cityCode: cityContext.cityCode,
@@ -671,7 +810,8 @@ export function renderGameplayEditor(refs, env) {
                 { label: '防御塔', value: config.towers.length },
                 { label: '卡片', value: config.cards.length },
                 { label: '角色', value: config.characters.length },
-                { label: '技能', value: config.skills.length }
+                { label: '技能', value: config.skills.length },
+                { label: '道具', value: config.items.length }
             ].map(function (card) {
                 return '<div class="stat-card"><strong>' + escapeHtml(String(card.value)) + '</strong><span>' + escapeHtml(card.label) + '</span></div>';
             }).join('')

@@ -1,4 +1,12 @@
 import type * as THREE from "three";
+import type {
+  DefenseElement,
+  DefenseEffectSpec,
+  DefenseFunctionTag,
+  DefenseResistanceProfile,
+  DefenseRuntimeStatus,
+  DefenseStatusId,
+} from "./defense-types";
 
 export type GameMode = "defense" | "explore";
 export type CameraMode = "topdown" | "free";
@@ -338,6 +346,9 @@ export interface InventoryItem {
   type: "material" | "consumable";
   icon: string;
   collectedAt: number;
+  healAmount?: number;
+  cleanseStatuses?: DefenseStatusId[];
+  defenseConsumableId?: string;
 }
 
 export interface ExploreEnemy {
@@ -392,6 +403,9 @@ export interface BuildSpec {
   color: number;
   rank?: GachaRarity;
   requiresUnlock?: boolean;
+  element?: DefenseElement;
+  functionTags?: DefenseFunctionTag[];
+  effects?: DefenseEffectSpec[];
   range?: number;
   fireRate?: number;
   damage?: number;
@@ -422,6 +436,7 @@ export interface Building {
   hp: number;
   blockingEnemies: Enemy[];
   skillCooldownTimer: number;
+  activeStatuses?: DefenseRuntimeStatus[];
   damageReductionUntil?: number;
   damageReductionFactor?: number;
   bonusBlockUntil?: number;
@@ -443,6 +458,9 @@ export interface Enemy {
   healthBar: THREE.Mesh;
   hp: number;
   maxHp: number;
+  element?: DefenseElement;
+  resistances?: DefenseResistanceProfile;
+  activeStatuses?: DefenseRuntimeStatus[];
   speed: number;
   reward: number;
   segment: number;

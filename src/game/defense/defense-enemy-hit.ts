@@ -3,12 +3,15 @@ import * as THREE from "three";
 import type { EnemyDefenseVisuals } from "./enemy-defense-visuals";
 import { TILE_SIZE, distanceXZ } from "../core/runtime-grid";
 import type { Building, Enemy } from "../core/types";
+import { getDefenseEnemyArchetypeSpec } from "./defense-enemy-archetypes";
+import { applyDefenseEffectToBuilding } from "./defense-status";
 
 /** 塔防杀敌、黑客僵直、蜂群分裂与掉落的一体化入口 */
 export interface DefenseEnemyDamagePipelineContext {
   buildings: Building[];
   enemies: Enemy[];
   enemyGroup: THREE.Group;
+  elapsed: number;
   allocateEnemyUid(): number;
   spawnMoneyDropAt(position: THREE.Vector3, amount: number, autoCollect: boolean): void;
   addExplosion(center: THREE.Vector3, radius: number, color: number): void;
@@ -44,7 +47,11 @@ export function applyDefenseEnemyDamage(ctx: DefenseEnemyDamagePipelineContext, 
     for (const b of ctx.buildings) {
       if (b.spec.role === "ranged" || b.spec.role === "mage" || b.spec.role === "support") {
         if (distanceXZ(b.mesh.position, enemy.mesh.position) <= 4 * TILE_SIZE) {
-          b.cooldown = Math.max(b.cooldown, 3.0);
+          applyDefenseEffectToBuilding(
+            b,
+            { statusId: "electromagneticInterference", duration: 3, magnitude: 3, element: "electric" },
+            ctx.elapsed,
+          );
           ctx.showToast(`[\u9ed1\u5ba2] \u5df2\u7628\u75ea ${b.spec.name}`);
         }
       }
@@ -53,6 +60,7 @@ export function applyDefenseEnemyDamage(ctx: DefenseEnemyDamagePipelineContext, 
 
   if (enemy.type === "swarm") {
     for (let i = 0; i < 3; i++) {
+      const archetype = getDefenseEnemyArchetypeSpec("basic");
       const healthBar = new THREE.Mesh(
         new THREE.BoxGeometry(0.9, 0.12, 0.1),
         new THREE.MeshBasicMaterial({ color: 0x34ff6a, depthTest: false, depthWrite: false }),
@@ -77,6 +85,8 @@ export function applyDefenseEnemyDamage(ctx: DefenseEnemyDamagePipelineContext, 
         healthBar,
         hp: 60,
         maxHp: 60,
+        element: archetype.element,
+        resistances: archetype.resistances,
         speed: 2.2,
         reward: 5,
         segment: enemy.segment,

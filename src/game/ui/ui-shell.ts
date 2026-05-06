@@ -197,7 +197,7 @@ export function renderGameUiShell(app: HTMLElement, requiredElement: RequiredEle
               <button class="close-button" id="inventoryCloseBtn" aria-label="关闭背包">×</button>
             </div>
             <div class="inventory-grid" id="inventoryGrid"></div>
-            <p class="inventory-hint">按 I 关闭背包，点击火焰道具可使用</p>
+            <p class="inventory-hint">按 I 关闭背包，点击治疗或塔防净化道具可使用</p>
           </div>
         </section>
         <section class="game-over-overlay" id="gameOverPanel" aria-hidden="true">
@@ -214,44 +214,11 @@ export function renderGameUiShell(app: HTMLElement, requiredElement: RequiredEle
         <section class="safe-zone-shop" id="safeZoneShopPanel" aria-hidden="true">
           <div class="shop-card">
             <div class="shop-header">
-              <h3>🏥 安全区补给站</h3>
+              <h3>补给站</h3>
               <button class="close-button" id="shopCloseBtn">×</button>
             </div>
-            <p class="shop-hint">按 B 开关商店 · 金钱通用：探索与塔防共用</p>
-            <div class="shop-items" id="shopItems">
-              <div class="shop-item">
-                <span class="shop-item-icon">💊</span>
-                <div class="shop-item-info">
-                  <span class="shop-item-name">HP 恢复药水</span>
-                  <span class="shop-item-desc">恢复 50 点生命</span>
-                </div>
-                <button class="shop-item-buy" data-item="hp-small">$30</button>
-              </div>
-              <div class="shop-item">
-                <span class="shop-item-icon">💉</span>
-                <div class="shop-item-info">
-                  <span class="shop-item-name">HP 强效药水</span>
-                  <span class="shop-item-desc">恢复 150 点生命</span>
-                </div>
-                <button class="shop-item-buy" data-item="hp-large">$60</button>
-              </div>
-              <div class="shop-item">
-                <span class="shop-item-icon">❤️</span>
-                <div class="shop-item-info">
-                  <span class="shop-item-name">生命强化</span>
-                  <span class="shop-item-desc">最大 HP +50 并完全回复</span>
-                </div>
-                <button class="shop-item-buy" data-item="max-hp">$100</button>
-              </div>
-              <div class="shop-item">
-                <span class="shop-item-icon">✨</span>
-                <div class="shop-item-info">
-                  <span class="shop-item-name">完全恢复</span>
-                  <span class="shop-item-desc">HP 恢复至最大值</span>
-                </div>
-                <button class="shop-item-buy" data-item="full-heal">$80</button>
-              </div>
-            </div>
+            <p class="shop-hint">按 B 开关商店 · 塔防可直接打开，探索需进入安全区</p>
+            <div class="shop-items" id="shopItems"></div>
           </div>
         </section>
       </div>

@@ -96,6 +96,9 @@ import { renderGameUiShell } from "../ui/ui-shell";
 import { playCutsceneIfPresent } from "../ui/cutscene-player";
 import { tickTowerDefenseCombat } from "../defense/tower-defense-combat";
 import { ToastController } from "../ui/toast-controller";
+import { resolveDefenseDamage } from "../defense/defense-damage";
+import { cleanseDefenseStatuses, tickDefenseEnemyStatuses } from "../defense/defense-status";
+import { getDefenseConsumableById, getDefenseConsumables } from "../defense/defense-taxonomy";
 import {
   GRID_COLS,
   GRID_ROWS,
@@ -141,6 +144,7 @@ import type {
   SaveData,
   TimedEffect,
 } from "../core/types";
+import type { DefenseDamageSource } from "../core/defense-types";
 import { UI_THEME_STORAGE_KEY, applyUiColorMode, getUiColorMode, toggleUiColorMode } from "../ui/ui-theme";
 
 const GEO_PLAYFIELD_SCALE = 20;
@@ -425,6 +429,7 @@ export class TowerDefenseGame {
     void (async () => {
       await this.loadGameAssetConfig();
       await this.loadEditorRuntimeMaps();
+      this.renderShopItems();
       this.loadInitialCityMap();
       await this.loadDefaultPlayer();
     })();
@@ -480,6 +485,7 @@ export class TowerDefenseGame {
       const btn = (e.target as HTMLElement).closest<HTMLButtonElement>(".shop-item-buy");
       if (btn?.dataset.item) this.buySafeZoneItem(btn.dataset.item);
     });
+    this.renderShopItems();
     const { toolbar } = uiShell;
     for (const spec of Object.values(BUILD_SPECS)) {
       const card = document.createElement("div");
@@ -1219,6 +1225,13 @@ export class TowerDefenseGame {
         ) {
           this.exploreWalkMode = !this.exploreWalkMode;
         }
+        if (pressed && meta?.repeat !== true && this.mode === "defense") {
+          if (code === "KeyB") {
+            const hidden = this.safeZoneShopPanel.getAttribute("aria-hidden") !== "false";
+            this.safeZoneShopPanel.setAttribute("aria-hidden", String(!hidden));
+          }
+          if (code === "KeyI") this.toggleInventory();
+        }
         if (pressed && meta?.repeat !== true && this.mode === "explore") {
           if (code === "KeyB") {
             // B = open safe zone shop (only when in safe zone)
@@ -1296,6 +1309,7 @@ export class TowerDefenseGame {
     try {
       const importedCount = await this.pullEditorLevelsFromProjectFile();
       await this.loadGameAssetConfig();
+      this.renderShopItems();
       this.defenseMapIndex = Math.min(this.defenseMapIndex, MAPS.length - 1);
       this.exploreMapIndex = Math.min(this.exploreMapIndex, EXPLORE_MAPS.length - 1);
       this.renderMapButtons();
@@ -2054,6 +2068,12 @@ export class TowerDefenseGame {
   }
 
   private updateEnemies(dt: number): void {
+    tickDefenseEnemyStatuses({
+      dt,
+      elapsed: this.elapsed,
+      enemies: this.enemies,
+      damageEnemy: (enemy, damage) => this.damageEnemy(enemy, damage),
+    });
     tickDefenseEnemyWave({
       dt,
       elapsed: this.elapsed,
@@ -2079,7 +2099,7 @@ export class TowerDefenseGame {
       fxGroup: this.fxGroup,
       elapsed: this.elapsed,
       aimWorldCenter: (e) => this.enemyDefenseVisuals.aimWorldCenter(e),
-      damageEnemy: (e, d) => this.damageEnemy(e, d),
+      damageEnemy: (e, d, source) => this.damageEnemy(e, d, source),
       addBeam: (from, to, color) => this.addBeam(from, to, color),
       onTowerFired: (b) => playTowerFire(b.spec.id, "defense"),
     });
@@ -2091,7 +2111,7 @@ export class TowerDefenseGame {
       enemies: this.enemies,
       buildGroup: this.buildGroup,
       addExplosion: (c, r, col) => this.addExplosion(c, r, col),
-      damageEnemy: (e, d) => this.damageEnemy(e, d),
+      damageEnemy: (e, d, source) => this.damageEnemy(e, d, source),
       onMineExploded: (m) => playTowerFire(m.spec.id, "defense"),
     });
   }
@@ -2104,18 +2124,20 @@ export class TowerDefenseGame {
       getBuildings: () => this.buildings,
       addExplosion: (center, radius, color) => this.addExplosion(center, radius, color),
       addBeam: (from, to, color) => this.addBeam(from, to, color),
-      damageEnemy: (enemy, damage) => this.damageEnemy(enemy, damage),
+      damageEnemy: (enemy, damage, source) => this.damageEnemy(enemy, damage, source),
       showToast: (message, critical) => this.showToast(message, critical),
       refreshUi: () => this.updateUi(),
     });
   }
 
-  private damageEnemy(enemy: Enemy, damage: number): void {
+  private damageEnemy(enemy: Enemy, damage: number, source?: DefenseDamageSource): void {
+    const finalDamage = resolveDefenseDamage(enemy, damage, source);
     applyDefenseEnemyDamage(
       {
         buildings: this.buildings,
         enemies: this.enemies,
         enemyGroup: this.enemyGroup,
+        elapsed: this.elapsed,
         allocateEnemyUid: () => {
           const uid = this.nextUid;
           this.nextUid += 1;
@@ -2128,7 +2150,7 @@ export class TowerDefenseGame {
         onEnemyKilled: () => playDefenseEnemyKilled(),
       },
       enemy,
-      damage,
+      finalDamage,
     );
   }
 
@@ -2245,6 +2267,40 @@ export class TowerDefenseGame {
     this.safeZoneShopPanel.setAttribute("aria-hidden", "true");
   }
 
+  private renderShopItems(): void {
+    const shop = this.requiredElement("#shopItems");
+    const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (ch) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      "\"": "&quot;",
+      "'": "&#39;",
+    }[ch] ?? ch));
+    const healingItems = [
+      { id: "hp-small", icon: "HP", name: "HP 恢复药水", desc: "恢复 50 点生命", cost: 30 },
+      { id: "hp-large", icon: "HP+", name: "HP 强效药水", desc: "恢复 150 点生命", cost: 60 },
+      { id: "max-hp", icon: "MAX", name: "生命强化", desc: "最大 HP +50 并完全回复", cost: 100 },
+      { id: "full-heal", icon: "FULL", name: "完全恢复", desc: "HP 恢复至最大值", cost: 80 },
+    ];
+    const defenseItems = getDefenseConsumables().map((item) => ({
+      id: item.id,
+      icon: item.icon,
+      name: item.name,
+      desc: item.description,
+      cost: item.cost,
+    }));
+    shop.innerHTML = healingItems.concat(defenseItems).map((item) => `
+      <div class="shop-item">
+        <span class="shop-item-icon">${escapeHtml(item.icon)}</span>
+        <div class="shop-item-info">
+          <span class="shop-item-name">${escapeHtml(item.name)}</span>
+          <span class="shop-item-desc">${escapeHtml(item.desc)}</span>
+        </div>
+        <button class="shop-item-buy" data-item="${escapeHtml(item.id)}">$${item.cost}</button>
+      </div>
+    `).join("");
+  }
+
   private buySafeZoneItem(item: string): void {
     const costs: Record<string, number> = {
       "hp-small": 30,
@@ -2252,9 +2308,24 @@ export class TowerDefenseGame {
       "max-hp": 100,
       "full-heal": 80,
     };
-    const cost = costs[item] ?? 0;
+    const defenseItem = getDefenseConsumableById(item);
+    const cost = defenseItem?.cost ?? costs[item] ?? 0;
     if (!this.economy.trySpend(cost)) {
       this.showToast("\u8d44\u91d1\u4e0d\u8db3\uff01");
+      return;
+    }
+    if (defenseItem) {
+      this.addInventoryItem({
+        id: `defense-${defenseItem.id}-${Date.now()}`,
+        name: defenseItem.name,
+        quantity: 1,
+        type: "consumable",
+        icon: defenseItem.icon,
+        collectedAt: Date.now(),
+        cleanseStatuses: defenseItem.cleanseStatuses,
+        defenseConsumableId: defenseItem.id,
+      });
+      this.showToast(`已购买 ${defenseItem.name}，可按 I 打开背包使用`);
       return;
     }
     switch (item) {
@@ -2302,7 +2373,18 @@ export class TowerDefenseGame {
   }
 
   private useInventoryItem(idx: number): void {
-    const result = this.exploreInventory.tryHealFromItem(idx, this.exploreProgress);
+    const result = this.exploreInventory.tryUseItem(idx, this.mode === "defense"
+      ? {
+          defenseCleanse: {
+            cleanse: (statuses) => cleanseDefenseStatuses({
+              enemies: this.enemies,
+              buildings: this.buildings,
+              statuses,
+              elapsed: this.elapsed,
+            }),
+          },
+        }
+      : { healProgress: this.exploreProgress });
     if (!result.message) {
       return;
     }
