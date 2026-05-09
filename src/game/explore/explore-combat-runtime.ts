@@ -41,6 +41,8 @@ export interface ExploreCombatHost {
   showExploreEnemyDamageFloat?(worldPosition: THREE.Vector3, damage: number, options?: { critical?: boolean }): void;
   onExploreBasicAttackFired?(): void;
   onExploreEnemyKilled?(): void;
+  /** 击倒带 placementId 的 Boss 后立即回调（奖励与吐司之后）；用于 Boss 击败过场 */
+  onExploreBossDefeated?(info: { placementId: string; name?: string }): void;
   /** 异步加载关卡里配置的 GLB；失败返回 null（会保留程序化占位体）。 */
   loadExploreGltfScene?(url: string): Promise<THREE.Object3D | null>;
 }
@@ -592,6 +594,12 @@ export class ExploreCombatRuntime {
       this.host.showToast(t, true);
     }
     this.host.showToast(enemy.boss ? `AI 化身已回收：${enemy.name || enemy.id}` : `已清理 ${enemy.name || "低阶 AI"}`);
+    if (enemy.boss && enemy.placementId) {
+      this.host.onExploreBossDefeated?.({
+        placementId: enemy.placementId,
+        name: enemy.name,
+      });
+    }
   }
 
   private grantRewardItem(reward: ExploreRewardSpec): void {

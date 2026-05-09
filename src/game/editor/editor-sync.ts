@@ -1,6 +1,7 @@
 import { hasEditorDefenseLayout, hasEditorExploreLayout, parseEditorColor, parseEditorOpacity, runtimeMapToEditorExplorationLayout, runtimeMapToEditorMap } from "./editor-runtime";
 import { sanitizeLevelMapAudioFromEditor } from "../audio/game-audio";
 import { CITY_GEO_CONFIG, BUILD_SPECS } from "../data/content";
+import { DEFENSE_MAP_FLAVORS } from "../data/defense-map-flavors";
 import { clamp, orderEditorPathCells, sameCell, uniqueCells, GRID_COLS, GRID_ROWS } from "../core/runtime-grid";
 import type {
   EditorCell,
@@ -13,6 +14,7 @@ import type {
   GameMode,
   GeoMapConfig,
   GridCell,
+  LevelCutscene,
   LevelCutsceneConfig,
   MapActorDef,
   MapBoardImageLayer,
@@ -66,19 +68,23 @@ function sanitizeBoardImageLayers(raw: unknown): MapBoardImageLayer[] | undefine
   return out.length ? out.sort((a, b) => (a.order ?? 0) - (b.order ?? 0)) : undefined;
 }
 
+function sanitizeCutsceneClip(raw: unknown): LevelCutscene | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const iv = raw as Record<string, unknown>;
+  const url = typeof iv.url === "string" ? iv.url.trim() : "";
+  if (!url) return undefined;
+  return {
+    url,
+    ...(typeof iv.title === "string" && iv.title ? { title: iv.title.trim() } : {}),
+    ...(typeof iv.projectPath === "string" && iv.projectPath.trim() ? { projectPath: iv.projectPath.trim() } : {}),
+  };
+}
+
 function sanitizeLevelCutscenes(raw: unknown): LevelCutsceneConfig | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const r = raw as Record<string, unknown>;
 
-  const introRaw = r.introVideo;
-  let introVideo: LevelCutsceneConfig["introVideo"];
-  if (introRaw && typeof introRaw === "object") {
-    const iv = introRaw as Record<string, unknown>;
-    const url = typeof iv.url === "string" ? iv.url.trim() : "";
-    if (url) {
-      introVideo = { url, ...(typeof iv.title === "string" && iv.title ? { title: iv.title } : {}) };
-    }
-  }
+  const introVideo = sanitizeCutsceneClip(r.introVideo);
 
   let waveVideos: LevelCutsceneConfig["waveVideos"];
   if (Array.isArray(r.waveVideos)) {
@@ -88,13 +94,28 @@ function sanitizeLevelCutscenes(raw: unknown): LevelCutsceneConfig | undefined {
       const afterWave = Math.round(Number(wv.afterWave));
       const url = typeof wv.url === "string" ? wv.url.trim() : "";
       if (!Number.isFinite(afterWave) || afterWave < 1 || !url) return [];
-      return [{ afterWave, url, ...(typeof wv.title === "string" && wv.title ? { title: wv.title } : {}) }];
+      return [
+        {
+          afterWave,
+          url,
+          ...(typeof wv.title === "string" && wv.title ? { title: wv.title.trim() } : {}),
+          ...(typeof wv.projectPath === "string" && wv.projectPath.trim()
+            ? { projectPath: wv.projectPath.trim() }
+            : {}),
+        },
+      ];
     });
     if (parsed.length) waveVideos = parsed;
   }
 
-  if (!introVideo && !waveVideos) return undefined;
-  return { ...(introVideo ? { introVideo } : {}), ...(waveVideos ? { waveVideos } : {}) };
+  const exploreBossVictoryVideo = sanitizeCutsceneClip(r.exploreBossVictoryVideo);
+
+  if (!introVideo && !waveVideos && !exploreBossVictoryVideo) return undefined;
+  return {
+    ...(introVideo ? { introVideo } : {}),
+    ...(waveVideos ? { waveVideos } : {}),
+    ...(exploreBossVictoryVideo ? { exploreBossVictoryVideo } : {}),
+  };
 }
 
 const EDITOR_FLAVOR_ENEMY_TYPES = new Set<EnemyType>(["basic", "scout", "hacker", "tank", "swarm"]);
@@ -129,6 +150,24 @@ function sanitizeDefenseFlavor(raw: unknown): DefenseMapFlavor | undefined {
     ...(Object.keys(towerNames).length ? { towerNames } : {}),
     ...(Object.keys(enemyNames).length ? { enemyNames } : {}),
   };
+}
+
+/** 两个济南编辑器关卡（泉城 / 奥体）均未写 map.defenseFlavor 时注入与内置 jinan-harbor 一致的 HUD 地名 */
+function shouldApplyJinanEditorDefenseFlavor(level: EditorLevel): boolean {
+  const ext = (level as { extensions?: { syncedBuiltInLayout?: { city?: unknown } } }).extensions;
+  if (ext && typeof ext === "object" && (ext.syncedBuiltInLayout as { city?: string } | undefined)?.city === "jinan") {
+    return true;
+  }
+  const text = [
+    level.id,
+    level.name,
+    level.location?.cityCode,
+    level.location?.cityName,
+    level.location?.regionLabel,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return /济南|泉城|济南市|370100|山东[·\s_]?济南|CN_shandong_370100|city-cn-370100/i.test(text);
 }
 
 function positiveNumber(raw: unknown, fallback: number, max = 1e9): number {
@@ -507,7 +546,12 @@ export function editorLevelToRuntimeMap(
   const theme = exploreLayout?.theme ?? editorMap.theme ?? {};
   const boardImageLayers = sanitizeBoardImageLayers(editorMap.boardImageLayers);
   const levelAudio = sanitizeLevelMapAudioFromEditor(editorMap.levelAudio);
-  const defenseFlavorSan = mode === "defense" ? sanitizeDefenseFlavor(editorMap.defenseFlavor) : undefined;
+  const flavorFromEditorMap = mode === "defense" ? sanitizeDefenseFlavor(editorMap.defenseFlavor) : undefined;
+  const jinanDefenseFallback =
+    mode === "defense" && !flavorFromEditorMap && shouldApplyJinanEditorDefenseFlavor(level)
+      ? sanitizeDefenseFlavor(DEFENSE_MAP_FLAVORS["jinan-harbor"])
+      : undefined;
+  const defenseFlavorSan = flavorFromEditorMap ?? jinanDefenseFallback;
   const exploreBosses = mode === "explore" ? sanitizeExploreBosses(editorMap.exploreBosses, project) : undefined;
   const exploreSpawners = mode === "explore" ? sanitizeExploreSpawners(editorMap.exploreSpawners, project) : undefined;
   const explorePickups = mode === "explore" ? sanitizeExplorePickups(editorMap.explorePickups, project) : undefined;
@@ -516,6 +560,13 @@ export function editorLevelToRuntimeMap(
 
   const boardUrlRaw = typeof theme.boardTextureUrl === "string" ? theme.boardTextureUrl.trim() : "";
   const boardTextureUrl = boardUrlRaw ? boardUrlRaw : undefined;
+
+  const cutscenesAll = sanitizeLevelCutscenes(editorMap.cutscenes);
+  const cutscenesDefense = cutscenesAll;
+  const cutscenesExplore =
+    cutscenesAll?.exploreBossVictoryVideo != null
+      ? { exploreBossVictoryVideo: cutscenesAll.exploreBossVictoryVideo }
+      : undefined;
 
   return {
     id: `${level.id || "editor-level"}-${mode}`,
@@ -559,11 +610,12 @@ export function editorLevelToRuntimeMap(
       : {}),
     ...(mode === "defense"
       ? {
-          cutscenes: sanitizeLevelCutscenes(editorMap.cutscenes),
+          ...(cutscenesDefense ? { cutscenes: cutscenesDefense } : {}),
           ...(defenseFlavorSan ? { defenseFlavor: defenseFlavorSan } : {}),
           ...(defenseTowerModelUrls && Object.keys(defenseTowerModelUrls).length ? { towerModelUrls: defenseTowerModelUrls } : {}),
         }
       : {}),
+    ...(mode === "explore" && cutscenesExplore ? { cutscenes: cutscenesExplore } : {}),
     ...(levelAudio ? { levelAudio } : {}),
     ...(boardImageLayers?.length ? { boardImageLayers } : {}),
   };

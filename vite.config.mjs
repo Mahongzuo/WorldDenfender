@@ -219,6 +219,283 @@ function resolveVolcArkApiKey() {
     .find(Boolean) || "";
 }
 
+/** 方舟图生视频须能拉取参考图：公网可访问的站点根 URL（如 https://xxx.ngrok.app），不含末尾斜杠也可 */
+function resolveVolcPublicBaseUrl() {
+  return [process.env.VOLCENGINE_ARK_PUBLIC_BASE_URL, loadedEnv.VOLCENGINE_ARK_PUBLIC_BASE_URL]
+    .map((item) => String(item || "").trim().replace(/\/$/, ""))
+    .find(Boolean) || "";
+}
+
+/** Seedance image_url.url 可使用 data:image/...;base64,...（免公网托管，适合本地 dev） */
+function normalizeCutsceneImageMime(mimeHint) {
+  const m = String(mimeHint || "image/jpeg").split(";")[0].trim().toLowerCase();
+  if (m.includes("png")) return "image/png";
+  if (m.includes("webp")) return "image/webp";
+  if (m.includes("gif")) return "image/gif";
+  return "image/jpeg";
+}
+
+/** 解码后超过此阈值则改用 public 托管 + VOLCENGINE_ARK_PUBLIC_BASE_URL（兆字节），默认 8 */
+function resolveVolcImageInlineMaxBytes() {
+  const mbRaw =
+    process.env.VOLCENGINE_ARK_IMAGE_INLINE_MAX_MB ??
+    loadedEnv.VOLCENGINE_ARK_IMAGE_INLINE_MAX_MB ??
+    8;
+  const mm = typeof mbRaw === "string" ? Number(mbRaw.trim()) : Number(mbRaw);
+  const mb = Number.isFinite(mm) && mm > 0 ? mm : 8;
+  return Math.min(32, mb) * 1024 * 1024;
+}
+
+const ARK_CN_BASE = "https://ark.cn-beijing.volces.com";
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * @param {unknown} payload
+ * @param {(url: string) => boolean} urlPredicate
+ */
+function deepFindHttpUrl(payload, urlPredicate) {
+  if (payload == null) return "";
+  if (typeof payload === "string") {
+    const trimmed = payload.trim();
+    if (trimmed.startsWith("http") && urlPredicate(trimmed)) return trimmed;
+    return "";
+  }
+  if (Array.isArray(payload)) {
+    for (const item of payload) {
+      const hit = deepFindHttpUrl(item, urlPredicate);
+      if (hit) return hit;
+    }
+    return "";
+  }
+  if (typeof payload === "object") {
+    for (const key of Object.keys(payload)) {
+      const hit = deepFindHttpUrl(/** @type {Record<string, unknown>} */ (payload)[key], urlPredicate);
+      if (hit) return hit;
+    }
+  }
+  return "";
+}
+
+/**
+ * @param {unknown} payload
+ */
+function extractArkContentTaskId(payload) {
+  if (!payload || typeof payload !== "object") return "";
+  const root = /** @type {Record<string, unknown>} */ (payload);
+  const data = typeof root.data === "object" && root.data !== null ? /** @type {Record<string, unknown>} */ (root.data) : {};
+  const result =
+    typeof root.result === "object" && root.result !== null ? /** @type {Record<string, unknown>} */ (root.result) : {};
+  const content = root.content;
+  let fromContent = "";
+  if (typeof content === "string" && /^cgt-/i.test(content.trim())) {
+    fromContent = content.trim();
+  } else if (Array.isArray(content)) {
+    const first = content.find((c) => c && typeof c === "object");
+    if (first && typeof first === "object") {
+      const o = /** @type {Record<string, unknown>} */ (first);
+      fromContent = String(o.id || o.task_id || "").trim();
+    }
+  }
+  return String(
+    fromContent ||
+      root.id ||
+      root.task_id ||
+      root.taskId ||
+      data.id ||
+      data.task_id ||
+      data.taskId ||
+      result.id ||
+      result.task_id ||
+      result.taskId ||
+      "",
+  ).trim();
+}
+
+/**
+ * @param {unknown} payload
+ */
+function normalizeArkTaskStatus(payload) {
+  if (!payload || typeof payload !== "object") return "";
+  const root = /** @type {Record<string, unknown>} */ (payload);
+  const data =
+    typeof root.data === "object" && root.data !== null ? /** @type {Record<string, unknown>} */ (root.data) : {};
+  const s = root.status ?? root.task_status ?? root.state ?? data.status ?? data.task_status ?? data.state;
+  return String(s || "").trim().toLowerCase();
+}
+
+function looksLikeVideoAssetUrl(u) {
+  const lower = u.toLowerCase();
+  if (/\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(lower)) return true;
+  if (/(video|vod|mp4|playback|seedance|tos|volces)/i.test(lower) && /^https?:\/\//i.test(u)) return true;
+  return false;
+}
+
+/**
+ * @param {unknown} payload
+ */
+function extractGeneratedVideoUrl(payload) {
+  const predExt = (u) => /\.(mp4|webm|mov)(\?|$)/i.test(u);
+  let found = deepFindHttpUrl(payload, predExt);
+  if (found) return found;
+
+  if (payload && typeof payload === "object") {
+    const root = /** @type {Record<string, unknown>} */ (payload);
+    const data = typeof root.data === "object" && root.data !== null ? /** @type {Record<string, unknown>} */ (root.data) : {};
+    for (const bucket of [root, data]) {
+      for (const key of Object.keys(bucket)) {
+        if (!/video|output|url|file|content/i.test(key)) continue;
+        const v = bucket[key];
+        if (typeof v === "string" && v.startsWith("http") && looksLikeVideoAssetUrl(v)) return v.trim();
+        if (typeof v === "object" && v !== null) {
+          const hit = deepFindHttpUrl(v, (u) => looksLikeVideoAssetUrl(u));
+          if (hit) return hit;
+        }
+      }
+    }
+  }
+
+  found = deepFindHttpUrl(
+    payload && typeof payload === "object" && "content" in /** @type {Record<string, unknown>} */ (payload)
+      ? /** @type {Record<string, unknown>} */ (payload).content
+      : undefined,
+    predExt,
+  );
+  if (found) return found;
+
+  return (
+    deepFindHttpUrl(payload, (u) => typeof u === "string" && /^https?:\/\//i.test(u) && looksLikeVideoAssetUrl(u)) || ""
+  );
+}
+
+/**
+ * @param {unknown} payload
+ */
+function classifyArkVideoPollPhase(payload) {
+  const statusRaw = normalizeArkTaskStatus(payload);
+  const collapsed = statusRaw.replace(/[\s_-]+/g, "");
+  const doneSet = new Set(["succeeded", "success", "completed", "finished", "done", "succeed", "successed"]);
+  const failSet = new Set(["failed", "error", "cancelled", "canceled", "terminated", "reject", "failure"]);
+  const runSet = new Set([
+    "",
+    "queued",
+    "pending",
+    "waiting",
+    "submitted",
+    "init",
+    "notstart",
+    "notstarted",
+    "running",
+    "processing",
+    "inprogress",
+    "working",
+    "executing",
+    "generating",
+    "preparing",
+  ]);
+
+  let kind = "processing";
+  let short = statusRaw;
+  if (!short) short = "(方舟未返回 status 字段，可能仍在排队)";
+
+  if (doneSet.has(collapsed)) kind = "done";
+  else if (failSet.has(collapsed)) kind = "failed";
+  else if (runSet.has(collapsed)) kind = "processing";
+  else kind = "processing";
+
+  if (kind === "processing") {
+    const vu = extractGeneratedVideoUrl(payload);
+    if (vu) kind = "done";
+  }
+
+  return { kind, arkStatus: statusRaw || "unknown", arkStatusDisplay: short };
+}
+
+async function arkCreateContentGenerationTask(apiKey, jsonBody) {
+  const res = await fetch(`${ARK_CN_BASE}/api/v3/contents/generations/tasks`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify(jsonBody),
+  });
+  const text = await res.text();
+  let payload = {};
+  try {
+    payload = text ? JSON.parse(text) : {};
+  } catch {
+    payload = {};
+  }
+  if (!res.ok) {
+    const errObj = /** @type {{ error?: { message?: string }; message?: string }} */ (payload);
+    throw new Error(String(errObj.error?.message || errObj.message || text || `HTTP ${res.status}`));
+  }
+  return payload;
+}
+
+async function arkFetchContentGenerationTask(apiKey, taskId) {
+  const res = await fetch(`${ARK_CN_BASE}/api/v3/contents/generations/tasks/${encodeURIComponent(taskId)}`, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+  });
+  const text = await res.text();
+  let payload = {};
+  try {
+    payload = text ? JSON.parse(text) : {};
+  } catch {
+    payload = {};
+  }
+  if (!res.ok) {
+    const errObj = /** @type {{ error?: { message?: string }; message?: string }} */ (payload);
+    throw new Error(String(errObj.error?.message || errObj.message || text || `HTTP ${res.status}`));
+  }
+  return payload;
+}
+
+/**
+ * @param {string} videoRemoteUrl
+ * @param {object} params
+ */
+async function saveCutsceneVideoToPublic(videoRemoteUrl, params) {
+  const { scope, waveAfter, cityName, cityCode, levelNameSeg, model, taskId } = params;
+  const remoteBin = await fetch(videoRemoteUrl);
+  if (!remoteBin.ok) {
+    throw new Error(`下载方舟视频失败：HTTP ${remoteBin.status}`);
+  }
+  const assetType = "LevelVideos";
+  const resourceKind = "cutscene-video";
+  let assetTag = "intro-ai";
+  if (scope === "wave") assetTag = `wave${waveAfter}-ai`;
+  else if (scope === "boss") assetTag = "boss-victory-ai";
+
+  const directory = path.join(artsDir, assetType, cityName);
+  await mkdir(directory, { recursive: true });
+  const baseName = sanitizeProjectSegment(`${cityName}-${levelNameSeg}-${assetTag}`);
+  const filename = ensureUniqueFilename(directory, baseName, ".mp4");
+  const absolutePath = path.join(directory, filename);
+
+  await writeFile(absolutePath, Buffer.from(await remoteBin.arrayBuffer()));
+
+  const relativeSegments = path.relative(publicDir, absolutePath).split(path.sep).filter(Boolean);
+  const projectPath = path.posix.join("public", ...relativeSegments);
+  const publicUrl = buildPublicUrl(...relativeSegments);
+
+  return {
+    id: `${Date.now()}-${sanitizeName(`${cityCode || cityName}-${assetTag}-video`)}`,
+    assetType,
+    resourceKind,
+    cityCode,
+    cityName,
+    filename,
+    model,
+    taskId,
+    remoteUrl: videoRemoteUrl,
+    projectPath,
+    publicUrl,
+    scope,
+    afterWave: scope === "wave" ? waveAfter : undefined,
+  };
+}
+
 function resolveMeshyApiKey() {
   return [process.env.MESHY_API_KEY, loadedEnv.MESHY_API_KEY]
     .map((item) => String(item || "").trim())
@@ -625,6 +902,183 @@ export default defineConfig({
           }
         });
 
+        /**
+         * 火山方舟 Seedance：图生视频。POST body: action:start|poll；长流程由前端轮询，避免单次请求超时。
+         * 密钥：VOLCENGINE_ARK_API_KEY；参考图公网可达根地址：VOLCENGINE_ARK_PUBLIC_BASE_URL。
+         */
+        server.middlewares.use("/api/generate-cutscene-video", async (request, response) => {
+          if (request.method !== "POST") {
+            sendJson(response, 405, { error: "Method not allowed" });
+            return;
+          }
+          try {
+            const apiKey = resolveVolcArkApiKey();
+            if (!apiKey) {
+              sendJson(response, 400, {
+                error: "请在 .env.local 中配置 VOLCENGINE_ARK_API_KEY（或兼容项 ARK_API_KEY）",
+              });
+              return;
+            }
+            const body = await readJsonBody(request);
+            const action = String(body.action ?? "").trim().toLowerCase();
+            const model = String(
+              process.env.VOLCENGINE_ARK_VIDEO_MODEL ||
+                loadedEnv.VOLCENGINE_ARK_VIDEO_MODEL ||
+                "doubao-seedance-1-5-pro-251215",
+            ).trim();
+
+            const scopeRaw = String(body.scope ?? "intro").trim().toLowerCase();
+            const scope = scopeRaw === "wave" ? "wave" : scopeRaw === "boss" ? "boss" : "intro";
+            const waveAfter = Math.max(1, Math.round(Number(body.afterWave ?? 1)));
+            const cityName = sanitizeProjectSegment(body.cityName ?? body.levelName ?? "未命名城市");
+            const cityCode = sanitizeProjectSegment(body.cityCode ?? "");
+            const levelNameSeg = sanitizeProjectSegment(body.levelName ?? cityName);
+
+            if (action === "poll") {
+              const taskId = String(body.taskId ?? "").trim();
+              if (!taskId) {
+                sendJson(response, 400, { error: "poll 需提供 taskId（请先使用 action:start 提交任务）" });
+                return;
+              }
+              const arkPayload = await arkFetchContentGenerationTask(apiKey, taskId);
+              const classified = classifyArkVideoPollPhase(arkPayload);
+              if (classified.kind === "processing") {
+                sendJson(response, 200, {
+                  phase: "processing",
+                  taskId,
+                  model,
+                  scope,
+                  afterWave: scope === "wave" ? waveAfter : undefined,
+                  arkStatus: classified.arkStatus,
+                  arkStatusDisplay: classified.arkStatusDisplay,
+                });
+                return;
+              }
+              if (classified.kind === "failed") {
+                const root = /** @type {Record<string, unknown>} */ (arkPayload);
+                const errInner =
+                  root.error && typeof root.error === "object"
+                    ? /** @type {{ message?: string }} */ (root.error)
+                    : {};
+                sendJson(response, 200, {
+                  phase: "failed",
+                  taskId,
+                  model,
+                  scope,
+                  afterWave: scope === "wave" ? waveAfter : undefined,
+                  arkStatus: classified.arkStatus,
+                  error: String(errInner.message || root.message || "方舟视频任务失败"),
+                });
+                return;
+              }
+
+              const videoRemoteUrl = extractGeneratedVideoUrl(arkPayload);
+              if (!videoRemoteUrl) {
+                throw new Error(
+                  "方舟任务已就绪，但未解析到视频下载地址；请在方舟控制台核对返回 JSON 字段，或扩展服务端解析逻辑。",
+                );
+              }
+              const saved = await saveCutsceneVideoToPublic(videoRemoteUrl, {
+                scope,
+                waveAfter,
+                cityName,
+                cityCode,
+                levelNameSeg,
+                model,
+                taskId,
+              });
+              sendJson(response, 200, { phase: "complete", ...saved });
+              return;
+            }
+
+            if (action && action !== "start") {
+              sendJson(response, 400, { error: `不支持的 action: ${body.action}，请使用 start 或 poll` });
+              return;
+            }
+
+            const promptHuman = String(body.prompt ?? "").trim();
+            if (!promptHuman) {
+              sendJson(response, 400, { error: "请填写视频提示词" });
+              return;
+            }
+
+            let imagePublicUrl = String(body.imagePublicUrl ?? "").trim();
+            const imageBase64RawIn = String(body.imageBase64 ?? "").trim();
+
+            if (!imagePublicUrl && imageBase64RawIn) {
+              const b64 = imageBase64RawIn.replace(/\s+/g, "");
+              const mime = normalizeCutsceneImageMime(body.imageMimeType);
+              const imageBuffer = Buffer.from(b64, "base64");
+              if (!b64.length || !imageBuffer.length) {
+                sendJson(response, 400, { error: "参考图内容无效（Base64 为空或解码失败）" });
+                return;
+              }
+              const inlineMaxBytes = resolveVolcImageInlineMaxBytes();
+              const publicBase = resolveVolcPublicBaseUrl();
+              if (imageBuffer.length <= inlineMaxBytes) {
+                imagePublicUrl = `data:${mime};base64,${b64}`;
+              } else {
+                if (!publicBase) {
+                  sendJson(response, 400, {
+                    error: `参考图约 ${Math.round(imageBuffer.length / 1024 / 1024)}MB，大于内联上限 ${Math.round(inlineMaxBytes / 1024 / 1024)}MB：请压缩分辨率、或在 .env.local 设置 VOLCENGINE_ARK_PUBLIC_BASE_URL（可把图托管到可被方舟访问的网址），或直接填写公网 imagePublicUrl。`,
+                  });
+                  return;
+                }
+                let ext = ".jpg";
+                if (mime === "image/png") ext = ".png";
+                else if (mime === "image/webp") ext = ".webp";
+                else if (mime === "image/gif") ext = ".gif";
+
+                const refDir = path.join(artsDir, "TempVolcRef");
+                await mkdir(refDir, { recursive: true });
+                const refBase = sanitizeProjectSegment(`i2v-ref-${Date.now()}`);
+                const refAbs = path.join(refDir, `${refBase}${ext}`);
+                await writeFile(refAbs, imageBuffer);
+                const refRelSegments = path.relative(publicDir, refAbs).split(path.sep).filter(Boolean);
+                imagePublicUrl = `${publicBase}${buildPublicUrl(...refRelSegments)}`;
+              }
+            }
+
+            if (!imagePublicUrl) {
+              sendJson(response, 400, { error: "请上传参考照片，或填入公网图片 URL（imagePublicUrl）" });
+              return;
+            }
+
+            let fullPrompt = promptHuman;
+            if (!/--duration\b/i.test(fullPrompt)) fullPrompt += "  --duration 5";
+            if (!/--camerafixed\b/i.test(fullPrompt)) fullPrompt += " --camerafixed false";
+            if (!/--watermark\b/i.test(fullPrompt)) fullPrompt += " --watermark true";
+
+            const createPayload = await arkCreateContentGenerationTask(apiKey, {
+              model,
+              content: [
+                { type: "text", text: fullPrompt },
+                { type: "image_url", image_url: { url: imagePublicUrl } },
+              ],
+            });
+
+            const taskId = extractArkContentTaskId(createPayload);
+            if (!taskId) {
+              throw new Error(`方舟未返回任务 id：${JSON.stringify(createPayload).slice(0, 360)}`);
+            }
+
+            sendJson(response, 200, {
+              phase: "submitted",
+              taskId,
+              model,
+              scope,
+              afterWave: scope === "wave" ? waveAfter : undefined,
+            });
+          } catch (error) {
+            const isDev = process.env.NODE_ENV !== "production";
+            if (isDev) console.error("[generate-cutscene-video]", error);
+            sendJson(response, 500, {
+              error: error instanceof Error ? error.message : "cutscene video generation failed",
+              ...(isDev && error instanceof Error && error.stack ? { detail: error.stack } : {}),
+            });
+          }
+        });
+
         /** 在系统文件管理器中定位 public 下的文件（开发机本地体验） */
         server.middlewares.use("/api/reveal-project-path", async (request, response) => {
           if (request.method !== "POST") {
@@ -654,38 +1108,69 @@ export default defineConfig({
               sendJson(response, 400, { error: "Path outside public/" });
               return;
             }
+
+            const videoExtensions = new Set([".mp4", ".webm", ".ogg", ".mov", ".m4v"]);
+            const ext = path.extname(abs).toLowerCase();
+
+            let revealPath = abs;
+            let revealIsDirectory = false;
+            let created = false;
+
             if (!existsSync(abs)) {
-              sendJson(response, 404, {
-                error: "File not found",
-                absolutePath: abs,
-              });
-              return;
+              if (videoExtensions.has(ext)) {
+                await mkdir(path.dirname(abs), { recursive: true });
+                revealPath = path.dirname(abs);
+                revealIsDirectory = true;
+                created = true;
+              } else {
+                await mkdir(abs, { recursive: true });
+                revealPath = abs;
+                revealIsDirectory = true;
+                created = true;
+              }
+            } else {
+              const st = statSync(abs);
+              revealIsDirectory = st.isDirectory();
+              revealPath = abs;
             }
+
             const platform = process.platform;
-            const isDirectory = statSync(abs).isDirectory();
 
             /** Windows：explorer /select 必须写成 “/select,\"路径\””，且不宜用 execFile 等待退出（易判为失败） */
             if (platform === "win32") {
-              const forCmd = abs.replace(/"/g, '""');
-              if (isDirectory) {
+              const forCmd = revealPath.replace(/"/g, '""');
+              if (revealIsDirectory) {
                 exec(`explorer.exe "${forCmd}"`, { windowsHide: true }, () => {});
               } else {
                 exec(`explorer.exe /select,"${forCmd}"`, { windowsHide: true }, () => {});
               }
             } else if (platform === "darwin") {
-              spawn("open", isDirectory ? [abs] : ["-R", abs], {
-                detached: true,
-                stdio: "ignore",
-                windowsHide: true,
-              }).unref();
+              if (revealIsDirectory) {
+                spawn("open", [revealPath], {
+                  detached: true,
+                  stdio: "ignore",
+                  windowsHide: true,
+                }).unref();
+              } else {
+                spawn("open", ["-R", revealPath], {
+                  detached: true,
+                  stdio: "ignore",
+                  windowsHide: true,
+                }).unref();
+              }
             } else {
-              spawn("xdg-open", [isDirectory ? abs : path.dirname(abs)], {
+              spawn("xdg-open", [revealIsDirectory ? revealPath : path.dirname(revealPath)], {
                 detached: true,
                 stdio: "ignore",
                 windowsHide: true,
               }).unref();
             }
-            sendJson(response, 200, { ok: true, absolutePath: abs });
+
+            sendJson(response, 200, {
+              ok: true,
+              absolutePath: revealPath,
+              createdDirectory: created,
+            });
           } catch (error) {
             sendJson(response, 500, {
               error: error instanceof Error ? error.message : "reveal failed",

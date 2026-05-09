@@ -36,7 +36,8 @@ import {
     refreshGlobalSettingsWorkbench as _refreshGlobalSettingsWorkbench,
     bindGlobalCutscenePanel as _bindGlobalCutscenePanel,
     bindGlobalSettingsChrome as _bindGlobalSettingsChrome,
-    renderGlobalCutsceneOverview as _renderGlobalCutsceneOverview
+    renderGlobalCutsceneOverview as _renderGlobalCutsceneOverview,
+    renderGlobalCutsceneEditor as _renderGlobalCutsceneEditor
 } from './editor/global-settings.js';
 import { renderMap as _renderMap } from './editor/map-render.js';
 import { handleCellAction as _handleCellAction, moveActor as _moveActor, moveMarker as _moveMarker, eraseCellAt as _eraseCellAt, selectGridCellObject as _selectGridCellObject, mapGridPickCellFromClientPoint as _mapGridPickCellFromClientPoint } from './editor/map-edit.js';
@@ -339,6 +340,18 @@ import {
         btnOpenIntroVideoLocation: document.getElementById('btnOpenIntroVideoLocation'),
         btnAddWaveVideo: document.getElementById('btnAddWaveVideo'),
         waveVideoList: document.getElementById('waveVideoList'),
+        cutsceneAiRefImage: document.getElementById('cutsceneAiRefImage'),
+        cutsceneAiRefUrl: document.getElementById('cutsceneAiRefUrl'),
+        cutsceneAiRefThumb: document.getElementById('cutsceneAiRefThumb'),
+        cutsceneAiRefMetaLine: document.getElementById('cutsceneAiRefMetaLine'),
+        btnCutsceneAiClearRefPhoto: document.getElementById('btnCutsceneAiClearRefPhoto'),
+        cutsceneAiPrompt: document.getElementById('cutsceneAiPrompt'),
+        btnCutsceneAiGenerateIntro: document.getElementById('btnCutsceneAiGenerateIntro'),
+        exploreBossCutsceneInfo: document.getElementById('exploreBossCutsceneInfo'),
+        exploreBossCutsceneFile: document.getElementById('exploreBossCutsceneFile'),
+        btnExploreBossCutsceneAi: document.getElementById('btnExploreBossCutsceneAi'),
+        btnClearExploreBossCutscene: document.getElementById('btnClearExploreBossCutscene'),
+        exploreBossCutsceneTitle: document.getElementById('exploreBossCutsceneTitle'),
         createLevelModal: document.getElementById('createLevelModal'),
         btnCancelCreateLevel: document.getElementById('btnCancelCreateLevel'),
         newLevelName: document.getElementById('newLevelName'),
@@ -1335,7 +1348,121 @@ import {
 
     async function revealProjectPathInExplorer(projectPath) {
         await _revealProjectPathInExplorer(projectPath);
-        setStatus('已在资源管理器中定位视频文件', 'success');
+        setStatus('已在资源管理器中打开保存位置（若目录不存在已自动创建）', 'success');
+    }
+
+    function refreshAllCutsceneUis() {
+        renderCutsceneEditor();
+        _renderGlobalCutsceneEditor(refs, globalSettingsEnv());
+        _renderGlobalCutsceneOverview(refs, globalSettingsEnv());
+    }
+
+    async function generateCutsceneVideo(options) {
+        var scope = options.scope || 'intro';
+        var level = options.level || getLevel();
+        if (!level || !level.map) throw new Error('请先选择关卡');
+        var cityContext = levelVideoCityContext(level) || getGameplayCityContext();
+        if (!cityContext) throw new Error('关卡缺少城市信息，无法确定视频保存目录');
+
+        var refUrl = String(options.imagePublicUrl || '').trim();
+        var imageFile = options.imageFile || null;
+        var imageBase64 = '';
+        var imageMimeType = 'image/jpeg';
+        if (!refUrl && imageFile) {
+            imageBase64 = await fileToBase64(imageFile);
+            imageMimeType = imageFile.type || imageMimeType;
+        }
+        if (!refUrl && !imageBase64) throw new Error('请上传参考照片或填写公网图片 URL');
+
+        var promptText = String(options.prompt || '').trim();
+        if (!promptText) throw new Error('请填写提示词');
+
+        var body = {
+            prompt: promptText,
+            imagePublicUrl: refUrl || undefined,
+            imageBase64: imageBase64 || undefined,
+            imageMimeType: imageMimeType,
+            scope: scope,
+            afterWave: options.afterWave,
+            cityCode: cityContext.cityCode,
+            cityName: cityContext.cityName,
+            countryName: String((level.location && level.location.countryName) || ''),
+            levelId: String(level.id || ''),
+            levelName: String(level.name || '')
+        };
+
+        var onProgress = typeof options.onProgress === 'function' ? options.onProgress : null;
+        var maxWaitMs =
+            typeof options.maxWaitMs === 'number' && options.maxWaitMs > 0 ? options.maxWaitMs : 15 * 60 * 1000;
+
+        async function readVideoApiJson(res, resText) {
+            if (!res.ok) throw new Error(parseFetchErrorBody(res.status, resText));
+            try {
+                return JSON.parse(resText);
+            } catch (e) {
+                throw new Error('服务器返回非 JSON');
+            }
+        }
+
+        var startRes = await fetch('/api/generate-cutscene-video', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(Object.assign({}, body, { action: 'start' }))
+        });
+        var startText = await startRes.text();
+        var startJson = await readVideoApiJson(startRes, startText);
+        if (startJson.phase !== 'submitted' || !startJson.taskId) {
+            throw new Error((startJson && startJson.error) || '方舟任务未成功提交');
+        }
+        var taskId = String(startJson.taskId);
+        if (onProgress) {
+            try {
+                onProgress({ taskId: taskId, arkStatusDisplay: '已提交，等待方舟生成' });
+            } catch (_e) {}
+        }
+
+        var pollBody = {
+            action: 'poll',
+            taskId: taskId,
+            scope: scope,
+            afterWave: options.afterWave,
+            cityCode: cityContext.cityCode,
+            cityName: cityContext.cityName,
+            levelId: String(level.id || ''),
+            levelName: String(level.name || '')
+        };
+
+        var deadline = Date.now() + maxWaitMs;
+        while (Date.now() < deadline) {
+            var pollRes = await fetch('/api/generate-cutscene-video', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(pollBody)
+            });
+            var pollText = await pollRes.text();
+            var pollJson = await readVideoApiJson(pollRes, pollText);
+            if (pollJson.phase === 'complete') {
+                var result = Object.assign({}, pollJson);
+                delete result.phase;
+                return result;
+            }
+            if (pollJson.phase === 'failed') {
+                throw new Error((pollJson && pollJson.error) || '方舟视频任务失败');
+            }
+            if (pollJson.phase === 'processing') {
+                if (onProgress) {
+                    try {
+                        onProgress(pollJson);
+                    } catch (_e) {}
+                }
+                await new Promise(function (resolve) {
+                    setTimeout(resolve, 2500);
+                });
+                continue;
+            }
+            throw new Error((pollJson && pollJson.error) || '意外的视频生成状态');
+        }
+        throw new Error('等待方舟视频超时，请稍后重试或在火山方舟控制台查看任务进度');
     }
 
     /** 获取或初始化当前关卡的 cutscenes 对象 */
@@ -1352,7 +1479,12 @@ import {
             setStatus: setStatus,
             renderGlobalCutsceneOverview: renderGlobalCutsceneOverview,
             revealProjectPathInExplorer: revealProjectPathInExplorer,
-            refreshCutscenePanel: renderCutsceneEditor
+            refreshCutscenePanel: renderCutsceneEditor,
+            refreshAllCutsceneUis: refreshAllCutsceneUis,
+            generateCutsceneVideo: generateCutsceneVideo,
+            rememberEditorCutsceneAsset: function (payload) {
+                _rememberEditorAsset(gameAssetEnv(), payload, 'cutscene-video');
+            }
         };
     }
 

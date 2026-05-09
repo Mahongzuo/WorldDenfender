@@ -3180,6 +3180,7 @@ input[type="range"].audio-volume-slider {
 }
 .game-asset-upload,
 label.game-asset-upload {
+    position: relative;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -3205,7 +3206,33 @@ label.game-asset-upload {
 
 .game-asset-upload input,
 .game-asset-upload.tight input {
-    display: none;
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    opacity: 0;
+    cursor: pointer;
+    font-size: 0;
+}
+
+/** 共用参考图等：选图后的缩略与说明 */
+.cutscene-ai-ref-status {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+}
+
+.cutscene-ai-ref-thumb {
+    flex: 0 0 auto;
+    width: 140px;
+    height: 140px;
+    object-fit: cover;
+    border-radius: 8px;
+    border: 1px solid var(--editor-line, #354);
+    background: rgba(255, 255, 255, 0.04);
 }
 
 .game-asset-scale,

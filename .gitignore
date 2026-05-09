@@ -7,3 +7,6 @@ node_modules/
 
 # 本地 IDE 配置，不进入版本库
 .cursor/
+
+# 方舟图生视频临时参考图（可由 dev 服务器公网 URL 拉取）
+public/Arts/TempVolcRef/

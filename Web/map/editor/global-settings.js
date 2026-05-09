@@ -162,7 +162,7 @@ export function renderGlobalCutsceneOverview(refs, env) {
     ].join('');
 }
 
-function renderGlobalCutsceneEditor(refs, env) {
+export function renderGlobalCutsceneEditor(refs, env) {
     if (!refs.gIntroVideoInfo) return;
     var level = getGlobalCutsceneTargetLevel(env);
     if (!level || !level.map) {

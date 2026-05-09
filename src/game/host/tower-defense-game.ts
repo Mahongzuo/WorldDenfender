@@ -1209,6 +1209,9 @@ export class TowerDefenseGame {
           return null;
         }
       },
+      onExploreBossDefeated: () => {
+        this.scheduleExploreBossVictoryCutscene();
+      },
     };
   }
 
@@ -2287,6 +2290,18 @@ export class TowerDefenseGame {
     if (!entry?.url) return;
     this.cutsceneActive = true;
     void playCutsceneIfPresent(entry).then(() => {
+      this.cutsceneActive = false;
+    });
+  }
+
+  /** 探索地图：击倒 AI Boss 后播放配置的胜利过场视频 */
+  private scheduleExploreBossVictoryCutscene(): void {
+    if (this.cutsceneActive) return;
+    const map = EXPLORE_MAPS[this.exploreMapIndex];
+    const cut = map?.cutscenes?.exploreBossVictoryVideo;
+    if (!cut?.url) return;
+    this.cutsceneActive = true;
+    void playCutsceneIfPresent(cut).finally(() => {
       this.cutsceneActive = false;
     });
   }

@@ -321,6 +321,8 @@ export interface LevelCutsceneConfig {
   introVideo?: LevelCutscene;
   /** 各波次结束后播放的视频；按 afterWave 排列 */
   waveVideos?: WaveCutscene[];
+  /** 探索模式：非重生 AI Boss 被击倒后播放的过场视频 */
+  exploreBossVictoryVideo?: LevelCutscene;
 }
 
 export interface MapDefinition {

@@ -541,12 +541,55 @@
                             </label>
                         </div>
 
+                        <div class="section-title-row"><h3>火山方舟 · 图生视频</h3></div>
+                        <p class="section-hint">需在 <code>.env.local</code> 配置 <code>VOLCENGINE_ARK_API_KEY</code>（或 <code>ARK_API_KEY</code>）。本地上传的参考图会先以内联 <code>data:image/…;base64</code> 提交给方舟（默认可到约 8MB 解码体积，可用 <code>VOLCENGINE_ARK_IMAGE_INLINE_MAX_MB</code> 调整）；超大图或方舟拒收内联时请配置 <code>VOLCENGINE_ARK_PUBLIC_BASE_URL</code>（站点 <code>public</code> 对外可访问的根 URL）或直接使用公网图片 URL。模型默认 <code>doubao-seedance-1-5-pro-251215</code>，可通过 <code>VOLCENGINE_ARK_VIDEO_MODEL</code> 覆盖。</p>
+                        <div class="form-grid two">
+                            <label class="game-asset-upload" style="flex:1;">
+                                共用参考照片
+                                <input type="file" id="cutsceneAiRefImage" accept="image/*">
+                            </label>
+                            <label class="field-block">
+                                <span>或公网图片 URL</span>
+                                <input type="text" id="cutsceneAiRefUrl" placeholder="https://…" autocomplete="off">
+                            </label>
+                        </div>
+                        <div id="cutsceneAiRefStatus" class="cutscene-ai-ref-status section-hint">
+                            <img id="cutsceneAiRefThumb" class="cutscene-ai-ref-thumb" alt="参考预览" width="140" height="140" loading="lazy" hidden />
+                            <div style="flex:1;min-width:140px;">
+                                <div id="cutsceneAiRefMetaLine" style="min-height:1.35em;line-height:1.35;word-break:break-all;"></div>
+                                <button type="button" class="mini-button" id="btnCutsceneAiClearRefPhoto" hidden>清除所选照片</button>
+                            </div>
+                        </div>
+                        <label class="field-block">
+                            <span>共用提示词（可含 <code>--duration</code> 等 Seedance 参数）</span>
+                            <textarea id="cutsceneAiPrompt" rows="3" placeholder="例如：无人机快速穿过城市天际线，电影感调色，济南夜景 …"></textarea>
+                        </label>
+                        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
+                            <button type="button" class="mini-button accent" id="btnCutsceneAiGenerateIntro">AI 生成并设为开场视频</button>
+                        </div>
+
                         <div class="section-title-row">
                             <h3>波次过场视频</h3>
                             <button type="button" class="mini-button" id="btnAddWaveVideo">＋ 添加</button>
                         </div>
-                        <p class="section-hint">设置在某波次结束后播放的视频；如未上传或波次无对应视频则自动跳过。</p>
+                        <p class="section-hint">设置在某波次结束后播放的视频；如未上传或波次无对应视频则自动跳过。每行可使用「AI 生成」基于上方参考图与提示词生成该波次视频。</p>
                         <div id="waveVideoList" class="wave-video-list"></div>
+
+                        <div class="section-title-row"><h3>探索：击败 AI Boss 过场</h3></div>
+                        <p class="section-hint">探索模式下击倒任意带 placement 的 Boss（非重生）后全屏播放；塔防波次过场与此独立。可与上方相同的参考图与提示词做 AI 生成。</p>
+                        <div id="exploreBossCutsceneInfo" class="section-hint" style="word-break:break-all;min-height:1.2em;"></div>
+                        <div class="form-grid three" style="align-items:end;margin-bottom:8px;">
+                            <label class="game-asset-upload" style="flex:1;">
+                                上传 Boss 击败视频
+                                <input type="file" id="exploreBossCutsceneFile" accept="video/mp4,video/webm,video/ogg,video/*">
+                            </label>
+                            <button type="button" class="mini-button accent" id="btnExploreBossCutsceneAi">AI 生成并绑定</button>
+                            <button type="button" class="mini-button" id="btnClearExploreBossCutscene">清除</button>
+                        </div>
+                        <label class="field-block">
+                            <span>Boss 过场字幕（可选）</span>
+                            <input type="text" id="exploreBossCutsceneTitle" placeholder="留空则不显示字幕">
+                        </label>
 
                         <section class="inspector-section theme-audio-stack" id="levelAudioSection" aria-label="关卡配乐与音效">
                             <div class="panel-head panel-head-tight">

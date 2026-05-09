@@ -83,7 +83,7 @@ export var BUILT_IN_CITY_LAYOUTS = {
     },
     jinan: {
         aliases: ['济南', '济南市', '山东·济南', '山东 · 济南', '中国·济南', '中国 · 济南', '中国 · 济南市'],
-        defenseName: '济南·泉港栈桥',
+        defenseName: '济南·泉港曲栈',
         exploreName: '济南·趵突露台',
         geo: CITY_GEO_CONFIGS.jinan,
         defense: {
