@@ -11,6 +11,10 @@ import type { DefenseDamageSource } from "../core/defense-types";
 import { buildDefenseDamageSource } from "./defense-damage";
 import { applyBuildingEffectsToEnemy } from "./defense-status";
 
+/** 所有可造成伤害的防御塔（不含治疗/纯装置）在未配置 critChance 时的基础暴击率 */
+const DEFAULT_TOWER_CRIT_CHANCE = 0.05;
+const DEFAULT_TOWER_CRIT_DAMAGE_MULT = 2;
+
 /** 与各塔 procedural 网格大致匹配的炮口局部偏移 */
 const PRESET_TOWER_MUZZLE_LOCAL: Partial<Record<BuildId, THREE.Vector3>> = {
   machine: new THREE.Vector3(0, 0.9, -0.78),
@@ -28,7 +32,12 @@ export interface TowerDefenseCombatTickDeps {
   fxGroup: THREE.Group;
   elapsed: number;
   aimWorldCenter: (enemy: Enemy) => THREE.Vector3;
-  damageEnemy(enemy: Enemy, damage: number, source?: DefenseDamageSource): void;
+  damageEnemy(
+    enemy: Enemy,
+    damage: number,
+    source?: DefenseDamageSource,
+    meta?: { critical?: boolean },
+  ): void;
   addBeam(from: THREE.Vector3, to: THREE.Vector3, color: number): void;
   onTowerFired?(building: Building): void;
 }
@@ -38,6 +47,24 @@ function towerProjectileMuzzleWorld(building: Building): THREE.Vector3 {
   const local =
     PRESET_TOWER_MUZZLE_LOCAL[building.spec.id]?.clone() ?? DEFAULT_PRESET_MUZZLE_LOCAL.clone();
   return building.mesh.localToWorld(local);
+}
+
+function isDamageDealingDefenseTower(building: Building): boolean {
+  return building.spec.category === "tower" && building.spec.role !== "healer";
+}
+
+/** 对每个受击敌人独立掷骰暴击（溅射每名敌人各自判定）。 */
+function rollTowerStrikeDamage(building: Building): { damage: number; critical: boolean } {
+  let damage = Math.max(0, building.spec.damage ?? 0);
+  if (!isDamageDealingDefenseTower(building) || damage <= 0) {
+    return { damage, critical: false };
+  }
+  const chance = building.spec.critChance ?? DEFAULT_TOWER_CRIT_CHANCE;
+  const mult = building.spec.critDamageMult ?? DEFAULT_TOWER_CRIT_DAMAGE_MULT;
+  if (Math.random() < Math.min(1, Math.max(0, chance))) {
+    return { damage: damage * mult, critical: true };
+  }
+  return { damage, critical: false };
 }
 
 function applyTowerEffects(
@@ -77,14 +104,16 @@ function fireAt(deps: TowerDefenseCombatTickDeps, building: Building, target: En
     for (const enemy of [...deps.enemies]) {
       if (distanceXZ(anchor, enemy.mesh.position) <= splashRadiusWorld) {
         applyTowerEffects(deps, building, enemy);
-        deps.damageEnemy(enemy, building.spec.damage ?? 0, damageSource);
+        const { damage, critical } = rollTowerStrikeDamage(building);
+        deps.damageEnemy(enemy, damage, damageSource, { critical });
       }
     }
     return;
   }
 
   applyTowerEffects(deps, building, target);
-  deps.damageEnemy(target, building.spec.damage ?? 0, damageSource);
+  const one = rollTowerStrikeDamage(building);
+  deps.damageEnemy(target, one.damage, damageSource, { critical: one.critical });
 }
 
 export function tickTowerDefenseCombat(dt: number, deps: TowerDefenseCombatTickDeps): void {
@@ -101,7 +130,8 @@ export function tickTowerDefenseCombat(dt: number, deps: TowerDefenseCombatTickD
         const damageSource = buildDefenseDamageSource(building.spec);
         for (const e of building.blockingEnemies) {
           applyBuildingEffectsToEnemy(building, e, deps.elapsed);
-          deps.damageEnemy(e, building.spec.damage ?? 0, damageSource);
+          const meleeHit = rollTowerStrikeDamage(building);
+          deps.damageEnemy(e, meleeHit.damage, damageSource, { critical: meleeHit.critical });
           dealt = true;
         }
         if (dealt) {

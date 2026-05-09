@@ -19,6 +19,22 @@ export function presentGameOverScreen(deps: GameOverPresenterDeps): void {
   deps.gameOverPanel.setAttribute("aria-hidden", "false");
 }
 
+export interface VictoryScreenDeps {
+  getVictoryActive: () => boolean;
+  setVictoryActive: (v: boolean) => void;
+  victoryReasonElement: HTMLElement;
+  victoryPanel: HTMLElement;
+  victoryTitleElement: HTMLElement;
+}
+
+export function presentVictoryScreen(deps: VictoryScreenDeps, reason: string): void {
+  if (deps.getVictoryActive()) return;
+  deps.setVictoryActive(true);
+  deps.victoryTitleElement.textContent = "\u80dc\u5229"; // 胜利
+  deps.victoryReasonElement.textContent = reason;
+  deps.victoryPanel.setAttribute("aria-hidden", "false");
+}
+
 export interface SharedRunFailureCleanupDeps {
   getGachaOpen: () => boolean;
   closeGacha: () => void;

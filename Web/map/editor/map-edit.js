@@ -189,7 +189,7 @@ export function handleCellAction(env, col, row) {
         if (env.getActiveTool() === 'objective') setObjectivePoint(env, col, row);
     }
     if (env.getActiveTool() === 'explorePoint') addExplorePoint(env, col, row);
-    if (env.getActiveTool() === 'actor') env.placeActorFromTemplate(env.getSelectedTemplateId(), col, row);
+    if (env.getActiveTool() === 'actor') env.placeActorFromCatalogModel(env.getSelectedActorPlacementModelId(), col, row);
     if (env.getActiveTool() === 'erase') env.applyEraserBrush(col, row);
     level.status = level.status === 'draft' ? 'needs-work' : level.status;
     env.markDirty('已更新地图');

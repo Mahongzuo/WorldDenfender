@@ -1,5 +1,6 @@
 import { BUILD_SPECS, GACHA_POOLS } from "../data/content";
-import { INITIAL_BASE_HP } from "../core/game-config";
+import { INITIAL_BASE_HP, DEFENSE_STANDARD_WAVE_COUNT } from "../core/game-config";
+import { formatDefenseDifficultyHud, type DefenseDifficultyTier } from "../defense/defense-difficulty";
 import type { GameEconomy } from "../economy/game-economy";
 import type {
   Building,
@@ -46,9 +47,17 @@ export interface GameplayHudModels {
   currentCityCode: string;
   currentMapId: string;
   buildings: readonly Building[];
+  /** 塔防当前地图 defenseFlavor.towerNames，用于 HUD 展示 */
+  defenseTowerNameOverrides?: Partial<Record<BuildId, string>>;
+  defenseVictoryAwaitingChoice?: boolean;
+  defenseEndless?: boolean;
+  /** 仅在塔防 HUD 有意义 */
+  defenseDifficultyTier?: DefenseDifficultyTier;
 }
 
 export function refreshGameplayHud(dom: GameplayHudDom, m: GameplayHudModels): void {
+  const towerHudName = (id: BuildId) => m.defenseTowerNameOverrides?.[id] ?? BUILD_SPECS[id].name;
+
   dom.modeElement.textContent = m.mode === "defense" ? "\u5854\u9632\u6a21\u5f0f" : "\u81ea\u7531\u63a2\u7d22";
   dom.moneyElement.textContent = `$${Math.round(m.economy.balance)}`;
   dom.cameraModeElement.textContent =
@@ -58,11 +67,23 @@ export function refreshGameplayHud(dom: GameplayHudDom, m: GameplayHudModels): v
         ? "\u6218\u672f\u4fef\u89c6"
         : "\u659c\u89c6\u5de1\u822a";
   dom.baseHpElement.textContent = `${m.baseHp}/${INITIAL_BASE_HP}`;
-  const waveText = m.waveActive
-    ? `\u7b2c ${m.wave} \u6ce2 \u00b7 \u5269\u4f59 ${m.spawnRemaining + m.enemiesAlive}`
-    : `\u7b2c ${m.wave} \u6ce2 \u00b7 ${Math.ceil(m.nextWaveDelay)}s`;
+  const awaiting =
+    !!(m.defenseVictoryAwaitingChoice && m.mode === "defense");
+  let waveText: string;
+  if (awaiting) {
+    waveText = `\u7b2c ${DEFENSE_STANDARD_WAVE_COUNT} \u6ce2\u5df2\u6e05 \u00b7 \u8bf7\u9009\u62e9\u901a\u5173\u6216\u65e0\u5c3d`;
+  } else if (m.waveActive) {
+    waveText = `\u7b2c ${m.wave} \u6ce2 \u00b7 \u5269\u4f59 ${m.spawnRemaining + m.enemiesAlive}`;
+  } else {
+    waveText = `\u7b2c ${m.wave} \u6ce2 \u00b7 ${Math.ceil(m.nextWaveDelay)}s`;
+  }
+  if (m.mode === "defense" && m.defenseEndless && !awaiting) {
+    waveText = `${waveText} \u00b7 \u65e0\u5c3d`;
+  }
+  const diffHud =
+    m.defenseDifficultyTier != null ? ` \u00b7 ${formatDefenseDifficultyHud(m.defenseDifficultyTier)}` : "";
   dom.waveElement.textContent =
-    m.mode === "defense" ? waveText : `\u540e\u53f0 ${waveText}`;
+    m.mode === "defense" ? `${waveText}${diffHud}` : `\u540e\u53f0 ${waveText}${diffHud}`;
   dom.mapNameElement.textContent = m.activeMapLabel;
   dom.dropHudElement.textContent =
     m.mode === "explore"
@@ -70,7 +91,7 @@ export function refreshGameplayHud(dom: GameplayHudDom, m: GameplayHudModels): v
       : "\u5207\u5230\u63a2\u7d22";
 
   const spec = BUILD_SPECS[m.selectedBuild];
-  dom.selectedBuildSummaryElement.textContent = `\u5f53\u524d\uff1a${spec.name}\uff08$${spec.cost}\uff09${
+  dom.selectedBuildSummaryElement.textContent = `\u5f53\u524d\uff1a${towerHudName(m.selectedBuild)}\uff08$${spec.cost}\uff09${
     spec.requiresUnlock && !m.economy.sTowerUnlocked ? " \u00b7 \u672a\u89e3\u9501" : ""
   }`;
   dom.gachaPullsElement.textContent = String(m.economy.freePulls);
@@ -84,7 +105,7 @@ export function refreshGameplayHud(dom: GameplayHudDom, m: GameplayHudModels): v
 
   if (m.selectedBuilding) {
     dom.selectedUnitPanel.style.display = "flex";
-    dom.selectedUnitName.textContent = m.selectedBuilding.spec.name;
+    dom.selectedUnitName.textContent = towerHudName(m.selectedBuilding.spec.id);
     dom.selectedUnitStats.textContent = `\u751f\u547d\uff1a${Math.ceil(m.selectedBuilding.hp)}/${
       m.selectedBuilding.spec.maxHp ?? 1
     } | \u653b\u51fb\uff1a${m.selectedBuilding.spec.damage ?? 0}`;

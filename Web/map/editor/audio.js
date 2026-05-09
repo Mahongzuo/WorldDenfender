@@ -1,6 +1,85 @@
 import { TOWER_MODEL_SPECS } from './content.js';
+import { projectPathFromVideoPublicUrl as projectPathFromPublicUrl } from './cutscene-utils.js';
+import { levelVideoCityContext } from './display-utils.js';
 import { normalizeGlobalAudio, normalizeLevelAudioSource } from './normalizers.js';
 import { escapeAttr, escapeHtml, editorPctFromVol01 } from './utils.js';
+
+function sanitizeProjectSegment(value) {
+    return String(value || '')
+        .normalize('NFC')
+        .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .replace(/[. ]+$/g, '')
+        .slice(0, 80);
+}
+
+function levelAudioProjectDirectory(level) {
+    var cityContext = levelVideoCityContext(level);
+    if (!cityContext || !cityContext.cityName) return '';
+    var cityDir = sanitizeProjectSegment(cityContext.cityName);
+    if (!cityDir) return '';
+    return ['public', 'Arts', 'LevelAudio', cityDir].join('/');
+}
+
+function firstLevelAudioProjectPath(levelAudio) {
+    if (!levelAudio || typeof levelAudio !== 'object') return '';
+    var candidates = [];
+    if (levelAudio.defenseBgmUrl) candidates.push(levelAudio.defenseBgmUrl);
+    if (levelAudio.exploreBgmUrl) candidates.push(levelAudio.exploreBgmUrl);
+    if (levelAudio.towerAttackSfxByBuildId && typeof levelAudio.towerAttackSfxByBuildId === 'object') {
+        TOWER_MODEL_SPECS.forEach(function (spec) {
+            var value = String(levelAudio.towerAttackSfxByBuildId[spec.id] || '').trim();
+            if (value) candidates.push(value);
+        });
+    }
+    for (var index = 0; index < candidates.length; index += 1) {
+        var projectPath = projectPathFromPublicUrl(candidates[index]);
+        if (projectPath) return projectPath;
+    }
+    return '';
+}
+
+function effectiveLevelAudioOpenPath(levelAudio, level) {
+    return firstLevelAudioProjectPath(levelAudio) || levelAudioProjectDirectory(level);
+}
+
+function buildLevelAudioLocationText(levelAudio, level) {
+    var openPath = effectiveLevelAudioOpenPath(levelAudio, level);
+    var configured = [];
+    if (levelAudio.defenseBgmUrl) configured.push('塔防 BGM 已配置');
+    if (levelAudio.exploreBgmUrl) configured.push('探索 BGM 已配置');
+    var towerCount = 0;
+    if (levelAudio.towerAttackSfxByBuildId && typeof levelAudio.towerAttackSfxByBuildId === 'object') {
+        towerCount = Object.keys(levelAudio.towerAttackSfxByBuildId).filter(function (key) {
+            return !!String(levelAudio.towerAttackSfxByBuildId[key] || '').trim();
+        }).length;
+    }
+    if (towerCount) configured.push('塔开火音效 ' + towerCount + ' 项');
+    var lines = [];
+    if (openPath) {
+        lines.push('项目保存位置：' + openPath);
+    } else {
+        lines.push('当前还无法推断关卡声音目录；如果关卡未设置城市信息，上传会先回退到 public/GameModels/Audio。');
+    }
+    lines.push('上传成功后会自动填充链接，无需玩家手动输入。');
+    if (configured.length) lines.push('当前配置：' + configured.join('，'));
+    return lines.join('\n');
+}
+
+function buildLevelAudioUploadOptions(level, resourceKind, assetName) {
+    if (levelAudioProjectDirectory(level)) {
+        return {
+            assetType: 'LevelAudio',
+            resourceKind: resourceKind,
+            assetName: assetName
+        };
+    }
+    return {
+        gameModelsUpload: true,
+        gameModelsSubdir: 'Audio'
+    };
+}
 
 function applyVolSliderDisp(sliderId, dispId, vol01, fallbackPct) {
     var slider = document.getElementById(sliderId);
@@ -38,21 +117,35 @@ export function renderLevelAudioFields(refs, level) {
     var levelAudio = ensureLevelMapAudio(level.map);
     var defenseInput = document.getElementById('levelAudioDefenseBgmUrl');
     var exploreInput = document.getElementById('levelAudioExploreBgmUrl');
+    var openButton = document.getElementById('btnOpenLevelAudioLocation');
+    var locationInfo = document.getElementById('levelAudioLocationInfo');
     if (defenseInput) defenseInput.value = levelAudio.defenseBgmUrl || '';
     if (exploreInput) exploreInput.value = levelAudio.exploreBgmUrl || '';
+    if (locationInfo) locationInfo.textContent = buildLevelAudioLocationText(levelAudio, level);
+    if (openButton) {
+        var openPath = effectiveLevelAudioOpenPath(levelAudio, level);
+        openButton.disabled = !openPath;
+        openButton.title = firstLevelAudioProjectPath(levelAudio)
+            ? '在文件管理器中定位当前关卡声音文件'
+            : openPath
+                ? '打开当前关卡的声音保存目录'
+                : '无法推断当前关卡的声音目录';
+    }
     refs.levelAudioTowerRows.innerHTML = TOWER_MODEL_SPECS.map(function (spec) {
         var url = (levelAudio.towerAttackSfxByBuildId && levelAudio.towerAttackSfxByBuildId[spec.id]) || '';
         return [
             '<div class="game-asset-tower-row level-audio-tower-row">',
             '  <div class="game-asset-tower-title">' + escapeHtml(spec.key + ' · ' + spec.name + ' 开火') + '</div>',
-            '  <input type="text" class="field-inline level-audio-tower-url" data-level-tower-sfx-id="' +
+            '  <div class="theme-audio-tower-controls">',
+            '    <input type="text" class="field-inline level-audio-tower-url" data-level-tower-sfx-id="' +
                 escapeAttr(spec.id) +
-                '" placeholder="URL" value="' +
+                '" placeholder="上传后自动回填 URL" value="' +
                 escapeAttr(url) +
                 '" />',
-            '  <label class="game-asset-upload tight">上传<input type="file" data-level-tower-sfx-file="' +
+            '    <label class="game-asset-upload tight theme-audio-inline-upload">上传<input type="file" data-level-tower-sfx-file="' +
                 escapeAttr(spec.id) +
                 '" accept=".mp3,.wav,.ogg,.m4a,audio/*" /></label>',
+            '  </div>',
             '</div>'
         ].join('');
     }).join('');
@@ -131,6 +224,22 @@ export function bindLevelAudioUi(refs, env) {
             env.markDirty('已更新关卡探索 BGM');
         });
     }
+    var openButton = document.getElementById('btnOpenLevelAudioLocation');
+    if (openButton && openButton.dataset.bound !== '1') {
+        openButton.dataset.bound = '1';
+        openButton.addEventListener('click', function () {
+            var level = env.getLevel();
+            var levelAudio = currentLevelAudio();
+            var openPath = effectiveLevelAudioOpenPath(levelAudio, level);
+            if (!openPath) {
+                env.setStatus('无法推断该关卡的声音目录，请先设置城市信息或上传声音文件', 'error');
+                return;
+            }
+            void env.revealProjectPathInExplorer(openPath).catch(function (error) {
+                env.setStatus((error && error.message) || '打开资源管理器失败', 'error');
+            });
+        });
+    }
     function bindBgmFile(inputId, field) {
         var input = document.getElementById(inputId);
         if (!input) return;
@@ -141,7 +250,10 @@ export function bindLevelAudioUi(refs, env) {
             (async function () {
                 try {
                     env.setStatus('正在上传「' + file.name + '」…', 'idle');
-                    var url = await env.uploadFileToProjectUrl(file, { gameModelsUpload: true, gameModelsSubdir: 'Audio' });
+                    var level = env.getLevel();
+                    var resourceKind = field === 'defenseBgmUrl' ? 'level-defense-bgm' : 'level-explore-bgm';
+                    var assetName = field === 'defenseBgmUrl' ? 'defense-bgm' : 'explore-bgm';
+                    var url = await env.uploadFileToProjectUrl(file, buildLevelAudioUploadOptions(level, resourceKind, assetName));
                     var levelAudio = currentLevelAudio();
                     if (!levelAudio) return;
                     levelAudio[field] = url;
@@ -188,7 +300,8 @@ export function bindLevelAudioUi(refs, env) {
         (async function () {
             try {
                 env.setStatus('正在上传「' + file.name + '」…', 'idle');
-                var url = await env.uploadFileToProjectUrl(file, { gameModelsUpload: true, gameModelsSubdir: 'Audio' });
+                var level = env.getLevel();
+                var url = await env.uploadFileToProjectUrl(file, buildLevelAudioUploadOptions(level, 'level-tower-attack-sfx', 'tower-attack-' + id));
                 var levelAudio = currentLevelAudio();
                 if (!levelAudio) return;
                 if (!levelAudio.towerAttackSfxByBuildId) levelAudio.towerAttackSfxByBuildId = {};

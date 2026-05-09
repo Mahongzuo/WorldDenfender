@@ -15,6 +15,31 @@ import {
 } from "../core/runtime-grid";
 import type { GameMode, GridCell, MapDefinition } from "../core/types";
 
+/** 济南/泉城系整块底板占位 URL（仓库无资源时仍会走加载失败兜底） */
+const JINAN_REGIONAL_FALLBACK_BOARD_URL = "/Arts/Maps/jinan_full_map.png";
+
+/**
+ * 泉城风「整块底板 + 高光路径」：无 theme.boardTextureUrl 时仍可启用。
+ * 选关入口可能没带 `city=jinan`，编辑器 id 常为 CN_shandong…。
+ */
+function mapEligibleForJinanRegionalFlatPreset(map: MapDefinition, currentCity: string): boolean {
+  if (currentCity === "jinan") {
+    return true;
+  }
+  const id = map.id.toLowerCase();
+  const name = map.name ?? "";
+  if (id.includes("jinan")) {
+    return true;
+  }
+  if (/(泉城|济南|闯荡山东|山东[^\s·]*济南|370100)/u.test(name)) {
+    return true;
+  }
+  if (/(quan[cheng]?|jinan|shandong|370100)/i.test(id)) {
+    return true;
+  }
+  return false;
+}
+
 /** 障碍物顶面纯色（不用贴图）：始终由底色与 accent 混合，避免出现贴图 UV + 高光造成的「发白顶」 */
 function obstacleTopFaceTint(obstacleHex: number, accentHex: number): number {
   const base = new THREE.Color(obstacleHex);
@@ -117,14 +142,16 @@ export function renderRuntimeMapScene(options: {
     polygonOffsetUnits: -2.4,
   });
 
-  const isJinan = currentCity === "jinan" || map.id.startsWith("jinan");
+  const isJinanRegion = mapEligibleForJinanRegionalFlatPreset(map, currentCity);
   const isBeijing = currentCity === "beijing" || map.id.startsWith("beijing");
   const usesGeoBackdrop = !!useGeoBackdrop && !!map.geo?.enabled;
   const geoVerticalStretch = usesGeoBackdrop && xzScale > 1 ? xzScale : 1;
   const trimmedBoard = (map.theme.boardTextureUrl ?? "").trim();
   const hasCustomBoardImage = trimmedBoard.length > 0;
-  const jinanPresetBoard = isJinan && !hasCustomBoardImage;
-  const flatBoardMode = !usesGeoBackdrop && (jinanPresetBoard || hasCustomBoardImage);
+  /** 整块底板平面（泉城预设或编辑器 theme.boardTextureUrl）；地理映射开启时也使用，与关底板一致的可读棋盘 */
+  const jinanRegionalFlatPreset = isJinanRegion && !hasCustomBoardImage;
+  /** 程序化格子 +  voxel 路径换为整块贴图 + 平面路径条带 */
+  const surfaceBoardPresentation = jinanRegionalFlatPreset || hasCustomBoardImage;
   const pathGlowOpacity = map.theme.pathGlowOpacity ?? 0.46;
   const pathDetailOpacity = map.theme.pathDetailOpacity ?? 0.82;
   scene.background = new THREE.Color(usesGeoBackdrop ? 0x9eb8c4 : map.theme.fog);
@@ -174,20 +201,16 @@ export function renderRuntimeMapScene(options: {
       obstacleTopMat,
       obstacleBottomMat,
     ]);
-    const groundOpacity = map.theme.geoTileOpacity ?? 0.48;
-    for (const m of [groundMaterial, groundAltMaterial]) {
-      m.transparent = true;
-      m.opacity = groundOpacity;
-      m.depthWrite = false;
+    /** 地理底板开启时也不再半透棋盘：与关闭映射一致（opaque + depthWrite），否则血条/弹道易与远景底板穿插 */
+    for (const m of [groundMaterial, groundAltMaterial, pathMaterial]) {
+      m.transparent = false;
+      m.opacity = 1;
+      m.depthWrite = true;
       m.needsUpdate = true;
     }
-    pathMaterial.transparent = true;
-    pathMaterial.opacity = map.theme.geoPathOpacity ?? 0.92;
-    pathMaterial.depthWrite = false;
-    pathMaterial.needsUpdate = true;
   }
 
-  if (usesGeoBackdrop || (!flatBoardMode && !isJinan)) {
+  if (usesGeoBackdrop || (!surfaceBoardPresentation && !isJinanRegion)) {
     addBoardBase(mapGroup, map, usesGeoBackdrop);
   }
   if (usesGeoBackdrop) {
@@ -217,7 +240,9 @@ export function renderRuntimeMapScene(options: {
       const position = cellToWorld(cell);
 
       if (pathCells.has(key)) {
-        if (usesGeoBackdrop) {
+        if (surfaceBoardPresentation) {
+          addPathOverlayTile(mapGroup, position, map.theme.path, pathGlowOpacity);
+        } else if (usesGeoBackdrop) {
           const mesh = new THREE.Mesh(pathGeometry, pathMaterial);
           mesh.position.set(position.x, 0.14, position.z);
           mesh.renderOrder = 6;
@@ -227,9 +252,7 @@ export function renderRuntimeMapScene(options: {
           }
           mapGroup.add(mesh);
           addPathTileDetails(mapGroup, cell, position, map.theme.accent, pathCells, pathDetailOpacity);
-        } else if (flatBoardMode) {
-          addPathOverlayTile(mapGroup, position, map.theme.path, pathGlowOpacity);
-        } else if (isBeijing && !flatBoardMode) {
+        } else if (isBeijing) {
           const plane = new THREE.Mesh(
             new THREE.PlaneGeometry(TILE_SIZE, TILE_SIZE),
             new THREE.MeshStandardMaterial({ 
@@ -250,7 +273,7 @@ export function renderRuntimeMapScene(options: {
           addPathTileDetails(mapGroup, cell, position, map.theme.accent, pathCells, pathDetailOpacity);
         }
       } else if (obstacleCells.has(key)) {
-        if (usesGeoBackdrop) {
+        if (usesGeoBackdrop && !surfaceBoardPresentation) {
           const mesh = new THREE.Mesh(obstacleGeometry, obstacleMaterials);
           mesh.rotation.y = ((col * 17 + row * 11) % 6) * (Math.PI / 6);
           mesh.position.set(position.x, 0.72, position.z);
@@ -260,7 +283,7 @@ export function renderRuntimeMapScene(options: {
             mesh.scale.set(1, geoVerticalStretch, 1);
           }
           mapGroup.add(mesh);
-        } else if (isBeijing && !flatBoardMode) {
+        } else if (isBeijing && !surfaceBoardPresentation) {
           const buildingHeight = 1.0 + (Math.sin(col * 0.5) + Math.cos(row * 0.5)) * 0.5;
           const mesh = new THREE.Mesh(
             new THREE.BoxGeometry(TILE_SIZE * 0.85, buildingHeight, TILE_SIZE * 0.85),
@@ -279,12 +302,12 @@ export function renderRuntimeMapScene(options: {
           mesh.position.set(position.x, 0.72, position.z);
           mesh.castShadow = true;
           mesh.receiveShadow = true;
-          if (!jinanPresetBoard) {
+          if (!jinanRegionalFlatPreset) {
             mapGroup.add(mesh);
           }
         }
       } else {
-        if (usesGeoBackdrop) {
+        if (usesGeoBackdrop && !surfaceBoardPresentation) {
           const mesh = new THREE.Mesh(tileGeometry, (col + row) % 2 === 0 ? groundMaterial : groundAltMaterial);
           mesh.position.set(position.x, -0.01, position.z);
           mesh.receiveShadow = true;
@@ -292,7 +315,7 @@ export function renderRuntimeMapScene(options: {
             mesh.scale.set(1, geoVerticalStretch, 1);
           }
           mapGroup.add(mesh);
-        } else if (isBeijing && !flatBoardMode) {
+        } else if (isBeijing && !surfaceBoardPresentation) {
           // Use pseudo-random biomes for Beijing ground
           const noise = (Math.sin(col * 0.3) + Math.cos(row * 0.3) + 2) / 4;
           let type = "grass";
@@ -324,7 +347,7 @@ export function renderRuntimeMapScene(options: {
           const mesh = new THREE.Mesh(tileGeometry, (col + row) % 2 === 0 ? groundMaterial : groundAltMaterial);
           mesh.position.set(position.x, -0.01, position.z);
           mesh.receiveShadow = true;
-          if (!flatBoardMode) {
+          if (!surfaceBoardPresentation) {
             mapGroup.add(mesh);
           }
         }
@@ -332,22 +355,44 @@ export function renderRuntimeMapScene(options: {
     }
   }
 
-  if (flatBoardMode) {
-    const planeUrl = hasCustomBoardImage ? trimmedBoard : "/Arts/Maps/jinan_full_map.png";
+  if (surfaceBoardPresentation) {
+    const planeUrl = hasCustomBoardImage ? trimmedBoard : JINAN_REGIONAL_FALLBACK_BOARD_URL;
     const textureLoader = new THREE.TextureLoader();
-    const texture = textureLoader.load(planeUrl);
-    texture.colorSpace = THREE.SRGBColorSpace;
+    const provisionalMap = createBoardTexture(map.theme.ground, map.theme.groundAlt);
+    provisionalMap.wrapS = provisionalMap.wrapT = THREE.ClampToEdgeWrapping;
     const planeGeo = new THREE.PlaneGeometry(getActiveGridCols() * TILE_SIZE, getActiveGridRows() * TILE_SIZE);
-    const planeMat = new THREE.MeshBasicMaterial({ map: texture });
+    const planeMat = new THREE.MeshBasicMaterial({ map: provisionalMap });
     const plane = new THREE.Mesh(planeGeo, planeMat);
     plane.rotation.x = -Math.PI / 2;
     plane.position.y = 0.05;
     mapGroup.add(plane);
+    textureLoader.load(
+      planeUrl,
+      (tex) => {
+        tex.colorSpace = THREE.SRGBColorSpace;
+        tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+        if (planeMat.map && planeMat.map !== tex) {
+          planeMat.map.dispose?.();
+        }
+        planeMat.map = tex;
+        planeMat.needsUpdate = true;
+      },
+      undefined,
+      () => {
+        console.warn("[renderRuntimeMapScene] board texture load failed, using procedural fallback:", planeUrl);
+      },
+    );
     addJinanPathGuides(mapGroup, map.path, map.theme.path, softPathGuideCenter(map.theme.path, map.theme.accent));
   }
 
   /* 略高于程序性格子 / flat 整块底板，低于路径高亮与安全区 */
-  const decorY = usesGeoBackdrop ? 0.048 : flatBoardMode ? 0.063 : 0.098;
+  const decorY = usesGeoBackdrop
+    ? surfaceBoardPresentation
+      ? 0.063
+      : 0.048
+    : surfaceBoardPresentation
+      ? 0.063
+      : 0.098;
   addBoardDecorImageLayers(mapGroup, map, decorY, xzScale);
 
   if (mode === "defense") {
@@ -617,7 +662,6 @@ function createObstacleTexture(base: number, accent: number): THREE.Texture {
 function addBoardBase(mapGroup: THREE.Group, map: MapDefinition, usesGeoBackdrop: boolean): void {
   const width = mapCols(map) * TILE_SIZE + TILE_SIZE * 1.2;
   const height = mapRows(map) * TILE_SIZE + TILE_SIZE * 1.2;
-  const baseOpacity = map.theme.boardBaseOpacity ?? 0.42;
   const baseMat = new THREE.MeshStandardMaterial({
     color: new THREE.Color(map.theme.ground).multiplyScalar(0.72),
     roughness: 0.72,
@@ -625,9 +669,9 @@ function addBoardBase(mapGroup: THREE.Group, map: MapDefinition, usesGeoBackdrop
     polygonOffset: true,
     polygonOffsetFactor: 1.06,
     polygonOffsetUnits: 1.06,
-    ...(usesGeoBackdrop
-      ? { transparent: true, opacity: baseOpacity, depthWrite: false }
-      : {}),
+    transparent: false,
+    opacity: 1,
+    depthWrite: true,
   });
   const base = new THREE.Mesh(new THREE.BoxGeometry(width, 0.16, height), baseMat);
   /** 整块底板下移，避免与地面格子盒体顶/底重合产生 z-fighting（约 0.1+ 净空）*/

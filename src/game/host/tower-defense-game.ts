@@ -32,6 +32,7 @@ import {
   advanceDefenseSpawnState,
   spawnDefenseWaveEnemy,
 } from "../defense/defense-wave-spawner";
+import { clampDefenseDifficulty, formatDefenseDifficultyHud, type DefenseDifficultyTier } from "../defense/defense-difficulty";
 import { tickDefenseMines } from "../defense/defense-mines";
 import { applyDefenseEnemyDamage } from "../defense/defense-enemy-hit";
 import { tickDefenseEnemyWave } from "../defense/defense-enemy-wave-sim";
@@ -54,7 +55,8 @@ import {
   pullEditorLevelsFromProjectFile as importEditorLevelsFromProjectFile,
 } from "../editor/editor-sync-session";
 import { GeoTilesRuntime, canUseGeoTiles } from "../geo/geo-tiles-runtime";
-import { DEFAULT_PLAYER_MODEL_URLS, INITIAL_BASE_HP } from "../core/game-config";
+import { getGameGeoMappingEnabled, setGameGeoMappingEnabled } from "../geo/game-geo-mapping-pref";
+import { DEFAULT_PLAYER_MODEL_URLS, DEFENSE_DIFFICULTY_DEFAULT, INITIAL_BASE_HP, DEFENSE_STANDARD_WAVE_COUNT } from "../core/game-config";
 import { GameEconomy } from "../economy/game-economy";
 import { GameModelCustomization } from "../assets/game-model-customization";
 import { GachaPanelPresenter } from "../ui/gacha-panel";
@@ -70,6 +72,7 @@ import {
 import {
   applySharedRunFailureCleanup,
   presentGameOverScreen,
+  presentVictoryScreen,
 } from "../persistence/game-flow-coordinator";
 import { HudBillboardOrient } from "../ui/hud-billboard-orient";
 import { spawnDefenseMoneyDropAtWorld, spawnPlacedExplorePickup } from "../drops/money-drop-spawn";
@@ -134,6 +137,7 @@ import type {
   ExplorePickupPlacement,
   GameAssetConfig,
   GameMode,
+  GeoMapConfig,
   GachaFocusBanner,
   GachaPool,
   GridCell,
@@ -210,6 +214,8 @@ export class TowerDefenseGame {
   private activeSkillButton!: HTMLButtonElement;
   private gachaPanel!: HTMLElement;
   private homeOverlay!: HTMLElement;
+  private gameGeoMappingToggle!: HTMLInputElement;
+  private topGeoMappingToggle!: HTMLInputElement;
   private saveSummaryElement!: HTMLElement;
   private gachaPullsElement!: HTMLElement;
   private gachaPityElement!: HTMLElement;
@@ -223,6 +229,10 @@ export class TowerDefenseGame {
   private gachaPoolTabsElement!: HTMLElement;
   private gachaFocusTabsElement!: HTMLElement;
   private pausePanel!: HTMLElement;
+  private defenseDifficultyHome!: HTMLInputElement;
+  private defenseDifficultyHomeHint!: HTMLElement;
+  private defenseDifficultyPause!: HTMLInputElement;
+  private defenseDifficultyPauseHint!: HTMLElement;
   private gameRootEl!: HTMLElement;
   private hoverMesh!: THREE.Mesh;
   private player!: THREE.Group;
@@ -249,10 +259,17 @@ export class TowerDefenseGame {
   private readonly exploreProjectileGroup = new THREE.Group();
   private exploreSafeZoneCells = new Set<string>();
 
-  // Game-over state
+  // Game-over / victory / 塔防通关抉择
   private gameOverPanel!: HTMLElement;
+  private defenseVictoryPromptPanel!: HTMLElement;
+  private gameVictoryPanel!: HTMLElement;
+  private gameVictoryTitle!: HTMLElement;
+  private gameVictoryReason!: HTMLElement;
   private safeZoneShopPanel!: HTMLElement;
   private gameOverActive = false;
+  private gameVictoryActive = false;
+  private defenseVictoryAwaitingChoice = false;
+  private defenseEndless = false;
   // Safe-zone shop state
   private inSafeZone = false;
 
@@ -275,6 +292,8 @@ export class TowerDefenseGame {
   private spawnRemaining = 0;
   private spawnCooldown = 0;
   private waveActive = false;
+  /** 塔防运行时难度 1–5；仅影响后续刷怪与波规模，不重载棋盘 */
+  private defenseDifficulty: DefenseDifficultyTier = DEFENSE_DIFFICULTY_DEFAULT;
   /** true 时游戏逻辑暂停，等待过场视频播完或跳过 */
   private cutsceneActive = false;
   private selectedBuilding: Building | null = null;
@@ -448,6 +467,15 @@ export class TowerDefenseGame {
     const uiShell = renderGameUiShell(app, this.requiredElement.bind(this));
     Object.assign(this, uiShell);
 
+    this.wireDefenseDifficultyControls();
+    this.syncGeoMappingTogglesFromStorage();
+    this.gameGeoMappingToggle.addEventListener("change", () => {
+      this.onGameGeoMappingUserChange(this.gameGeoMappingToggle.checked);
+    });
+    this.topGeoMappingToggle.addEventListener("change", () => {
+      this.onGameGeoMappingUserChange(this.topGeoMappingToggle.checked);
+    });
+
     this.requiredElement("#newGameButton").addEventListener("click", () => this.startNewGame());
     this.requiredElement("#loadGameButton").addEventListener("click", () => void this.loadGame());
     this.requiredElement("#saveGameHomeButton").addEventListener("click", () => this.saveGame());
@@ -470,7 +498,7 @@ export class TowerDefenseGame {
     this.requiredElement("#pauseButton").addEventListener("click", () => this.togglePause());
     this.requiredElement("#resumeButton").addEventListener("click", () => this.resumeGame());
     this.requiredElement("#pauseSaveButton").addEventListener("click", () => this.saveGame());
-    this.requiredElement("#pauseHomeButton").addEventListener("click", () => this.backToSelection());
+    this.requiredElement("#pauseHomeButton").addEventListener("click", () => this.returnToGameHomeFromPause());
     this.requiredElement("#levelEditorButton").addEventListener("click", () => this.openCurrentLevelEditor());
     const onUiThemeClick = () => {
       toggleUiColorMode();
@@ -484,6 +512,10 @@ export class TowerDefenseGame {
     this.requiredElement("#inventoryCloseBtn").addEventListener("click", () => this.toggleInventory());
     this.requiredElement("#gameOverRestartBtn").addEventListener("click", () => this.restartAfterGameOver());
     this.requiredElement("#gameOverMapBtn").addEventListener("click", () => this.returnToHomeFromGameOver());
+    this.requiredElement("#defenseEndlessConfirmBtn").addEventListener("click", () => this.confirmDefenseEndlessMode());
+    this.requiredElement("#defenseStandardCompleteBtn").addEventListener("click", () => this.completeDefenseStandardVictory());
+    this.requiredElement("#gameVictoryRestartBtn").addEventListener("click", () => this.restartAfterVictory());
+    this.requiredElement("#gameVictoryMapBtn").addEventListener("click", () => this.returnHomeFromVictory());
     this.requiredElement("#shopCloseBtn").addEventListener("click", () => this.closeSafeZoneShop());
     this.requiredElement("#shopItems").addEventListener("click", (e) => {
       const btn = (e.target as HTMLElement).closest<HTMLButtonElement>(".shop-item-buy");
@@ -639,6 +671,8 @@ export class TowerDefenseGame {
     this.gameStarted = true;
     this.homeOverlay.classList.remove("show");
     this.mode = "defense";
+    this.defenseDifficulty = clampDefenseDifficulty(Number(this.defenseDifficultyHome.value));
+    this.reflectDefenseDifficultySliders(this.defenseDifficulty);
     this.economy.resetForNewRun();
     this.defenseMapIndex = this.requestedDefIdx >= 0 ? this.requestedDefIdx : this.defenseMapIndex;
     this.exploreMapIndex = this.requestedExpIdx >= 0 ? this.requestedExpIdx : this.exploreMapIndex;
@@ -674,7 +708,15 @@ export class TowerDefenseGame {
 
   private openHome(): void {
     this.homeOverlay.classList.add("show");
+    this.reflectDefenseDifficultySliders(this.defenseDifficulty);
     this.updateSaveSummary();
+    this.syncGeoMappingTogglesFromStorage();
+  }
+
+  private returnToGameHomeFromPause(): void {
+    this.pausePanel.classList.remove("show");
+    this.paused = false;
+    this.openHome();
   }
 
   private backToSelection(): void {
@@ -729,6 +771,9 @@ export class TowerDefenseGame {
       spawnRemaining: this.spawnRemaining,
       spawnCooldown: this.spawnCooldown,
       waveActive: this.waveActive,
+      defenseDifficulty: this.defenseDifficulty,
+      defenseEndless: this.defenseEndless,
+      defenseVictoryAwaitingChoice: this.defenseVictoryAwaitingChoice,
       buildings: this.buildings.map((building) => ({
         id: building.spec.id,
         cell: building.cell,
@@ -792,6 +837,13 @@ export class TowerDefenseGame {
       this.spawnRemaining = data.spawnRemaining ?? 0;
       this.spawnCooldown = data.spawnCooldown ?? 0;
       this.waveActive = !!data.waveActive;
+
+      this.defenseDifficulty = clampDefenseDifficulty(data.defenseDifficulty ?? DEFENSE_DIFFICULTY_DEFAULT);
+      this.reflectDefenseDifficultySliders(this.defenseDifficulty);
+      this.defenseEndless = !!data.defenseEndless;
+      this.defenseVictoryAwaitingChoice = !!data.defenseVictoryAwaitingChoice;
+      this.gameVictoryActive = false;
+      this.syncDefenseVictoryPromptVisibility();
 
       const restoredUniqueS = new Set<BuildId>();
       for (const savedBuilding of data.buildings ?? []) {
@@ -1086,7 +1138,13 @@ export class TowerDefenseGame {
       onResize: () => this.resize(),
     });
     this.geoGroup.name = "geo-backdrop";
-    this.scene.add(this.geoGroup);
+    /** Cesium Tiles 先于棋盘与特效遍历，否则会与 logarithmicDepthBuffer 组合错误遮挡弹道/粒子 */
+    const mapIdxForGeo = this.scene.children.indexOf(this.mapGroup);
+    if (mapIdxForGeo >= 0) {
+      this.scene.children.splice(mapIdxForGeo, 0, this.geoGroup);
+    } else {
+      this.scene.add(this.geoGroup);
+    }
     this.exploreEnemyGroup.name = "explore-enemies";
     this.scene.add(this.exploreEnemyGroup);
     this.exploreProjectileGroup.name = "explore-projectiles";
@@ -1132,6 +1190,8 @@ export class TowerDefenseGame {
         this.economy.addMoney(Math.round(amount));
         this.showToast(`AI 回收奖励 +$${Math.round(amount)}`);
       },
+      showExploreEnemyDamageFloat: (worldPos, dmg, opts) =>
+        this.effectsFacade.spawnDamageFloat(worldPos, dmg, opts),
       onExploreBasicAttackFired: () => playExploreBasicAttack(),
       onExploreEnemyKilled: () => playExploreEnemyKilled(),
       loadExploreGltfScene: async (url) => {
@@ -1536,6 +1596,12 @@ export class TowerDefenseGame {
     this.cameraPan.set(0, 0, 0);
 
     if (resetEncounter) {
+      this.defenseEndless = false;
+      this.defenseVictoryAwaitingChoice = false;
+      this.gameVictoryActive = false;
+      this.defenseVictoryPromptPanel.setAttribute("aria-hidden", "true");
+      this.gameVictoryPanel.setAttribute("aria-hidden", "true");
+
       this.clearGroup(this.buildGroup);
       this.clearGroup(this.enemyGroup);
       this.clearGroup(this.dropGroup);
@@ -1630,7 +1696,7 @@ export class TowerDefenseGame {
     this.exploreCombat.clearEphemeralProjectiles();
 
     const map = MAPS[this.defenseMapIndex];
-    const hasGeoBackdrop = canUseGeoTiles(map.geo);
+    const hasGeoBackdrop = this.mapGeoBackdropActive(map.geo);
     setActiveRuntimeGrid(map);
     this.pathCells = this.defensePathCells;
     this.obstacleCells = this.defenseObstacleCells;
@@ -1639,6 +1705,11 @@ export class TowerDefenseGame {
     if (this.playfieldVisualScale > 1) {
       this.freeCameraDistance = Math.max(this.freeCameraDistance, 760);
       this.topdownDistance = Math.max(this.topdownDistance, 1100);
+    } else if (this.freeCameraDistance >= 500) {
+      // Geo mapping was just turned off: scale returned to 1 but camera is still at
+      // the geo-enlarged distance (760+).  Reset to normal defaults so the map is visible.
+      this.freeCameraDistance = 86;
+      this.topdownDistance = 120;
     }
     this.geoTilesRuntime.dispose();
     this.clearGroup(this.mapGroup);
@@ -1654,7 +1725,7 @@ export class TowerDefenseGame {
       useGeoBackdrop: hasGeoBackdrop,
       mapGroupWorldXzScale: this.playfieldVisualScale,
     });
-    this.geoTilesRuntime.load(map.geo);
+    this.geoTilesRuntime.load(hasGeoBackdrop ? map.geo : undefined);
     const defActorGen = ++this.mapActorGen;
     const defYOffset = hasGeoBackdrop ? this.geoBoardHeight(map) : 0;
     loadMapActors({
@@ -1685,6 +1756,9 @@ export class TowerDefenseGame {
   private showExploreView(): void {
     // Clear stuck keys so the player can't auto-walk after mode switch
     this.keys.clear();
+    /** fxGroup 在探索里也用于飘字：切视图时倒掉塔防侧残留弹道/粒子，避免误判为「探索特效」 */
+    this.clearGroup(this.fxGroup);
+    this.effects = [];
 
     if (!this.exploreMapInitialized) {
       this.loadExploreMap(this.exploreMapIndex, true);
@@ -1692,6 +1766,7 @@ export class TowerDefenseGame {
     }
 
     const map = EXPLORE_MAPS[this.exploreMapIndex];
+    const exploreGeoOn = this.mapGeoBackdropActive(map.geo);
     setActiveRuntimeGrid(map);
     this.pathCells = this.explorePathCells;
     this.obstacleCells = this.exploreObstacleCells;
@@ -1708,11 +1783,11 @@ export class TowerDefenseGame {
       obstacleCells: this.obstacleCells,
       currentCity: this.currentCity,
       mode: this.mode,
-      useGeoBackdrop: canUseGeoTiles(map.geo),
+      useGeoBackdrop: exploreGeoOn,
       safeZoneCells: this.exploreSafeZoneCells,
       mapGroupWorldXzScale: this.playfieldVisualScale,
     });
-    this.geoTilesRuntime.load(map.geo);
+    this.geoTilesRuntime.load(exploreGeoOn ? map.geo : undefined);
     const expActorGen = ++this.mapActorGen;
     loadMapActors({
       group: this.mapGroup,
@@ -1722,7 +1797,8 @@ export class TowerDefenseGame {
     }).catch((e) => console.warn("[MapActors]", e));
     this.buildGroup.visible = false;
     this.enemyGroup.visible = false;
-    this.fxGroup.visible = false;
+    /** Sprite 飘字等在 fxGroup；须可见才能在探索里也显示（弹道仍在 exploreProjectileGroup） */
+    this.fxGroup.visible = true;
     this.actorGroup.visible = true;
     this.exploreEnemyGroup.visible = true;
     this.exploreProjectileGroup.visible = true;
@@ -1775,6 +1851,57 @@ export class TowerDefenseGame {
     } else {
       delete mesh.userData.geoSquashCompensatedScale;
     }
+  }
+
+  private mapGeoBackdropActive(geo?: GeoMapConfig): boolean {
+    return getGameGeoMappingEnabled() && canUseGeoTiles(geo);
+  }
+
+  private onGameGeoMappingUserChange(enabled: boolean): void {
+    setGameGeoMappingEnabled(enabled);
+    this.gameGeoMappingToggle.checked = enabled;
+    this.topGeoMappingToggle.checked = enabled;
+    this.updateGameGeoMappingStateLabel();
+    this.refreshDefenseOrExploreSceneForGeoPref();
+  }
+
+  private syncGeoMappingTogglesFromStorage(): void {
+    const on = getGameGeoMappingEnabled();
+    this.gameGeoMappingToggle.checked = on;
+    this.topGeoMappingToggle.checked = on;
+    this.updateGameGeoMappingStateLabel();
+  }
+
+  /** 进行中切换地理底板时重建当前模式场景，避免缩放与特效残留 */
+  private refreshDefenseOrExploreSceneForGeoPref(): void {
+    // 未开始游戏或主页遮罩显示时：只需重建主页预览底板，无需完整重置
+    if (!this.gameStarted || this.homeOverlay.classList.contains("show")) {
+      const map = MAPS[this.defenseMapIndex];
+      if (map && this.mode === "defense") {
+        const runtimeState = buildRuntimeMapState(map);
+        this.defensePathCells = runtimeState.pathCells;
+        this.defenseObstacleCells = runtimeState.obstacleCells;
+        this.defensePathWorldPoints = runtimeState.pathWorldPoints;
+        this.showDefenseView();
+      }
+      return;
+    }
+    this.clearGroup(this.fxGroup);
+    this.effects = [];
+    if (this.mode === "defense") {
+      this.showDefenseView();
+    } else {
+      this.loadExploreMap(this.exploreMapIndex, false, { silent: true });
+    }
+  }
+
+  private updateGameGeoMappingStateLabel(): void {
+    const el = document.querySelector<HTMLElement>("#gameGeoMappingState");
+    if (!el) {
+      return;
+    }
+    const on = this.gameGeoMappingToggle.checked;
+    el.textContent = on ? (el.dataset.stateOn ?? "已开启") : (el.dataset.stateOff ?? "已关闭");
   }
 
   private geoBoardHeight(map: MapDefinition): number {
@@ -1909,6 +2036,7 @@ export class TowerDefenseGame {
       this.mode === "explore" ? "\u81ea\u7531\u63a2\u7d22\uff1a\u6218\u7ebf\u5728\u540e\u53f0\u7ee7\u7eed\u63a8\u8fdb" : "\u5854\u9632\u6a21\u5f0f\uff1a\u56de\u5230\u5b9e\u65f6\u6218\u7ebf",
     );
     refreshBgmForMode(this.mode);
+    this.syncDefenseVictoryPromptVisibility();
   }
 
   private toggleCameraMode(): void {
@@ -2042,16 +2170,29 @@ export class TowerDefenseGame {
     this.lastFrameTime = now;
     this.elapsed += dt;
 
-    if (this.gameStarted && !this.paused && !this.gameOverActive && !this.cutsceneActive) {
-      this.updateDefense(dt);
+    if (
+      this.gameStarted &&
+      !this.paused &&
+      !this.gameOverActive &&
+      !this.gameVictoryActive &&
+      !this.cutsceneActive &&
+      !this.homeOverlay.classList.contains("show")
+    ) {
+      if (!this.defenseVictoryAwaitingChoice) {
+        this.updateDefense(dt);
+      }
       /** 对战进行中探索与塔防并行模拟（切视图也不断探索侧计时/战斗） */
       this.updateExplore(dt);
       this.updateDrops(dt);
     }
     this.updateCamera(dt);
     this.geoTilesRuntime.update();
-    if (!this.paused) {
+    // 暂停时仍递减特效 TTL；否则命中描边/弹道等会永远卡在暂停那一帧（看起来像“永不消失”）。
+    if (!this.homeOverlay.classList.contains("show")) {
       this.updateEffects(dt);
+    }
+    /** 暂停/弹窗时也递减顶栏提示计时，否则会卡到「继续游戏」才消失 */
+    if (!this.homeOverlay.classList.contains("show")) {
       this.updateToast(dt);
     }
     this.enemyDefenseVisuals.tickEnemyHuds(this.enemies);
@@ -2061,7 +2202,15 @@ export class TowerDefenseGame {
   }
 
   private updateDefense(dt: number): void {
-    this.defenseSession.tick(dt);
+    const exploreSnap = EXPLORE_MAPS[this.exploreMapIndex];
+    setActiveRuntimeGrid(MAPS[this.defenseMapIndex]);
+    try {
+      this.defenseSession.tick(dt);
+    } finally {
+      if (this.mode === "explore") {
+        setActiveRuntimeGrid(exploreSnap);
+      }
+    }
   }
 
   private moveDefenseCamera(dt: number): void {
@@ -2090,6 +2239,9 @@ export class TowerDefenseGame {
         spawnCooldown: this.spawnCooldown,
       },
       enemiesLength: this.enemies.length,
+      defenseEndless: this.defenseEndless,
+      defenseDifficulty: this.defenseDifficulty,
+      defenseVictoryAwaitingChoice: this.defenseVictoryAwaitingChoice,
     });
     this.wave = out.timers.wave;
     this.waveActive = out.timers.waveActive;
@@ -2104,6 +2256,10 @@ export class TowerDefenseGame {
         this.scheduleWaveCutscene(fx.completedWave);
       } else if (fx.kind === "toastWaveBegins") {
         this.showToast(`\u7b2c ${fx.wave} \u6ce2\u5df2\u5f00\u59cb`, true);
+      } else if (fx.kind === "defenseStandardVictoryAwaitChoice") {
+        this.defenseVictoryAwaitingChoice = true;
+        this.syncDefenseVictoryPromptVisibility();
+        this.saveGame(false);
       } else if (fx.kind === "spawnEnemy") {
         this.spawnEnemy();
       }
@@ -2139,6 +2295,8 @@ export class TowerDefenseGame {
     spawnDefenseWaveEnemy({
       defenseMapIndex: this.defenseMapIndex,
       wave: this.wave,
+      defenseEndless: this.defenseEndless,
+      defenseDifficulty: this.defenseDifficulty,
       enemies: this.enemies,
       enemyGroup: this.enemyGroup,
       allocateUid: () => {
@@ -2175,7 +2333,49 @@ export class TowerDefenseGame {
       },
       triggerGameOverDefense: () => this.triggerGameOver("defense"),
       showToast: (m, c) => this.showToast(m, c),
+      spawnSiegeStrikeFx: (e, b) => this.trySiegeStrikeFx(e, b),
     });
+  }
+
+  /** 敌人攻城 / 远程 hacker 等 DPS 命中塔顶时的打击射线（宿主侧节流） */
+  private trySiegeStrikeFx(enemy: Enemy, building: Building): void {
+    const ud = enemy.mesh.userData as { siegeFxBeamT?: number };
+    if (this.elapsed - (ud.siegeFxBeamT ?? -999) < 0.125) {
+      return;
+    }
+    ud.siegeFxBeamT = this.elapsed;
+    const from = this.enemyDefenseVisuals.aimWorldCenter(enemy).clone();
+    from.y += 0.06;
+    this.addBeam(from, this.defenseBuildingSiegeRoofWorld(building), 0xff6622);
+  }
+
+  private defenseBuildingSiegeRoofWorld(building: Building): THREE.Vector3 {
+    const visual =
+      building.mesh.children.find(
+        ch =>
+          ch !== building.healthBarGroup &&
+          ch !== building.skillHudAnchor &&
+          !ch.userData?.isRangeRing,
+      ) ?? building.mesh.children[0];
+    building.mesh.updateWorldMatrix(true, true);
+    if (!visual) {
+      const o = new THREE.Vector3();
+      building.mesh.getWorldPosition(o);
+      o.y += 2.35;
+      return o;
+    }
+    const box = new THREE.Box3().setFromObject(visual);
+    if (box.isEmpty()) {
+      const o = new THREE.Vector3();
+      building.mesh.getWorldPosition(o);
+      o.y += 2.35;
+      return o;
+    }
+    return new THREE.Vector3(
+      (box.min.x + box.max.x) * 0.5,
+      box.max.y + 0.14,
+      (box.min.z + box.max.z) * 0.5,
+    );
   }
 
   private updateTowers(dt: number): void {
@@ -2217,8 +2417,13 @@ export class TowerDefenseGame {
     });
   }
 
-  private damageEnemy(enemy: Enemy, damage: number, source?: DefenseDamageSource): void {
+  private damageEnemy(enemy: Enemy, damage: number, source?: DefenseDamageSource, meta?: { critical?: boolean }): void {
     const finalDamage = resolveDefenseDamage(enemy, damage, source);
+    if (finalDamage > 0 && enemy.hp > 0) {
+      const w = new THREE.Vector3();
+      enemy.mesh.getWorldPosition(w);
+      this.effectsFacade.spawnDamageFloat(w, finalDamage, { critical: meta?.critical });
+    }
     applyDefenseEnemyDamage(
       {
         buildings: this.buildings,
@@ -2264,9 +2469,99 @@ export class TowerDefenseGame {
       safeZoneShopPanel: this.safeZoneShopPanel,
       showToast: (message, critical) => this.showToast(message, critical),
     });
+    this.maybeTriggerExploreVictory();
+  }
+
+  private syncDefenseVictoryPromptVisibility(): void {
+    const show = this.defenseVictoryAwaitingChoice && this.mode === "defense";
+    this.defenseVictoryPromptPanel.setAttribute("aria-hidden", show ? "false" : "true");
+  }
+
+  private confirmDefenseEndlessMode(): void {
+    if (!this.defenseVictoryAwaitingChoice) return;
+    this.defenseVictoryAwaitingChoice = false;
+    this.defenseEndless = true;
+    this.syncDefenseVictoryPromptVisibility();
+    this.wave = DEFENSE_STANDARD_WAVE_COUNT + 1;
+    this.nextWaveDelay = 5;
+    this.waveActive = false;
+    this.spawnRemaining = 0;
+    this.saveGame(false);
+    this.showToast("\u65e0\u5c3d\u6a21\u5f0f\u5df2\u5f00\u542f\uff0c\u6bcf\u6ce2\u589e\u5f3a", true);
+    this.updateUi();
+  }
+
+  private completeDefenseStandardVictory(): void {
+    if (!this.defenseVictoryAwaitingChoice) return;
+    this.defenseVictoryAwaitingChoice = false;
+    this.syncDefenseVictoryPromptVisibility();
+    presentVictoryScreen(
+      {
+        getVictoryActive: () => this.gameVictoryActive,
+        setVictoryActive: (v) => {
+          this.gameVictoryActive = v;
+        },
+        victoryReasonElement: this.gameVictoryReason,
+        victoryPanel: this.gameVictoryPanel,
+        victoryTitleElement: this.gameVictoryTitle,
+      },
+      `\u5854\u9632\u5df2\u5b8c\u6210\u6807\u51c6 ${DEFENSE_STANDARD_WAVE_COUNT} \u6ce2`,
+    );
+    this.saveGame(false);
+  }
+
+  private maybeTriggerExploreVictory(): void {
+    if (this.mode !== "explore") return;
+    if (!this.gameStarted || this.paused || this.cutsceneActive) return;
+    if (this.gameOverActive || this.gameVictoryActive) return;
+    if (this.defenseVictoryAwaitingChoice) return;
+    if (this.homeOverlay.classList.contains("show")) return;
+    if (!this.exploreCombat.allPermanentBossesCleared()) return;
+    presentVictoryScreen(
+      {
+        getVictoryActive: () => this.gameVictoryActive,
+        setVictoryActive: (v) => {
+          this.gameVictoryActive = v;
+        },
+        victoryReasonElement: this.gameVictoryReason,
+        victoryPanel: this.gameVictoryPanel,
+        victoryTitleElement: this.gameVictoryTitle,
+      },
+      "\u63a2\u7d22\u5df2\u51fb\u8d25\u672c\u56fe\u5168\u90e8 Boss",
+    );
+    this.saveGame(false);
+  }
+
+  private restartAfterVictory(): void {
+    this.gameVictoryActive = false;
+    this.gameVictoryPanel.setAttribute("aria-hidden", "true");
+    this.defenseVictoryAwaitingChoice = false;
+    this.syncDefenseVictoryPromptVisibility();
+    this.resetSharedRunStateAfterFailure();
+    this.defenseEndless = false;
+    this.mode = "defense";
+    this.loadDefenseMap(this.defenseMapIndex, true);
+    this.loadExploreMap(this.exploreMapIndex, true, { skipViewRefresh: true });
+    this.saveGame(false);
+    this.showToast(
+      "\u5df2\u4ece\u5934\u5f00\u59cb\uff1a\u8d44\u91d1\u3001\u8865\u7ed9\u4e0e\u5854\u9632/\u63a2\u7d22\u8fdb\u5ea6\u5747\u5df2\u91cd\u7f6e",
+      true,
+    );
+    this.updateUi();
+  }
+
+  private returnHomeFromVictory(): void {
+    this.gameVictoryActive = false;
+    this.gameVictoryPanel.setAttribute("aria-hidden", "true");
+    this.defenseVictoryAwaitingChoice = false;
+    this.syncDefenseVictoryPromptVisibility();
+    this.backToSelection();
   }
 
   private triggerGameOver(mode: "defense" | "explore"): void {
+    if (this.gameVictoryActive) {
+      return;
+    }
     presentGameOverScreen({
       getGameOverActive: () => this.gameOverActive,
       setGameOverActive: (v) => {
@@ -2317,6 +2612,10 @@ export class TowerDefenseGame {
   private restartAfterGameOver(): void {
     this.gameOverActive = false;
     this.gameOverPanel.setAttribute("aria-hidden", "true");
+    this.gameVictoryActive = false;
+    this.gameVictoryPanel.setAttribute("aria-hidden", "true");
+    this.defenseVictoryAwaitingChoice = false;
+    this.syncDefenseVictoryPromptVisibility();
     this.resetSharedRunStateAfterFailure();
     this.mode = "defense";
     this.loadDefenseMap(this.defenseMapIndex, true);
@@ -2332,6 +2631,10 @@ export class TowerDefenseGame {
   private returnToHomeFromGameOver(): void {
     this.gameOverActive = false;
     this.gameOverPanel.setAttribute("aria-hidden", "true");
+    this.gameVictoryActive = false;
+    this.gameVictoryPanel.setAttribute("aria-hidden", "true");
+    this.defenseVictoryAwaitingChoice = false;
+    this.syncDefenseVictoryPromptVisibility();
     this.backToSelection();
   }
 
@@ -2711,6 +3014,7 @@ export class TowerDefenseGame {
     this.paused = !this.paused;
     this.pausePanel.classList.toggle("show", this.paused);
     if (this.paused) {
+      this.reflectDefenseDifficultySliders(this.defenseDifficulty);
       this.showToast("\u6e38\u620f\u5df2\u6682\u505c");
     }
   }
@@ -2727,8 +3031,53 @@ export class TowerDefenseGame {
     this.gachaPresenter.draw(requestedCount);
   }
 
-  private showToast(message: string, critical = false): void {
-    this.toasts.show(message, critical);
+  private showToast(message: string, critical = false, topBarHoldSeconds?: number): void {
+    this.toasts.show(message, critical, topBarHoldSeconds);
+  }
+
+  private wireDefenseDifficultyControls(): void {
+    const slide = (event: Event) => {
+      this.applyDefenseDifficultyFromSliders(event.target as HTMLInputElement);
+    };
+    this.defenseDifficultyHome.addEventListener("input", slide);
+    this.defenseDifficultyPause.addEventListener("input", slide);
+    this.reflectDefenseDifficultySliders(this.defenseDifficulty);
+  }
+
+  private reflectDefenseDifficultySliders(tier: DefenseDifficultyTier): void {
+    const s = String(tier);
+    if (this.defenseDifficultyHome.value !== s) {
+      this.defenseDifficultyHome.value = s;
+    }
+    if (this.defenseDifficultyPause.value !== s) {
+      this.defenseDifficultyPause.value = s;
+    }
+    this.defenseDifficultyHome.setAttribute("aria-valuenow", s);
+    this.defenseDifficultyPause.setAttribute("aria-valuenow", s);
+    const hud = formatDefenseDifficultyHud(tier);
+    this.defenseDifficultyHomeHint.textContent = hud;
+    this.defenseDifficultyPauseHint.textContent = hud;
+  }
+
+  /**
+   * 仅更新运行时数值与 UI，不重载棋盘/场景；
+   * 已存在于场上的敌人沿用生成时的血量与攻城参数。
+   */
+  private applyDefenseDifficultyFromSliders(source: HTMLInputElement): void {
+    const tier = clampDefenseDifficulty(Number(source.value));
+    const changed = tier !== this.defenseDifficulty;
+    this.defenseDifficulty = tier;
+    this.reflectDefenseDifficultySliders(tier);
+    /** 仅在玩家拉动难度条且档位变化时弹出；与其它流程（开局/暂停文案等）区分开 */
+    if (changed && this.gameStarted) {
+      this.showToast(
+        `\u5854\u9632\u96be\u5ea6 ${formatDefenseDifficultyHud(tier)}\uff1a\u5df2\u51fa\u573a\u654c\u4eba\u4e0d\u53d8\uff1b\u4ece\u6b64\u523b\u8d77\u5237\u65b0\u7684\u5c0f\u602a\u4e0e\u5c1a\u672a\u5f00\u59cb\u7684\u65b0\u6ce2\u968f\u4e4b\u589e\u5f31\u3002`,
+        true,
+        3,
+      );
+      this.saveGame(false);
+    }
+    this.updateUi();
   }
 
   private updateUi(): void {
@@ -2770,6 +3119,10 @@ export class TowerDefenseGame {
         currentCityCode: this.currentCity,
         currentMapId: map.id,
         buildings: this.buildings,
+        defenseTowerNameOverrides: this.mode === "defense" ? map.defenseFlavor?.towerNames : undefined,
+        defenseVictoryAwaitingChoice: this.defenseVictoryAwaitingChoice,
+        defenseEndless: this.defenseEndless,
+        defenseDifficultyTier: this.defenseDifficulty,
       },
     );
     if (this.gachaOpen) {

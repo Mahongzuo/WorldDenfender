@@ -18,6 +18,8 @@ import type {
   MapBoardImageLayer,
   MapDefinition,
   BuildId,
+  DefenseMapFlavor,
+  EnemyType,
 } from "../core/types";
 import { sanitizeDefenseElement } from "../defense/defense-taxonomy";
 
@@ -93,6 +95,40 @@ function sanitizeLevelCutscenes(raw: unknown): LevelCutsceneConfig | undefined {
 
   if (!introVideo && !waveVideos) return undefined;
   return { ...(introVideo ? { introVideo } : {}), ...(waveVideos ? { waveVideos } : {}) };
+}
+
+const EDITOR_FLAVOR_ENEMY_TYPES = new Set<EnemyType>(["basic", "scout", "hacker", "tank", "swarm"]);
+
+function sanitizeDefenseFlavor(raw: unknown): DefenseMapFlavor | undefined {
+  if (!raw || typeof raw !== "object") {
+    return undefined;
+  }
+  const r = raw as Record<string, unknown>;
+  const towerNamesRaw = r.towerNames && typeof r.towerNames === "object" ? (r.towerNames as Record<string, unknown>) : undefined;
+  const enemyNamesRaw = r.enemyNames && typeof r.enemyNames === "object" ? (r.enemyNames as Record<string, unknown>) : undefined;
+  const towerNames: DefenseMapFlavor["towerNames"] = {};
+  const enemyNames: DefenseMapFlavor["enemyNames"] = {};
+  if (towerNamesRaw) {
+    for (const [key, val] of Object.entries(towerNamesRaw)) {
+      if (Object.prototype.hasOwnProperty.call(BUILD_SPECS, key) && typeof val === "string" && val.trim()) {
+        towerNames[key as BuildId] = val.trim();
+      }
+    }
+  }
+  if (enemyNamesRaw) {
+    for (const [key, val] of Object.entries(enemyNamesRaw)) {
+      if (EDITOR_FLAVOR_ENEMY_TYPES.has(key as EnemyType) && typeof val === "string" && val.trim()) {
+        enemyNames[key as EnemyType] = val.trim();
+      }
+    }
+  }
+  if (!Object.keys(towerNames).length && !Object.keys(enemyNames).length) {
+    return undefined;
+  }
+  return {
+    ...(Object.keys(towerNames).length ? { towerNames } : {}),
+    ...(Object.keys(enemyNames).length ? { enemyNames } : {}),
+  };
 }
 
 function positiveNumber(raw: unknown, fallback: number, max = 1e9): number {
@@ -471,6 +507,7 @@ export function editorLevelToRuntimeMap(
   const theme = exploreLayout?.theme ?? editorMap.theme ?? {};
   const boardImageLayers = sanitizeBoardImageLayers(editorMap.boardImageLayers);
   const levelAudio = sanitizeLevelMapAudioFromEditor(editorMap.levelAudio);
+  const defenseFlavorSan = mode === "defense" ? sanitizeDefenseFlavor(editorMap.defenseFlavor) : undefined;
   const exploreBosses = mode === "explore" ? sanitizeExploreBosses(editorMap.exploreBosses, project) : undefined;
   const exploreSpawners = mode === "explore" ? sanitizeExploreSpawners(editorMap.exploreSpawners, project) : undefined;
   const explorePickups = mode === "explore" ? sanitizeExplorePickups(editorMap.explorePickups, project) : undefined;
@@ -523,6 +560,7 @@ export function editorLevelToRuntimeMap(
     ...(mode === "defense"
       ? {
           cutscenes: sanitizeLevelCutscenes(editorMap.cutscenes),
+          ...(defenseFlavorSan ? { defenseFlavor: defenseFlavorSan } : {}),
           ...(defenseTowerModelUrls && Object.keys(defenseTowerModelUrls).length ? { towerModelUrls: defenseTowerModelUrls } : {}),
         }
       : {}),

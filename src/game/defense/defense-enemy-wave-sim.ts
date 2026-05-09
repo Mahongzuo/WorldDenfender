@@ -2,6 +2,7 @@ import * as THREE from "three";
 
 import { cellToWorld, sameCell, worldToCell } from "../core/runtime-grid";
 import type { Building, Enemy } from "../core/types";
+import { applyEnemySiegeAgainstBuildings } from "./defense-enemy-siege";
 
 export interface DefenseEnemyWaveDeps {
   dt: number;
@@ -15,25 +16,13 @@ export interface DefenseEnemyWaveDeps {
   setBaseHp(next: number): void;
   triggerGameOverDefense(): void;
   showToast(message: string, critical?: boolean): void;
+  /** 攻城 DPS（hacker / 站桩 siege）击中塔时在宿主侧节流后画光束等 */
+  spawnSiegeStrikeFx?: (enemy: Enemy, building: Building) => void;
 }
 
 function defenseBuildingBlockLimit(building: Building, elapsed: number): number {
   const base = building.spec.maxBlockCount ?? 1;
   return (building.bonusBlockUntil ?? 0) > elapsed ? base + 1 : base;
-}
-
-function defenseDamageBuilding(
-  building: Building,
-  damage: number,
-  elapsed: number,
-  onDemolish: (building: Building) => void,
-): void {
-  const reductionFactor =
-    (building.damageReductionUntil ?? 0) > elapsed ? building.damageReductionFactor ?? 1 : 1;
-  building.hp -= damage * reductionFactor;
-  if (building.hp <= 0) {
-    onDemolish(building);
-  }
 }
 
 function defenseDemolishBuilding(
@@ -66,6 +55,7 @@ export function tickDefenseEnemyWave(deps: DefenseEnemyWaveDeps): void {
     setBaseHp,
     triggerGameOverDefense,
     showToast,
+    spawnSiegeStrikeFx,
   } = deps;
 
   const runDemolish = (b: Building) => defenseDemolishBuilding(b, enemies, buildGroup, buildings);
@@ -103,7 +93,7 @@ export function tickDefenseEnemyWave(deps: DefenseEnemyWaveDeps): void {
       if (enemy.blockedBy.hp <= 0) {
         enemy.blockedBy = null;
       } else {
-        defenseDamageBuilding(enemy.blockedBy, 20 * dt, elapsed, runDemolish);
+        applyEnemySiegeAgainstBuildings(enemy, buildings, dt, elapsed, runDemolish, spawnSiegeStrikeFx);
         continue;
       }
     }
@@ -144,6 +134,9 @@ export function tickDefenseEnemyWave(deps: DefenseEnemyWaveDeps): void {
         triggerGameOverDefense();
         return;
       }
+      continue;
     }
+
+    applyEnemySiegeAgainstBuildings(enemy, buildings, dt, elapsed, runDemolish, spawnSiegeStrikeFx);
   }
 }

@@ -6,6 +6,7 @@ import {
   addExplosionEffect,
   updateTimedEffects,
 } from "./effects-runtime";
+import { addDamageFloatEffect, type DamageFloatOptions } from "./damage-float-effect";
 import type { TimedEffect } from "../core/types";
 
 /** 将宿主 `effects` / `fxGroup` 收口为统一入口，便于塔防与其他系统注入同一套 FX。 */
@@ -26,6 +27,10 @@ export class GameEffectsFacade {
 
   addExplosion(center: THREE.Vector3, radius: number, color: number): void {
     addExplosionEffect(this.getEffects(), this.fxGroup, center, radius, color);
+  }
+
+  spawnDamageFloat(worldCenter: THREE.Vector3, damage: number, options?: DamageFloatOptions): void {
+    addDamageFloatEffect(this.getEffects(), this.fxGroup, worldCenter, damage, options);
   }
 
   tick(dt: number): void {

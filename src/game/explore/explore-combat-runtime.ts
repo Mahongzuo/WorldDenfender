@@ -37,6 +37,8 @@ export interface ExploreCombatHost {
   showToast(text: string, important?: boolean): void;
   damageExplorePlayer(amount: number): void;
   grantExploreMoney(amount: number): void;
+  /** 在敌人位置显示伤害飘字（与塔防共用 fx/effectsFacade） */
+  showExploreEnemyDamageFloat?(worldPosition: THREE.Vector3, damage: number, options?: { critical?: boolean }): void;
   onExploreBasicAttackFired?(): void;
   onExploreEnemyKilled?(): void;
   /** 异步加载关卡里配置的 GLB；失败返回 null（会保留程序化占位体）。 */
@@ -86,6 +88,18 @@ export class ExploreCombatRuntime {
   /** 载入或切换地图时由宿主调用 */
   syncGameplay(settings?: ExploreGameplaySettings | undefined): void {
     this.gameplay = resolveExploreGameplay(settings ?? undefined);
+  }
+
+  /**
+   * 探索胜利判定：地图上存在至少一个非重生首领，且这些首领均已击倒。
+   * 无主 Boss 或未配置占位时不视为自动胜利。
+   */
+  allPermanentBossesCleared(): boolean {
+    const required = this.bossPlacements.filter((p) => !p.respawn);
+    if (required.length === 0) {
+      return false;
+    }
+    return required.every((p) => this.defeatedBossIds.has(p.id));
   }
 
   syncMapContent(options: {
@@ -684,7 +698,13 @@ export class ExploreCombatRuntime {
   }
 
   private damageEnemy(enemy: ExploreEnemy, damage: number): void {
-    enemy.hp -= damage;
+    const amount = Math.max(0, damage);
+    if (amount > 0) {
+      const w = new THREE.Vector3();
+      enemy.mesh.getWorldPosition(w);
+      this.host.showExploreEnemyDamageFloat?.(w, amount);
+    }
+    enemy.hp -= amount;
     if (enemy.hp <= 0) {
       this.killEnemy(enemy);
     }

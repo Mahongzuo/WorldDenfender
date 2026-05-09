@@ -547,6 +547,64 @@
                         </div>
                         <p class="section-hint">设置在某波次结束后播放的视频；如未上传或波次无对应视频则自动跳过。</p>
                         <div id="waveVideoList" class="wave-video-list"></div>
+
+                        <section class="inspector-section theme-audio-stack" id="levelAudioSection" aria-label="关卡配乐与音效">
+                            <div class="panel-head panel-head-tight">
+                                <div>
+                                    <div class="eyebrow">Level Audio</div>
+                                    <h2>关卡声音</h2>
+                                </div>
+                                <button type="button" class="mini-button" id="btnOpenLevelAudioLocation" disabled title="上传并保存到项目后可定位文件">打开声音保存位置</button>
+                            </div>
+                            <p class="section-hint">写入 <code>map.levelAudio</code>，与主游戏 <code>MapDefinition.levelAudio</code> 同步。这里会自动把 BGM 和塔防开火音效保存到当前关卡的项目目录，并在上传成功后自动回填 URL。</p>
+                            <div id="levelAudioLocationInfo" class="section-hint theme-audio-location"></div>
+                            <div class="theme-audio-grid">
+                                <section class="theme-audio-card">
+                                    <div class="section-title-row">
+                                        <h3>塔防循环 BGM</h3>
+                                        <label class="game-asset-upload tight theme-audio-upload">
+                                            上传塔防 BGM
+                                            <input id="levelAudioDefenseBgmFile" type="file" accept=".mp3,.wav,.ogg,.m4a,audio/*" />
+                                        </label>
+                                    </div>
+                                    <label class="field-block">
+                                        <span>引用地址</span>
+                                        <input id="levelAudioDefenseBgmUrl" type="text" placeholder="上传后自动回填，默认无需手动输入">
+                                    </label>
+                                    <label class="field-block audio-vol-field">
+                                        <span class="audio-vol-field__label">塔防 BGM 音量 <span class="audio-vol-value" id="levelAudioDefenseBgmVolDisp">55%</span></span>
+                                        <input type="range" id="levelAudioDefenseBgmVol" class="audio-volume-slider" min="0" max="100" value="55" aria-label="塔防 BGM 音量" />
+                                    </label>
+                                </section>
+                                <section class="theme-audio-card">
+                                    <div class="section-title-row">
+                                        <h3>探索循环 BGM</h3>
+                                        <label class="game-asset-upload tight theme-audio-upload">
+                                            上传探索 BGM
+                                            <input id="levelAudioExploreBgmFile" type="file" accept=".mp3,.wav,.ogg,.m4a,audio/*" />
+                                        </label>
+                                    </div>
+                                    <label class="field-block">
+                                        <span>引用地址</span>
+                                        <input id="levelAudioExploreBgmUrl" type="text" placeholder="可留空，默认可与塔防 BGM 共用">
+                                    </label>
+                                    <label class="field-block audio-vol-field">
+                                        <span class="audio-vol-field__label">探索 BGM 音量 <span class="audio-vol-value" id="levelAudioExploreBgmVolDisp">55%</span></span>
+                                        <input type="range" id="levelAudioExploreBgmVol" class="audio-volume-slider" min="0" max="100" value="55" aria-label="探索 BGM 音量" />
+                                    </label>
+                                </section>
+                                <section class="theme-audio-card theme-audio-card--wide">
+                                    <div class="section-title-row">
+                                        <h3>塔防防御塔开火音效</h3>
+                                    </div>
+                                    <label class="field-block audio-vol-field">
+                                        <span class="audio-vol-field__label">本关塔开火音效音量 <span class="audio-vol-value" id="levelAudioTowerVolDisp">62%</span></span>
+                                        <input type="range" id="levelAudioTowerVol" class="audio-volume-slider" min="0" max="100" value="62" aria-label="本关塔开火音量" />
+                                    </label>
+                                    <div id="levelAudioTowerRows" class="level-audio-tower-rows"></div>
+                                </section>
+                            </div>
+                        </section>
                     </div>
                     </div>
 
@@ -804,6 +862,14 @@
             <div id="levelInspectorWorkspace">
 
             <section class="inspector-section">
+                <div class="section-title-row">
+                    <h3>选中对象</h3>
+                    <button id="btnDeleteSelection" class="mini-button danger">删除</button>
+                </div>
+                <div id="selectionInspector" class="selection-inspector empty-state">未选择对象。</div>
+            </section>
+
+            <section class="inspector-section">
                 <h3>关卡基础</h3>
                 <div class="form-grid two">
                     <label class="field-block">
@@ -835,42 +901,6 @@
                     <span>简介</span>
                     <textarea id="fieldDescription" rows="3"></textarea>
                 </label>
-            </section>
-
-            <section class="inspector-section" id="levelAudioSection" aria-label="关卡配乐与音效">
-                <h3>关卡配乐与塔防开火</h3>
-                <p class="section-hint">写入 <code>map.levelAudio</code>，与主游戏 <code>MapDefinition.levelAudio</code> 同步。探索/塔防 BGM 在进入对应模式时切换；各塔开火音效仅在塔防战斗触发，优先级为<strong>本关覆盖</strong> &gt; 全局默认 &gt; 全局按塔型。</p>
-                <div class="form-grid two">
-                    <label class="field-block">
-                        <span>塔防循环 BGM（URL）</span>
-                        <input id="levelAudioDefenseBgmUrl" type="text" placeholder="/GameModels/Audio/xxx.mp3">
-                    </label>
-                    <label class="field-block game-asset-upload tight">
-                        上传塔防 BGM
-                        <input id="levelAudioDefenseBgmFile" type="file" accept=".mp3,.wav,.ogg,.m4a,audio/*" />
-                    </label>
-                    <label class="field-block audio-vol-field">
-                        <span class="audio-vol-field__label">塔防 BGM 音量 <span class="audio-vol-value" id="levelAudioDefenseBgmVolDisp">55%</span></span>
-                        <input type="range" id="levelAudioDefenseBgmVol" class="audio-volume-slider" min="0" max="100" value="55" aria-label="塔防 BGM 音量" />
-                    </label>
-                    <label class="field-block">
-                        <span>探索循环 BGM（URL）</span>
-                        <input id="levelAudioExploreBgmUrl" type="text" placeholder="可留空则塔防/探索共用塔防 BGM">
-                    </label>
-                    <label class="field-block game-asset-upload tight">
-                        上传探索 BGM
-                        <input id="levelAudioExploreBgmFile" type="file" accept=".mp3,.wav,.ogg,.m4a,audio/*" />
-                    </label>
-                    <label class="field-block audio-vol-field">
-                        <span class="audio-vol-field__label">探索 BGM 音量 <span class="audio-vol-value" id="levelAudioExploreBgmVolDisp">55%</span></span>
-                        <input type="range" id="levelAudioExploreBgmVol" class="audio-volume-slider" min="0" max="100" value="55" aria-label="探索 BGM 音量" />
-                    </label>
-                </div>
-                <label class="field-block audio-vol-field">
-                    <span class="audio-vol-field__label">本关塔开火音效音量 <span class="audio-vol-value" id="levelAudioTowerVolDisp">62%</span></span>
-                    <input type="range" id="levelAudioTowerVol" class="audio-volume-slider" min="0" max="100" value="62" aria-label="本关塔开火音量" />
-                </label>
-                <div id="levelAudioTowerRows" class="level-audio-tower-rows"></div>
             </section>
 
             <section class="inspector-section game-asset-section" id="gameAssetSection" aria-label="游戏运行时模型">
@@ -969,26 +999,10 @@
                 </div>
             </section>
 
-            <section class="inspector-section">
-                <div class="section-title-row">
-                    <h3>选中对象</h3>
-                    <button id="btnDeleteSelection" class="mini-button danger">删除</button>
-                </div>
-                <div id="selectionInspector" class="selection-inspector empty-state">未选择对象。</div>
-            </section>
-
             <section class="inspector-section view-hidden" id="previewSceneOutlineSection" aria-label="关卡预览场景大纲（已迁移到预览区右侧）">
                 <h3>预览场景大纲</h3>
                 <p class="section-hint">已在「关卡预览」右侧「关卡内容浏览器」中展示；此处保留兼容布局。</p>
                 <div id="previewSceneOutlineList" class="preview-scene-outline-list"></div>
-            </section>
-
-            <section class="inspector-section">
-                <div class="section-title-row">
-                    <h3>Actor 模板库</h3>
-                    <button id="btnCreateActorTemplate" class="mini-button">新增模板</button>
-                </div>
-                <div id="actorPalette" class="actor-palette"></div>
             </section>
 
             <section class="inspector-section">
@@ -998,18 +1012,6 @@
                 </div>
                 <p class="section-hint">每波可单独替换外观模型与缩放；未覆盖时使用下方「关卡」enemyTypes / 玩法库敌人的模型设定。</p>
                 <div id="waveList" class="compact-list"></div>
-            </section>
-
-            <section class="inspector-section">
-                <div class="section-title-row">
-                    <h3>模型资产</h3>
-                    <label class="mini-button upload-button">
-                        上传模型
-                        <input id="modelUpload" type="file" accept=".glb,.gltf,.obj,.fbx,.dae,.stl">
-                    </label>
-                </div>
-                <p class="section-hint">写入项目 <code>public/GameModels/</code>，开发服务器启动后可在下方「关卡预览 · 项目模型」中拖拽使用。</p>
-                <div id="modelAssetList" class="compact-list"></div>
             </section>
             </div>
 

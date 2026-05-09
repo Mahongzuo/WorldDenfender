@@ -1,6 +1,8 @@
 export interface GameUiShellRefs {
   gameRootEl: HTMLElement;
   sceneHost: HTMLElement;
+  gameGeoMappingToggle: HTMLInputElement;
+  topGeoMappingToggle: HTMLInputElement;
   toastElement: HTMLElement;
   sideToastElement: HTMLElement;
   modeElement: HTMLElement;
@@ -33,6 +35,10 @@ export interface GameUiShellRefs {
   gachaFocusTabsElement: HTMLElement;
   pausePanel: HTMLElement;
   toolbar: HTMLElement;
+  defenseDifficultyHome: HTMLInputElement;
+  defenseDifficultyHomeHint: HTMLElement;
+  defenseDifficultyPause: HTMLInputElement;
+  defenseDifficultyPauseHint: HTMLElement;
   exploreHud: HTMLElement;
   exploreLevelBadge: HTMLElement;
   exploreXpBar: HTMLElement;
@@ -44,6 +50,10 @@ export interface GameUiShellRefs {
   inventoryPanel: HTMLElement;
   inventoryGrid: HTMLElement;
   gameOverPanel: HTMLElement;
+  defenseVictoryPromptPanel: HTMLElement;
+  gameVictoryPanel: HTMLElement;
+  gameVictoryTitle: HTMLElement;
+  gameVictoryReason: HTMLElement;
   safeZoneShopPanel: HTMLElement;
 }
 
@@ -60,6 +70,27 @@ export function renderGameUiShell(app: HTMLElement, requiredElement: RequiredEle
             <h1>地球守卫</h1>
             <p id="cityLabel" style="font-size:18px;letter-spacing:3px;color:var(--accent-highlight,#ff6b9d);margin-bottom:8px;"></p>
             <p>AI入侵各大城市！塔防模式与第三人称探索模式，守护人类最后的城市防线。</p>
+            <div class="home-geo-mapping-panel" role="group" aria-label="地图与地理底板">
+              <div class="home-geo-mapping-panel__text">
+                <strong class="home-geo-mapping-panel__title">地理信息映射（Cesium 实景底板）</strong>
+                <p class="home-geo-mapping-panel__desc">默认关闭，使用本地棋盘；开启后将按关卡坐标请求真实三维地图（需配置 token，占用流量与 GPU）。</p>
+              </div>
+              <label class="home-geo-mapping-panel__switch" title="与关卡编辑器中「开启地理信息映射」同类选项，仅作用于本游戏运行时">
+                <input type="checkbox" id="gameGeoMappingToggle" />
+                <span class="home-geo-mapping-panel__track" aria-hidden="true"><span class="home-geo-mapping-panel__thumb"></span></span>
+                <span class="home-geo-mapping-panel__state" id="gameGeoMappingState" data-state-on="已开启" data-state-off="已关闭">已关闭</span>
+              </label>
+            </div>
+            <div class="home-geo-mapping-panel home-geo-mapping-panel--tower-difficulty" role="group" aria-label="塔防运行时难度">
+              <div class="home-geo-mapping-panel__text">
+                <strong class="home-geo-mapping-panel__title">塔防难度（1最易 · 5最难）</strong>
+                <p class="home-geo-mapping-panel__desc">与全关卡通用的敌军强度档位。首页所选为<strong>新开一局</strong>的起点；开战后在<strong>暂停</strong>里也能改，不重载棋盘。已从场上出现的敌人<strong>不重算血量</strong>，仅从随后刷怪与下一波总人数起套用新档位。</p>
+              </div>
+              <div class="home-geo-mapping-panel__tower-diff-slot">
+                <input type="range" id="defenseDifficultyHome" min="1" max="5" step="1" value="3" aria-valuemin="1" aria-valuemax="5" aria-valuenow="3" />
+                <span id="defenseDifficultyHomeHint" class="home-geo-mapping-panel__tower-diff-hint"></span>
+              </div>
+            </div>
             <div class="home-actions">
               <button class="premium" id="newGameButton">新游戏</button>
               <button id="loadGameButton">读取存档</button>
@@ -83,6 +114,13 @@ export function renderGameUiShell(app: HTMLElement, requiredElement: RequiredEle
           <div class="stat"><span>地图</span><strong id="mapValue">-</strong></div>
           <div class="stat"><span>探索掉落</span><strong id="dropValue">切到探索</strong></div>
           <div class="top-panel-spacer" aria-hidden="true"></div>
+          <label class="top-panel-geo-pill" title="开启后加载 Cesium 实景底板（需 token）；关闭为本地棋盘">
+            <span class="top-panel-geo-pill__label">地理映射</span>
+            <span class="top-panel-geo-pill__switch">
+              <input type="checkbox" id="topGeoMappingToggle" />
+              <span class="top-panel-geo-pill__track" aria-hidden="true"><span class="top-panel-geo-pill__thumb"></span></span>
+            </span>
+          </label>
           <button type="button" class="theme-chip" id="levelEditorButton">编辑关卡</button>
           <button type="button" class="theme-chip" id="uiThemeToggleTop">深色模式</button>
         </section>
@@ -148,6 +186,16 @@ export function renderGameUiShell(app: HTMLElement, requiredElement: RequiredEle
         <section class="pause-overlay" id="pausePanel">
           <div class="pause-card">
             <h2>游戏暂停</h2>
+            <div class="home-geo-mapping-panel home-geo-mapping-panel--tower-difficulty" role="group" aria-label="塔防运行时难度">
+              <div class="home-geo-mapping-panel__text">
+                <strong class="home-geo-mapping-panel__title">塔防难度</strong>
+                <p class="home-geo-mapping-panel__desc">不重载棋盘与存档格子。<strong>已出场敌人不重算血量</strong>；从<strong>下一次刷怪</strong>及<strong>后续未开始的波</strong>起按当前档位缩放。</p>
+              </div>
+              <div class="home-geo-mapping-panel__tower-diff-slot">
+                <input type="range" id="defenseDifficultyPause" min="1" max="5" step="1" value="3" aria-valuemin="1" aria-valuemax="5" aria-valuenow="3" />
+                <span id="defenseDifficultyPauseHint" class="home-geo-mapping-panel__tower-diff-hint"></span>
+              </div>
+            </div>
             <div class="pause-actions">
               <button class="primary" id="resumeButton">继续游戏</button>
               <button id="pauseSaveButton">保存进度</button>
@@ -211,6 +259,28 @@ export function renderGameUiShell(app: HTMLElement, requiredElement: RequiredEle
             </div>
           </div>
         </section>
+        <section class="game-over-overlay" id="defenseVictoryPromptPanel" aria-hidden="true">
+          <div class="game-over-vignette"></div>
+          <div class="game-over-card">
+            <h2 class="game-over-title">通关</h2>
+            <p>你已经完成标准 20 波塔防攻势。可以选择<strong>无尽模式</strong>继续挑战不断增强的敌军，或直接<strong>结算胜利</strong>。</p>
+            <div class="game-over-actions" style="flex-wrap: wrap; gap: 10px; justify-content: center;">
+              <button class="premium" type="button" id="defenseEndlessConfirmBtn">开启无尽模式</button>
+              <button type="button" id="defenseStandardCompleteBtn">结算胜利</button>
+            </div>
+          </div>
+        </section>
+        <section class="game-over-overlay game-victory-overlay" id="gameVictoryPanel" aria-hidden="true">
+          <div class="game-over-vignette"></div>
+          <div class="game-over-card">
+            <h2 class="game-over-title" id="gameVictoryTitle">胜利</h2>
+            <p class="game-over-reason" id="gameVictoryReason"></p>
+            <div class="game-over-actions">
+              <button class="premium" type="button" id="gameVictoryRestartBtn">重新开始</button>
+              <button type="button" id="gameVictoryMapBtn">换一个关卡</button>
+            </div>
+          </div>
+        </section>
         <section class="safe-zone-shop" id="safeZoneShopPanel" aria-hidden="true">
           <div class="shop-card">
             <div class="shop-header">
@@ -227,6 +297,8 @@ export function renderGameUiShell(app: HTMLElement, requiredElement: RequiredEle
   return {
     gameRootEl: requiredElement(".game-root"),
     sceneHost: requiredElement(".scene-host"),
+    gameGeoMappingToggle: requiredElement<HTMLInputElement>("#gameGeoMappingToggle"),
+    topGeoMappingToggle: requiredElement<HTMLInputElement>("#topGeoMappingToggle"),
     toastElement: requiredElement("#toastCenter"),
     sideToastElement: requiredElement("#toastSide"),
     modeElement: requiredElement("#modeValue"),
@@ -259,6 +331,10 @@ export function renderGameUiShell(app: HTMLElement, requiredElement: RequiredEle
     gachaFocusTabsElement: requiredElement("#gachaFocusTabs"),
     pausePanel: requiredElement("#pausePanel"),
     toolbar: requiredElement("#buildToolbar"),
+    defenseDifficultyHome: requiredElement<HTMLInputElement>("#defenseDifficultyHome"),
+    defenseDifficultyHomeHint: requiredElement("#defenseDifficultyHomeHint"),
+    defenseDifficultyPause: requiredElement<HTMLInputElement>("#defenseDifficultyPause"),
+    defenseDifficultyPauseHint: requiredElement("#defenseDifficultyPauseHint"),
     exploreHud: requiredElement("#exploreHud"),
     exploreLevelBadge: requiredElement("#exploreLevelBadge"),
     exploreXpBar: requiredElement("#exploreXpBar"),
@@ -270,6 +346,10 @@ export function renderGameUiShell(app: HTMLElement, requiredElement: RequiredEle
     inventoryPanel: requiredElement("#inventoryPanel"),
     inventoryGrid: requiredElement("#inventoryGrid"),
     gameOverPanel: requiredElement("#gameOverPanel"),
+    defenseVictoryPromptPanel: requiredElement("#defenseVictoryPromptPanel"),
+    gameVictoryPanel: requiredElement("#gameVictoryPanel"),
+    gameVictoryTitle: requiredElement("#gameVictoryTitle"),
+    gameVictoryReason: requiredElement("#gameVictoryReason"),
     safeZoneShopPanel: requiredElement("#safeZoneShopPanel"),
   };
 }

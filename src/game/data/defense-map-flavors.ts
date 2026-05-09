@@ -1,0 +1,105 @@
+import type { DefenseMapFlavor } from "../core/types";
+
+/** 与 `maps.ts` 中内置塔防 id 对齐；编辑器同步关卡亦应携带同名 defenseFlavor（见 EditorLevelMap） */
+export const DEFENSE_MAP_FLAVORS: Record<string, DefenseMapFlavor> = {
+  "beijing-hub": {
+    enemyNames: {
+      basic: "炭火烤鸭机甲",
+      scout: "胡同豆汁儿飞艇",
+      hacker: "798 直播干扰球",
+      tank: "故宫墙盾车",
+      swarm: "庙会糖葫芦蜂群",
+    },
+    towerNames: {
+      machine: "大裤衩·玻璃棱阵",
+      cannon: "鸟巢·钢环重炮",
+      frost: "什刹海·冰面减速塔",
+      mine: "长城砖·感应雷",
+      beacon: "钟鼓楼·谐振信标",
+      stellar: "天坛星轨·棱镜",
+      qinqiong: "正阳门神·秦琼",
+      liqingzhao: "御河词牌·漱玉",
+      bianque: "太医院·青囊",
+    },
+  },
+  "shanghai-bund": {
+    enemyNames: {
+      basic: "生煎包蒸汽团",
+      scout: "外卖骑手机车怪",
+      hacker: "陆家嘴量化幽灵",
+      tank: "石库门铁栅门",
+      swarm: "小笼包皮塔群",
+    },
+    towerNames: {
+      machine: "外滩钟楼·加特林廊",
+      cannon: "杨浦大桥·桁架炮",
+      frost: "苏州河·潮汐霜塔",
+      mine: "里弄石板·瓦斯雷",
+      beacon: "东方明珠脉冲信标",
+      stellar: "环贸棱光·魔都 S",
+      qinqiong: "石库门门将·忠义",
+      liqingzhao: "申报馆·墨色潮",
+      bianque: "仁济堂·神医针",
+    },
+  },
+  "guangzhou-ridge": {
+    enemyNames: {
+      basic: "双皮奶茶柱团",
+      scout: "茶楼早点无人机",
+      hacker: "珠江新城 LED 爬虫",
+      tank: "骑楼砖碉堡",
+      swarm: "肠粉蒸汽云",
+    },
+    towerNames: {
+      machine: "花城大道·榕树机枪",
+      cannon: "蛮腰塔焰火炮",
+      frost: "白云骤雨冷凝塔",
+      mine: "茶位费·蒸笼雷",
+      beacon: "海珠桥谐振灯塔",
+      stellar: "广交会射灯·星辰",
+      qinqiong: "岭南门楼·忠义像",
+      liqingzhao: "珠江夜雨·词句潮",
+      bianque: "凉茶铺·神医柜",
+    },
+  },
+  "shenzhen-tech": {
+    enemyNames: {
+      basic: "科技园加班盒",
+      scout: "低空物流穿越机",
+      hacker: "南山 VPN 爬虫",
+      tank: "工地塔吊盾蜥",
+      swarm: "创客咖啡杯阵列",
+    },
+    towerNames: {
+      machine: "南山芯片·阵列枪",
+      cannon: "人才公园·镭射榴弹",
+      frost: "滨海冷凝·海风塔",
+      mine: "地铁施工·警戒雷",
+      beacon: "5G 小基站·功放",
+      stellar: "湾区别墅·镭射天河",
+      qinqiong: "海关大楼·守护神",
+      liqingzhao: "湾区墨色·潮汐诗",
+      bianque: "互联网医院·青囊 AI",
+    },
+  },
+  "jinan-harbor": {
+    enemyNames: {
+      basic: "把子肉热浪团",
+      scout: "趵突飞泉蝌蚪",
+      hacker: "泉标 Wi-Fi 水母",
+      tank: "黑虎泉铁闸蟹",
+      swarm: "油旋饼旋涡群",
+    },
+    towerNames: {
+      machine: "泉城广场·七十二泉眼阵",
+      cannon: "四门塔古刹榴弹",
+      frost: "千佛山雪线凝霜",
+      mine: "泉港栈桥感应雷",
+      beacon: "解放阁谐振信标",
+      stellar: "明湖夜游·珠光棱镜",
+      qinqiong: "护城河门神",
+      liqingzhao: "易安乐府·潮汐",
+      bianque: "华佗庙·神医塔",
+    },
+  },
+};

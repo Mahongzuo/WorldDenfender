@@ -17,6 +17,12 @@ export type EnemyType = "basic" | "scout" | "hacker" | "tank" | "swarm";
 export type GachaRarity = "S" | "A" | "B";
 export type ModelTarget = BuildId | "moneyDrop" | "player";
 
+/** 塔防地图上展示用的地域化名（不写则使用全局 BUILD_SPECS / 兵种 id） */
+export interface DefenseMapFlavor {
+  enemyNames?: Partial<Record<EnemyType, string>>;
+  towerNames?: Partial<Record<BuildId, string>>;
+}
+
 export interface PlayerExploreTransform {
   offsetMeters: { x: number; y: number; z: number };
   rotationDeg: { x: number; y: number; z: number };
@@ -96,6 +102,12 @@ export interface SaveData {
   spawnRemaining: number;
   spawnCooldown: number;
   waveActive: boolean;
+  /** 塔防运行时难度 1–5（见 defense-difficulty） */
+  defenseDifficulty?: number;
+  /** 已开启无尽强度（清完 DEFENSE_STANDARD_WAVE_COUNT 波后可选） */
+  defenseEndless?: boolean;
+  /** 塔防已完成标准波数，正在等待无尽/结算抉择（读档恢复原状态） */
+  defenseVictoryAwaitingChoice?: boolean;
   buildings: Array<{ id: BuildId; cell: GridCell }>;
   customModelUrls: Partial<Record<BuildId, string>>;
   customDropModelUrl: string;
@@ -337,6 +349,8 @@ export interface MapDefinition {
   exploreBosses?: ExploreBossPlacement[];
   exploreSpawners?: ExploreSpawnerPlacement[];
   explorePickups?: ExplorePickupPlacement[];
+  /** 关卡地域化：敌兵/防御塔 HUD 展示名（同步到编辑器 map.defenseFlavor） */
+  defenseFlavor?: DefenseMapFlavor;
 }
 
 export interface EditorCell {
@@ -386,6 +400,8 @@ export interface EditorLevelMap {
   cutscenes?: LevelCutsceneConfig;
   /** 关卡配乐与塔型攻击音效覆盖 */
   levelAudio?: LevelMapAudioConfig;
+  /** 与运行时 MapDefinition.defenseFlavor 对应 */
+  defenseFlavor?: DefenseMapFlavor;
 }
 
 export interface EditorExplorationLayout {
@@ -546,6 +562,9 @@ export interface BuildSpec {
   maxBlockCount?: number;
   healRange?: number;
   healAmount?: number;
+  /** 0–1，未设置时防御塔普攻基础按 5% 暴击掷骰 */
+  critChance?: number;
+  critDamageMult?: number;
   activeSkill?: {
     name: string;
     description: string;
@@ -595,6 +614,11 @@ export interface Enemy {
   slowFactor: number;
   blockedBy: Building | null;
   stunUntil: number;
+  /** HUD/提示用本地化名称（地图上 flavor 写入） */
+  displayName?: string;
+  /** 行进或驻足时对周身防御建筑的每秒伤害（hacker 为高射程掷射） */
+  towerSiegeDps?: number;
+  towerSiegeRadiusWorld?: number;
 }
 
 export interface MoneyDrop {
@@ -613,10 +637,15 @@ export interface TimedEffect {
   ttl: number;
   maxTtl: number;
   grow: number;
+  /** 峰值不透明度；淡出时实际 opacity = baseOpacity × (ttl/maxTtl)。
+   *  未设置则与旧行为一致（直接写入 alpha）。 */
+  baseOpacity?: number;
   /** 每帧更新粒子位置等（先于 ttl 递减调用） */
   tick?: (dt: number) => void;
   /** 不进行按 ttl 整体淡出（用于飞向目标的炮弹本体） */
   suppressOpacityFade?: boolean;
+  /** 已在 tick 内从 fxGroup 移除并 dispose；ttl 到期时勿重复清理 */
+  runtimeDisposed?: boolean;
 }
 
 /** 同一卡池内可选的「当期 UP」干员；选中后出 S 时仅给该干员。 */

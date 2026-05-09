@@ -23,8 +23,8 @@ import {
     applyEraserBrush,
     resetEraserPreviewAfterMapRebuild
 } from './editor/eraser-tool.js';
-import { statusLabel, actorCategoryLabel, summaryStats, gameplayPlacementLabel, modelBindShortLabel, isImageAssetPath, isModelAssetPath, groupLevels, compareRegionKeys, hasDefenseLayout, hasExploreLayout, isJinanLevel, normalizePlaceSearchResult, levelVideoCityContext, normalizeCityIdentity, pickPreferredGameplayTab } from './editor/display-utils.js';
-import { pickLevelId, uniqueLevelId, uniqueTemplateId, findLevelById, uniqueGameplayEntryId } from './editor/id-utils.js';
+import { statusLabel, gameplayPlacementLabel, isImageAssetPath, isModelAssetPath, groupLevels, compareRegionKeys, hasDefenseLayout, hasExploreLayout, isJinanLevel, normalizePlaceSearchResult, levelVideoCityContext, normalizeCityIdentity, pickPreferredGameplayTab } from './editor/display-utils.js';
+import { pickLevelId, uniqueLevelId, findLevelById, uniqueGameplayEntryId } from './editor/id-utils.js';
 import { resolveSpecialGeoForLevel, cloneGeoConfig, applyDefenseLayout, applyExploreLayout, createDraftLevel, ensureExplorationLayout } from './editor/layout-presets.js';
 import { mergeExploreGameplayDisplay, readExploreGameplayRawFromDomSection } from './editor/explore-gameplay-defaults.js';
 import { markerHtml, themeColorInput, findBoardImageLayerById } from './editor/html-builders.js';
@@ -44,11 +44,7 @@ import { bindGameplayUi as _bindGameplayUi, renderGameplayEditor as _renderGamep
 import {
     renderModelEditor as _renderModelEditor,
     replaceSelectedModel as _replaceSelectedModel,
-    uploadNewModelFromInspector as _uploadNewModelFromInspector,
-    renderModelAssets as _renderModelAssets,
-    uploadModelAsset as _uploadModelAsset,
-    bindActorTemplateModelControls as _bindActorTemplateModelControls,
-    applyActorTemplateUploadedModel as _applyActorTemplateUploadedModel
+    uploadNewModelFromInspector as _uploadNewModelFromInspector
 } from './editor/model-editor.js';
 import { renderSelectionInspector as _renderSelectionInspector } from './editor/selection-inspector.js';
 import { bindWaveEditorUi as _bindWaveEditorUi, renderWaveList as _renderWaveList } from './editor/wave-editor.js';
@@ -92,7 +88,6 @@ import {
     var state = null;
     var selectedLevelId = new URLSearchParams(window.location.search).get('levelId') || '';
     var selectedObject = null;
-    var selectedTemplateId = 'tower-machine';
     var activeTool = 'select';
     var activeStatusFilter = 'all';
     var activeWorkbench = 'level';
@@ -233,12 +228,8 @@ import {
         btnResizeMap: document.getElementById('btnResizeMap'),
         btnDeleteSelection: document.getElementById('btnDeleteSelection'),
         selectionInspector: document.getElementById('selectionInspector'),
-        actorPalette: document.getElementById('actorPalette'),
-        btnCreateActorTemplate: document.getElementById('btnCreateActorTemplate'),
         waveList: document.getElementById('waveList'),
         btnAddWave: document.getElementById('btnAddWave'),
-        modelUpload: document.getElementById('modelUpload'),
-        modelAssetList: document.getElementById('modelAssetList'),
         statusBadge: document.getElementById('statusBadge'),
         statusText: document.getElementById('statusText'),
         towerModelList: document.getElementById('towerModelList'),
@@ -383,7 +374,6 @@ import {
         ctx.state = state;
         ctx.selectedLevelId = selectedLevelId;
         ctx.selectedObject = selectedObject;
-        ctx.selectedTemplateId = selectedTemplateId;
         ctx.activeTool = activeTool;
         ctx.activeStatusFilter = activeStatusFilter;
         ctx.activeWorkbench = activeWorkbench;
@@ -947,9 +937,7 @@ import {
         renderLevelTree();
         renderLevelDetails();
         renderMap();
-        renderActorPalette();
         renderWaveList();
-        renderModelAssets();
         renderGameAssetPanel();
         renderOverview();
         renderGameplayEditor();
@@ -1871,7 +1859,10 @@ import {
         ].concat(cityConfig && (cityConfig.characters.length || cityConfig.skills.length || cityConfig.enemies.length)
             ? ['角色 ' + cityConfig.characters.length, '技能 ' + cityConfig.skills.length, '敌人 ' + cityConfig.enemies.length]
             : []).join(' · ');
-        refs.levelSummary.textContent = '当前关卡：' + level.name + '。使用工具栏绘制地图，拖拽 Actor 模板到画布。';
+        refs.levelSummary.textContent =
+            '当前关卡：' +
+            level.name +
+            '。使用工具栏绘制地图；在「内容浏览器」点选模型后可用「模型 Actor」放在棋盘上；或在预览中拖入。「模型」工作台可上传与管理文件。';
         refs.fieldLevelName.value = level.name;
         refs.fieldStatus.value = level.status;
         refs.fieldCountry.value = level.location.countryName || '';
@@ -1987,6 +1978,59 @@ import {
         renderAll();
     }
 
+    /** 「模型 Actor」在棋盘落子时使用的 catalog 条目：内容浏览器所选 > 「模型」工作台所选 > 首条有路径资产。 */
+    function resolveActorPlacementModelId() {
+        var assets = getBrowsableModelAssets();
+        if (!assets.length) return '';
+        if (selectedContentBrowserAssetId && assets.some(function (a) { return a.id === selectedContentBrowserAssetId; })) {
+            return selectedContentBrowserAssetId;
+        }
+        if (selectedModelId && assets.some(function (a) { return a.id === selectedModelId; })) {
+            return selectedModelId;
+        }
+        var withPath = assets.find(function (a) {
+            return String(a.path || a.publicUrl || '').trim();
+        });
+        return (withPath || assets[0]).id;
+    }
+
+    function placeActorFromCatalogModel(modelId, col, row) {
+        var level = getLevel();
+        if (!level) return;
+        var asset = getBrowsableModelAssets().find(function (item) {
+            return item.id === modelId;
+        });
+        var path = asset ? String(asset.path || asset.publicUrl || '').trim() : '';
+        if (!asset || !path) {
+            setStatus(
+                '没有可用的模型：请在顶部「模型」工作台上传，或将文件放入 public/GameModels 后在「内容浏览器」中刷新；也可在浏览器里点击一张模型卡片后再放置。',
+                'error'
+            );
+            return;
+        }
+        var actor = {
+            id: uid('actor'),
+            templateId: '',
+            name: String(asset.name || '模型 Actor'),
+            category: 'model',
+            icon: String(asset.name || 'M').charAt(0).toUpperCase(),
+            modelId: asset.id,
+            modelPath: path,
+            col: col,
+            row: row,
+            rotation: 0,
+            scale: 1,
+            worldOffsetMeters: { x: 0, y: 0, z: 0 },
+            team: 'neutral',
+            stats: normalizeStats({ hp: 1, attack: 0, range: 1, fireRate: 0, cost: 0, cooldown: 0 })
+        };
+        level.map.actors.push(actor);
+        selectedObject = { kind: 'actor', id: actor.id };
+        level.status = level.status === 'draft' ? 'needs-work' : level.status;
+        markDirty('已放置 Actor');
+        renderAll();
+    }
+
     function moveActor(actorId, col, row) {
         _moveActor(mapEditEnv(), actorId, col, row);
     }
@@ -1998,106 +2042,6 @@ import {
     function eraseCellAt(col, row) {
         _eraseCellAt(mapEditEnv(), col, row);
     }
-    function renderActorPalette() {
-        var templates = getAvailableActorTemplates();
-        if (!templates.length) {
-            refs.actorPalette.innerHTML = '<div class="empty-state">暂无可用 Actor 模板。</div>';
-            return;
-        }
-        if (!templates.some(function (template) { return template.id === selectedTemplateId; })) {
-            selectedTemplateId = templates[0].id;
-        }
-        refs.actorPalette.innerHTML =
-            '<p class="section-hint actor-palette-hint">从下方模板拖到「棋盘布局」或「关卡预览」；松手落在格缝时也会按坐标吸附到最近格。每行可绑定项目模型与缩放（与塔防单位替换一致）。</p>' +
-            templates
-                .map(function (template) {
-                    var t = findActorTemplate(template.id) || template;
-                    var url = String(t.modelPath || '');
-                    var sc =
-                        t.templateModelScale != null && t.templateModelScale > 0 ? t.templateModelScale : 1;
-                    var cityOnly = template.source === 'cityGameplay';
-                    var modelUi = cityOnly
-                        ? '<p class="section-hint" style="margin:8px 10px;font-size:10px;">城市玩法条目：请到「Gameplay」工作台为敌人/模型换绑；此处占位只读。</p>'
-                        : '  <div class="actor-template-model game-asset-tower-row">' +
-                          '    <div class="game-asset-tower-title">模型</div>' +
-                          '    <div class="game-asset-tower-upload-col" data-actor-template-drop="' +
-                          escapeAttr(template.id) +
-                          '" title="从底部「项目模型」拖入">' +
-                          '      <label class="game-asset-upload tight">替换模型' +
-                          '        <input type="file" data-actor-template-file="' +
-                          escapeAttr(template.id) +
-                          '" accept=".glb,.gltf,.obj,model/gltf-binary,model/gltf+json" />' +
-                          '      </label>' +
-                          '      <div class="game-asset-tower-drop">拖入项目模型</div>' +
-                          '    </div>' +
-                          '    <label class="field-block game-asset-scale-tower"><span>缩放</span>' +
-                          '      <input type="number" data-actor-template-scale="' +
-                          escapeAttr(template.id) +
-                          '" min="0.1" max="8" step="0.1" value="' +
-                          String(sc) +
-                          '" />' +
-                          '    </label>' +
-                          '    <div class="asset-url-hint" title="' +
-                          escapeAttr(url || '未绑定 Actor 模板模型') +
-                          '">' +
-                          escapeHtml(url ? modelBindShortLabel(url) : '未配置') +
-                          '</div>' +
-                          '  </div>';
-                    return (
-                        '<div class="actor-template-wrap' +
-                        (template.id === selectedTemplateId ? ' actor-template-wrap--selected' : '') +
-                        '">' +
-                        '  <div class="actor-template' +
-                        (template.id === selectedTemplateId ? ' selected' : '') +
-                        '" draggable="true" data-template-id="' +
-                        escapeAttr(template.id) +
-                        '">' +
-                        '    <strong>' +
-                        escapeHtml(template.name) +
-                        '</strong>' +
-                        '    <span>' +
-                        escapeHtml(actorCategoryLabel(template.category)) +
-                        ' · ' +
-                        escapeHtml(summaryStats(template.stats)) +
-                        (template.source === 'cityGameplay' ? ' · 城市玩法库' : '') +
-                        '</span>' +
-                        '  </div>' +
-                        modelUi +
-                        '</div>'
-                    );
-                })
-                .join('');
-
-        refs.actorPalette.querySelectorAll('[data-template-id]').forEach(function (item) {
-            item.addEventListener('click', function () {
-                selectedTemplateId = item.getAttribute('data-template-id');
-                activeTool = 'actor';
-                document.querySelectorAll('[data-tool]').forEach(function (tool) {
-                    tool.classList.toggle('active', tool.getAttribute('data-tool') === 'actor');
-                });
-                refs.activeToolLabel.textContent = '当前工具：模型 Actor';
-                renderActorPalette();
-            });
-            item.addEventListener('dragstart', function (event) {
-                selectedTemplateId = item.getAttribute('data-template-id');
-                var payloadJson = JSON.stringify({ kind: 'template', id: selectedTemplateId });
-                if (event.dataTransfer) {
-                    event.dataTransfer.setData('application/json', payloadJson);
-                    event.dataTransfer.setData('text/plain', payloadJson);
-                    event.dataTransfer.effectAllowed = 'copy';
-                }
-            });
-        });
-        bindActorTemplateModelControls();
-    }
-
-    function bindActorTemplateModelControls() {
-        _bindActorTemplateModelControls(refs, actorModelSidebarEnv());
-    }
-
-    async function applyActorTemplateUploadedModel(templateId, file) {
-        return _applyActorTemplateUploadedModel(refs, actorModelSidebarEnv(), templateId, file);
-    }
 
     function renderSelectionInspector() {
         _renderSelectionInspector(refs, selectionInspectorEnv());
@@ -2105,52 +2049,6 @@ import {
 
     function renderWaveList() {
         _renderWaveList(refs, waveEditorEnv());
-    }
-
-    function renderModelAssets() {
-        _renderModelAssets(refs, actorModelSidebarEnv());
-    }
-
-    async function uploadModelAsset(file) {
-        return _uploadModelAsset(refs, actorModelSidebarEnv(), file);
-    }
-
-    function createActorTemplateFromSelection() {
-        var name = window.prompt('Actor 模板名称', '新 Actor 模板');
-        if (!name) return;
-        var id = uniqueTemplateId(state.actorTemplates, slugify(name) || 'custom-actor');
-        state.actorTemplates.push({
-            id: id,
-            name: name,
-            category: 'model',
-            modelId: '',
-            modelPath: '',
-            templateModelScale: 1,
-            icon: name.charAt(0).toUpperCase(),
-            stats: { hp: 100, attack: 0, range: 1, fireRate: 0, cost: 0, cooldown: 0 }
-        });
-        selectedTemplateId = id;
-        markDirty('已新增 Actor 模板');
-        renderActorPalette();
-    }
-
-    function createActorTemplateFromModel(modelId) {
-        var asset = getBrowsableModelAssets().find(function (item) { return item.id === modelId; });
-        if (!asset) return;
-        var id = uniqueTemplateId(state.actorTemplates, 'model-' + modelId);
-        state.actorTemplates.push({
-            id: id,
-            name: asset.name + ' Actor',
-            category: 'model',
-            modelId: modelId,
-            modelPath: asset.path || asset.publicUrl || '',
-            templateModelScale: 1,
-            icon: 'M',
-            stats: { hp: 1, attack: 0, range: 1, fireRate: 0, cost: 0, cooldown: 0 }
-        });
-        selectedTemplateId = id;
-        markDirty('已从模型创建 Actor 模板');
-        renderActorPalette();
     }
 
     function applyMapSize() {
@@ -2885,8 +2783,8 @@ import {
             getActiveEditorMode: function () {
                 return activeEditorMode;
             },
-            getSelectedTemplateId: function () {
-                return selectedTemplateId;
+            getSelectedActorPlacementModelId: function () {
+                return resolveActorPlacementModelId();
             },
             setSelectedObject: function (next) {
                 selectedObject = next;
@@ -2899,6 +2797,7 @@ import {
             markDirty: markDirty,
             schedulePreviewRefresh: schedulePreviewRefresh,
             placeActorFromTemplate: placeActorFromTemplate,
+            placeActorFromCatalogModel: placeActorFromCatalogModel,
             applyEraserBrush: function (col, row) {
                 applyEraserBrush(col, row, getLevel, eraseCellAt);
             },
@@ -2978,9 +2877,7 @@ import {
             renderLevelTree: renderLevelTree,
             applyMapSize: applyMapSize,
             deleteSelection: deleteSelection,
-            createActorTemplateFromSelection: createActorTemplateFromSelection,
             bindWaveEditorUi: bindWaveEditorUi,
-            uploadModelAsset: uploadModelAsset,
             setActiveWorkbench: function (value) {
                 activeWorkbench = value || 'level';
             },
@@ -3248,22 +3145,6 @@ import {
         };
     }
 
-    function actorModelSidebarEnv() {
-        return {
-            getBrowsableModelAssets: getBrowsableModelAssets,
-            getState: function () {
-                return state;
-            },
-            setStatus: setStatus,
-            markDirty: markDirty,
-            renderAll: renderAll,
-            renderActorPalette: renderActorPalette,
-            schedulePreviewRefresh: schedulePreviewRefresh,
-            uploadFileToProjectUrl: uploadFileToProjectUrl,
-            createActorTemplateFromModel: createActorTemplateFromModel
-        };
-    }
-
     function levelContentBrowserEnv() {
         return {
             getState: function () {
@@ -3301,7 +3182,8 @@ import {
             },
             markDirty: markDirty,
             setStatus: setStatus,
-            uploadFileToProjectUrl: uploadFileToProjectUrl
+            uploadFileToProjectUrl: uploadFileToProjectUrl,
+            revealProjectPathInExplorer: revealProjectPathInExplorer
         };
     }
 

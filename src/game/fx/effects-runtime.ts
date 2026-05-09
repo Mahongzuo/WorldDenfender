@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { setObjectOpacity } from "../core/browser-utils";
 import { distanceXZ } from "../core/runtime-grid";
 import type { BuildId, TimedEffect } from "../core/types";
+import { unwindFxSquashFromPlayfieldParent, worldPointToFxGroupLocal } from "./fx-coordinate-space";
 
 function blendTowardWhite(hex: number, t: number): number {
   const c = new THREE.Color(hex);
@@ -27,7 +28,7 @@ function towerFlightSpeed(id: BuildId): number {
   }
 }
 
-function makeProjectileMesh(buildId: BuildId, color: number): THREE.Mesh {
+function makeProjectileMesh(buildId: BuildId, color: number, fxGroup: THREE.Group): THREE.Mesh {
   const tint = new THREE.Color(color).multiplyScalar(0.88);
   let geometry: THREE.BufferGeometry;
   switch (buildId) {
@@ -54,10 +55,318 @@ function makeProjectileMesh(buildId: BuildId, color: number): THREE.Mesh {
     roughness: 0.38,
     emissive: tint.clone().multiplyScalar(0.78),
     emissiveIntensity: 1.05,
+    fog: false,
   });
   const mesh = new THREE.Mesh(geometry, mat);
   mesh.castShadow = false;
+  unwindFxSquashFromPlayfieldParent(mesh, fxGroup);
   return mesh;
+}
+
+/** Machine gun: tight sparks, no ring — fires too often for rings not to pile up */
+function addMachineHitFx(
+  effects: TimedEffect[],
+  fxGroup: THREE.Group,
+  center: THREE.Vector3,
+  color: number,
+): void {
+  const count = 18;
+  const positions = new Float32Array(count * 3);
+  const velocities = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    positions[i * 3] = center.x;
+    positions[i * 3 + 1] = center.y + 0.1;
+    positions[i * 3 + 2] = center.z;
+    const angle = (i / count) * Math.PI * 2;
+    const speed = 1.8 + Math.random() * 2.2;
+    velocities[i * 3] = Math.cos(angle) * speed;
+    velocities[i * 3 + 1] = Math.random() * 2.5 + 0.8;
+    velocities[i * 3 + 2] = Math.sin(angle) * speed;
+  }
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  const pts = new THREE.Points(
+    geom,
+    new THREE.PointsMaterial({
+      color: blendTowardWhite(color, 0.1),
+      size: 0.1,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      sizeAttenuation: true,
+    }),
+  );
+  fxGroup.add(pts);
+  effects.push({
+    object: pts,
+    ttl: 0.22,
+    maxTtl: 0.22,
+    grow: 0,
+    baseOpacity: 0.88,
+    tick: (dt: number) => {
+      const pos = geom.attributes.position.array as Float32Array;
+      for (let i = 0; i < count; i++) {
+        pos[i * 3] += velocities[i * 3] * dt;
+        pos[i * 3 + 1] += velocities[i * 3 + 1] * dt;
+        pos[i * 3 + 2] += velocities[i * 3 + 2] * dt;
+        velocities[i * 3 + 1] -= 14 * dt;
+      }
+      geom.attributes.position.needsUpdate = true;
+    },
+  });
+  const flash = new THREE.Mesh(
+    new THREE.SphereGeometry(0.1, 6, 4),
+    new THREE.MeshBasicMaterial({
+      color: blendTowardWhite(color, 0.3),
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    }),
+  );
+  flash.position.copy(center);
+  unwindFxSquashFromPlayfieldParent(flash, fxGroup);
+  fxGroup.add(flash);
+  effects.push({ object: flash, ttl: 0.07, maxTtl: 0.07, grow: 5, baseOpacity: 0.72 });
+}
+
+/** Frost: ice shard scatter + small pulse ring */
+function addFrostHitFx(
+  effects: TimedEffect[],
+  fxGroup: THREE.Group,
+  center: THREE.Vector3,
+  color: number,
+): void {
+  const count = 24;
+  const positions = new Float32Array(count * 3);
+  const velocities = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    positions[i * 3] = center.x + (Math.random() - 0.5) * 0.08;
+    positions[i * 3 + 1] = center.y + 0.08;
+    positions[i * 3 + 2] = center.z + (Math.random() - 0.5) * 0.08;
+    const angle = (i / count) * Math.PI * 2;
+    const speed = 1.5 + Math.random() * 2.0;
+    velocities[i * 3] = Math.cos(angle) * speed * (0.7 + Math.random() * 0.6);
+    velocities[i * 3 + 1] = Math.random() * 1.8 + 0.3;
+    velocities[i * 3 + 2] = Math.sin(angle) * speed * (0.7 + Math.random() * 0.6);
+  }
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  const pts = new THREE.Points(
+    geom,
+    new THREE.PointsMaterial({
+      color: blendTowardWhite(color, 0.22),
+      size: 0.14,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      sizeAttenuation: true,
+    }),
+  );
+  fxGroup.add(pts);
+  effects.push({
+    object: pts,
+    ttl: 0.45,
+    maxTtl: 0.45,
+    grow: 0,
+    baseOpacity: 0.85,
+    tick: (dt: number) => {
+      const pos = geom.attributes.position.array as Float32Array;
+      for (let i = 0; i < count; i++) {
+        pos[i * 3] += velocities[i * 3] * dt;
+        pos[i * 3 + 1] += velocities[i * 3 + 1] * dt;
+        pos[i * 3 + 2] += velocities[i * 3 + 2] * dt;
+        velocities[i * 3 + 1] -= 8 * dt;
+        velocities[i * 3] *= (1 - 0.08 * dt * 60);
+        velocities[i * 3 + 2] *= (1 - 0.08 * dt * 60);
+      }
+      geom.attributes.position.needsUpdate = true;
+    },
+  });
+  // No ring — frost fires often enough that rings stack and blowout
+  const flash = new THREE.Mesh(
+    new THREE.SphereGeometry(0.16, 8, 6),
+    new THREE.MeshBasicMaterial({
+      color: 0xaaeeff,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    }),
+  );
+  flash.position.copy(center);
+  unwindFxSquashFromPlayfieldParent(flash, fxGroup);
+  fxGroup.add(flash);
+  effects.push({ object: flash, ttl: 0.1, maxTtl: 0.1, grow: 6, baseOpacity: 0.48 });
+}
+
+/** Stellar: 8-point starburst + golden stardust */
+function addStellarHitFx(
+  effects: TimedEffect[],
+  fxGroup: THREE.Group,
+  center: THREE.Vector3,
+  color: number,
+): void {
+  const starPts = 8;
+  const baseY = center.y + 0.06;
+  for (let i = 0; i < starPts; i++) {
+    const angle = (i / starPts) * Math.PI * 2;
+    const length = 0.55 + Math.random() * 0.4;
+    const endPt = new THREE.Vector3(
+      center.x + Math.cos(angle) * length,
+      baseY,
+      center.z + Math.sin(angle) * length,
+    );
+    const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(center.x, baseY, center.z), endPt]);
+    const line = new THREE.Line(
+      geo,
+      new THREE.LineBasicMaterial({ color: blendTowardWhite(color, 0.15), transparent: true, blending: THREE.AdditiveBlending }),
+    );
+    fxGroup.add(line);
+    effects.push({ object: line, ttl: 0.24, maxTtl: 0.24, grow: 0, baseOpacity: 0.82 });
+  }
+  const count = 28;
+  const positions = new Float32Array(count * 3);
+  const velocities = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    positions[i * 3] = center.x + (Math.random() - 0.5) * 0.06;
+    positions[i * 3 + 1] = center.y + 0.12;
+    positions[i * 3 + 2] = center.z + (Math.random() - 0.5) * 0.06;
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 2.5 + Math.random() * 3.5;
+    velocities[i * 3] = Math.cos(angle) * speed;
+    velocities[i * 3 + 1] = Math.random() * 3.5 + 1.0;
+    velocities[i * 3 + 2] = Math.sin(angle) * speed;
+  }
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  const pts = new THREE.Points(
+    geom,
+    new THREE.PointsMaterial({
+      color: 0xffd700,
+      size: 0.13,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      sizeAttenuation: true,
+    }),
+  );
+  fxGroup.add(pts);
+  effects.push({
+    object: pts,
+    ttl: 0.52,
+    maxTtl: 0.52,
+    grow: 0,
+    baseOpacity: 0.9,
+    tick: (dt: number) => {
+      const pos = geom.attributes.position.array as Float32Array;
+      for (let i = 0; i < count; i++) {
+        pos[i * 3] += velocities[i * 3] * dt;
+        pos[i * 3 + 1] += velocities[i * 3 + 1] * dt;
+        pos[i * 3 + 2] += velocities[i * 3 + 2] * dt;
+        velocities[i * 3 + 1] -= 12 * dt;
+      }
+      geom.attributes.position.needsUpdate = true;
+    },
+  });
+  const flash = new THREE.Mesh(
+    new THREE.SphereGeometry(0.15, 8, 6),
+    new THREE.MeshBasicMaterial({
+      color: blendTowardWhite(color, 0.35),
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    }),
+  );
+  flash.position.copy(center);
+  unwindFxSquashFromPlayfieldParent(flash, fxGroup);
+  fxGroup.add(flash);
+  effects.push({ object: flash, ttl: 0.11, maxTtl: 0.11, grow: 10, baseOpacity: 0.62 });
+}
+
+/** LiqingZhao: ink-brush streaks + droplet particles */
+function addLiqingzhaoHitFx(
+  effects: TimedEffect[],
+  fxGroup: THREE.Group,
+  center: THREE.Vector3,
+  color: number,
+): void {
+  const lineCount = 5;
+  for (let i = 0; i < lineCount; i++) {
+    const angle = (i / lineCount) * Math.PI * 2 + Math.random() * 0.6;
+    const len = 0.45 + Math.random() * 0.65;
+    const endPt = new THREE.Vector3(
+      center.x + Math.cos(angle) * len,
+      center.y + Math.random() * 0.3,
+      center.z + Math.sin(angle) * len,
+    );
+    const geo = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(center.x, center.y + 0.15, center.z),
+      endPt,
+    ]);
+    const line = new THREE.Line(
+      geo,
+      new THREE.LineBasicMaterial({ color: blendTowardWhite(color, 0.12), transparent: true, blending: THREE.AdditiveBlending }),
+    );
+    fxGroup.add(line);
+    const ttl = 0.3 + Math.random() * 0.15;
+    effects.push({ object: line, ttl, maxTtl: ttl, grow: 0, baseOpacity: 0.72 });
+  }
+  const count = 20;
+  const positions = new Float32Array(count * 3);
+  const velocities = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    positions[i * 3] = center.x + (Math.random() - 0.5) * 0.1;
+    positions[i * 3 + 1] = center.y + 0.1;
+    positions[i * 3 + 2] = center.z + (Math.random() - 0.5) * 0.1;
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 1.2 + Math.random() * 2.4;
+    velocities[i * 3] = Math.cos(angle) * speed;
+    velocities[i * 3 + 1] = Math.random() * 2.2 + 0.5;
+    velocities[i * 3 + 2] = Math.sin(angle) * speed;
+  }
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  const pts = new THREE.Points(
+    geom,
+    new THREE.PointsMaterial({
+      color,
+      size: 0.12,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      sizeAttenuation: true,
+    }),
+  );
+  fxGroup.add(pts);
+  effects.push({
+    object: pts,
+    ttl: 0.45,
+    maxTtl: 0.45,
+    grow: 0,
+    baseOpacity: 0.8,
+    tick: (dt: number) => {
+      const pos = geom.attributes.position.array as Float32Array;
+      for (let i = 0; i < count; i++) {
+        pos[i * 3] += velocities[i * 3] * dt;
+        pos[i * 3 + 1] += velocities[i * 3 + 1] * dt;
+        pos[i * 3 + 2] += velocities[i * 3 + 2] * dt;
+        velocities[i * 3 + 1] -= 10 * dt;
+      }
+      geom.attributes.position.needsUpdate = true;
+    },
+  });
+  const flash = new THREE.Mesh(
+    new THREE.SphereGeometry(0.14, 8, 6),
+    new THREE.MeshBasicMaterial({
+      color: 0x00e5ff,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    }),
+  );
+  flash.position.copy(center);
+  unwindFxSquashFromPlayfieldParent(flash, fxGroup);
+  fxGroup.add(flash);
+  effects.push({ object: flash, ttl: 0.1, maxTtl: 0.1, grow: 7, baseOpacity: 0.52 });
 }
 
 function addPointHitBurst(
@@ -67,17 +376,23 @@ function addPointHitBurst(
   color: number,
   towerId: BuildId,
 ): void {
-  const impactScale =
-    towerId === "machine"
-      ? 0.78
-      : towerId === "frost"
-        ? 0.95
-        : towerId === "stellar"
-          ? 1.12
-          : towerId === "liqingzhao"
-            ? 1.18
-            : 0.9;
-  addSparkBurstImpact(effects, fxGroup, center, color, impactScale);
+  const localHit = worldPointToFxGroupLocal(fxGroup, center);
+  switch (towerId) {
+    case "machine":
+      addMachineHitFx(effects, fxGroup, localHit, color);
+      break;
+    case "frost":
+      addFrostHitFx(effects, fxGroup, localHit, color);
+      break;
+    case "stellar":
+      addStellarHitFx(effects, fxGroup, localHit, color);
+      break;
+    case "liqingzhao":
+      addLiqingzhaoHitFx(effects, fxGroup, localHit, color);
+      break;
+    default:
+      addSparkBurstImpact(effects, fxGroup, center, color, towerId === "cannon" ? 0.85 : 0.9);
+  }
 }
 
 /**
@@ -93,7 +408,9 @@ export function addTowerProjectileImpactFx(
   towerId: BuildId,
   splashImpactRadiusWorld?: number,
 ): void {
-  const dir = new THREE.Vector3().subVectors(to, from);
+  const fromL = worldPointToFxGroupLocal(fxGroup, from);
+  const toL = worldPointToFxGroupLocal(fxGroup, to);
+  const dir = new THREE.Vector3().subVectors(toL, fromL);
   const dist = dir.length();
   if (dist < 0.025) {
     if (splashImpactRadiusWorld !== undefined && splashImpactRadiusWorld > 0) {
@@ -110,7 +427,7 @@ export function addTowerProjectileImpactFx(
   const arcLift = THREE.MathUtils.clamp(0.34 + dist * 0.072, 0.3, 2.35);
 
   const group = new THREE.Group();
-  const core = makeProjectileMesh(towerId, towerColor);
+  const core = makeProjectileMesh(towerId, towerColor, fxGroup);
   group.add(core);
 
   const trail = new THREE.Points(
@@ -131,36 +448,25 @@ export function addTowerProjectileImpactFx(
   trail.position.set(0, 0, 0);
   group.add(trail);
 
-  group.position.copy(from.clone().addScaledVector(nd, 0.05));
+  group.position.copy(fromL.clone().addScaledVector(nd, 0.05));
   group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), nd);
   fxGroup.add(group);
 
   let age = 0;
   let impactDone = false;
-  const fromC = from.clone();
-  const toC = to.clone();
+  const fromC = fromL.clone();
+  const toC = toL.clone();
 
-  const muzzle = new THREE.Sprite(
-    new THREE.SpriteMaterial({
-      color: towerColor,
-      transparent: true,
-      opacity: 0.66,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    }),
-  );
-  muzzle.scale.set(0.86, 0.86, 1);
-  muzzle.position.copy(fromC);
-  fxGroup.add(muzzle);
-  effects.push({ object: muzzle, ttl: 0.08, maxTtl: 0.08, grow: 2.2 });
-
-  effects.push({
+  const flightEffect: TimedEffect = {
     object: group,
     ttl: travel + 0.04,
     maxTtl: travel + 0.04,
     grow: 0,
     suppressOpacityFade: true,
     tick: (dt: number) => {
+      if (flightEffect.runtimeDisposed) {
+        return;
+      }
       age += dt;
       const p = Math.min(age / travel, 1);
       const wp = Math.min(p + Math.max(0.028, travel * 0.02), 1);
@@ -181,13 +487,19 @@ export function addTowerProjectileImpactFx(
       if (p >= 1 && !impactDone) {
         impactDone = true;
         if (splashImpactRadiusWorld !== undefined && splashImpactRadiusWorld > 0) {
-          addExplosionEffect(effects, fxGroup, toC.clone(), splashImpactRadiusWorld, towerColor);
+          addExplosionEffect(effects, fxGroup, to.clone(), splashImpactRadiusWorld, towerColor);
         } else {
-          addPointHitBurst(effects, fxGroup, toC.clone(), towerColor, towerId);
+          addPointHitBurst(effects, fxGroup, to.clone(), towerColor, towerId);
         }
       }
+      if (p >= 1 && impactDone) {
+        flightEffect.runtimeDisposed = true;
+        fxGroup.remove(group);
+        disposeObject3D(group);
+      }
     },
-  });
+  };
+  effects.push(flightEffect);
 }
 
 export function addBeamEffect(
@@ -199,7 +511,9 @@ export function addBeamEffect(
   lineOpacity = 0.82,
   ttl = 0.12,
 ): void {
-  const geometry = new THREE.BufferGeometry().setFromPoints([from, to]);
+  const fromL = worldPointToFxGroupLocal(fxGroup, from);
+  const toL = worldPointToFxGroupLocal(fxGroup, to);
+  const geometry = new THREE.BufferGeometry().setFromPoints([fromL, toL]);
   const material = new THREE.LineBasicMaterial({
     color,
     transparent: true,
@@ -209,7 +523,7 @@ export function addBeamEffect(
   const group = new THREE.Group();
   group.add(line);
 
-  const dir = new THREE.Vector3().subVectors(to, from);
+  const dir = new THREE.Vector3().subVectors(toL, fromL);
   const length = dir.length();
   if (length > 0.001) {
     const tube = new THREE.Mesh(
@@ -222,13 +536,14 @@ export function addBeamEffect(
         depthWrite: false,
       }),
     );
-    tube.position.copy(from).addScaledVector(dir, 0.5);
+    tube.position.copy(fromL).addScaledVector(dir, 0.5);
     tube.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
+    unwindFxSquashFromPlayfieldParent(tube, fxGroup);
     group.add(tube);
   }
 
   fxGroup.add(group);
-  effects.push({ object: group, ttl, maxTtl: ttl, grow: 0 });
+  effects.push({ object: group, ttl, maxTtl: ttl, grow: 0, baseOpacity: 0.82 });
 }
 
 function addSparkBurstImpact(
@@ -238,14 +553,15 @@ function addSparkBurstImpact(
   color: number,
   impactScale = 1,
 ): void {
+  const c = worldPointToFxGroupLocal(fxGroup, center);
   const sc = THREE.MathUtils.clamp(impactScale, 0.45, 4);
   const count = Math.floor(42 + sc * 18);
   const positions = new Float32Array(count * 3);
   const velocities = new Float32Array(count * 3);
   for (let i = 0; i < count; i += 1) {
-    positions[i * 3] = center.x + (Math.random() - 0.5) * 0.05;
-    positions[i * 3 + 1] = center.y + (Math.random() - 0.5) * 0.12;
-    positions[i * 3 + 2] = center.z + (Math.random() - 0.5) * 0.05;
+    positions[i * 3] = c.x + (Math.random() - 0.5) * 0.05;
+    positions[i * 3 + 1] = c.y + (Math.random() - 0.5) * 0.12;
+    positions[i * 3 + 2] = c.z + (Math.random() - 0.5) * 0.05;
     const vx = (Math.random() - 0.5) * 5.5 * sc;
     const vy = Math.random() * 4.2 + 1.2 * sc;
     const vz = (Math.random() - 0.5) * 5.5 * sc;
@@ -256,8 +572,8 @@ function addSparkBurstImpact(
   const geom = new THREE.BufferGeometry();
   geom.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   const mat = new THREE.PointsMaterial({
-    color: blendTowardWhite(color, 0.16),
-    size: Math.min(0.32, 0.11 + sc * 0.045),
+    color: blendTowardWhite(color, 0.08),
+    size: Math.min(0.065, 0.025 + sc * 0.012),
     transparent: true,
     opacity: 1,
     blending: THREE.AdditiveBlending,
@@ -273,6 +589,7 @@ function addSparkBurstImpact(
     ttl: maxTtl,
     maxTtl,
     grow: 0,
+    baseOpacity: 0.92,
     tick: (dt: number) => {
       const pos = geom.attributes.position.array as Float32Array;
       for (let i = 0; i < count; i += 1) {
@@ -285,35 +602,20 @@ function addSparkBurstImpact(
     },
   });
 
-  const ring = new THREE.Mesh(
-    new THREE.RingGeometry(0.12 * sc, 0.44 * sc, 32),
-    new THREE.MeshBasicMaterial({
-      color,
-      transparent: true,
-      opacity: 0.55,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-    }),
-  );
-  ring.position.copy(center.clone().add(new THREE.Vector3(0, 0.04, 0)));
-  ring.rotation.x = -Math.PI / 2;
-  fxGroup.add(ring);
-  effects.push({ object: ring, ttl: 0.35, maxTtl: 0.35, grow: 3.4 });
-
+  // Flash burst — no flat ring here to avoid white blowout from stacking
   const flash = new THREE.Mesh(
-    new THREE.SphereGeometry(0.13 * sc, 8, 6),
+    new THREE.SphereGeometry(0.14 * sc, 8, 6),
     new THREE.MeshBasicMaterial({
       color: blendTowardWhite(color, 0.22),
       transparent: true,
-      opacity: 0.55,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     }),
   );
-  flash.position.copy(center.clone().add(new THREE.Vector3(0, 0.1, 0)));
+  flash.position.copy(c.clone().add(new THREE.Vector3(0, 0.1, 0)));
+  unwindFxSquashFromPlayfieldParent(flash, fxGroup);
   fxGroup.add(flash);
-  effects.push({ object: flash, ttl: 0.09, maxTtl: 0.09, grow: 8 });
+  effects.push({ object: flash, ttl: 0.1, maxTtl: 0.1, grow: 9, baseOpacity: 0.68 });
 }
 
 export function addAuroraLaserEffect(
@@ -322,14 +624,16 @@ export function addAuroraLaserEffect(
   from: THREE.Vector3,
   to: THREE.Vector3,
 ): void {
+  const fromL = worldPointToFxGroupLocal(fxGroup, from);
+  const toL = worldPointToFxGroupLocal(fxGroup, to);
   const group = new THREE.Group();
   const colors = [0x7ff8ff, 0xff4fd8, 0xd9ff00];
   colors.forEach((color, index) => {
     const offset = (index - 1) * 0.12;
-    const geometry = new THREE.BufferGeometry().setFromPoints([
-      from.clone().add(new THREE.Vector3(offset, 0, -offset)),
-      to.clone().add(new THREE.Vector3(offset, 0, -offset)),
-    ]);
+    const o = new THREE.Vector3(offset, 0, -offset);
+    const p0 = worldPointToFxGroupLocal(fxGroup, from.clone().add(o));
+    const p1 = worldPointToFxGroupLocal(fxGroup, to.clone().add(o));
+    const geometry = new THREE.BufferGeometry().setFromPoints([p0, p1]);
     const material = new THREE.LineBasicMaterial({
       color,
       transparent: true,
@@ -338,18 +642,22 @@ export function addAuroraLaserEffect(
     group.add(new THREE.Line(geometry, material));
   });
 
-  const center = from.clone().lerp(to, 0.5);
-  const length = distanceXZ(from, to);
+  const beamDir = new THREE.Vector3().subVectors(toL, fromL);
+  const beamLen = beamDir.length();
+  const length = distanceXZ(fromL, toL);
   const core = new THREE.Mesh(
-    new THREE.BoxGeometry(0.26, 0.18, length),
+    new THREE.BoxGeometry(0.26, 0.18, length > 1e-5 ? length : 0.01),
     new THREE.MeshBasicMaterial({ color: 0x7ff8ff, transparent: true, opacity: 0.42 }),
   );
-  core.position.copy(center);
-  core.lookAt(to);
+  unwindFxSquashFromPlayfieldParent(core, fxGroup);
+  core.position.copy(new THREE.Vector3().lerpVectors(fromL, toL, 0.5));
+  if (beamLen > 1e-6) {
+    core.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), beamDir.clone().normalize());
+  }
   group.add(core);
 
   fxGroup.add(group);
-  effects.push({ object: group, ttl: 0.55, maxTtl: 0.55, grow: 0.04 });
+  effects.push({ object: group, ttl: 0.55, maxTtl: 0.55, grow: 0.04, baseOpacity: 0.82 });
 }
 
 export function addExplosionEffect(
@@ -359,31 +667,9 @@ export function addExplosionEffect(
   radius: number,
   color: number,
 ): void {
-  const ring = new THREE.Mesh(
-    new THREE.TorusGeometry(radius, 0.06, 8, 60),
-    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending }),
-  );
-  ring.rotation.x = Math.PI / 2;
-  ring.position.set(center.x, 0.16, center.z);
-  fxGroup.add(ring);
-  effects.push({ object: ring, ttl: 0.45, maxTtl: 0.45, grow: 0.9 });
-
-  const ring2 = new THREE.Mesh(
-    new THREE.TorusGeometry(radius * 1.35, 0.04, 8, 48),
-    new THREE.MeshBasicMaterial({
-      color: blendTowardWhite(color, 0.28),
-      transparent: true,
-      opacity: 0.55,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    }),
-  );
-  ring2.rotation.x = Math.PI / 2;
-  ring2.position.set(center.x, 0.18, center.z);
-  fxGroup.add(ring2);
-  effects.push({ object: ring2, ttl: 0.55, maxTtl: 0.55, grow: 1.1 });
-
-  addSparkBurstImpact(effects, fxGroup, center, color, Math.min(3.8, radius * 0.58));
+  // No torus ring — addExplosionEffect is called for splash towers that fire rapidly;
+  // a ring would stack and blowout to white. Sparks are sufficient.
+  addSparkBurstImpact(effects, fxGroup, center, color, Math.min(3.2, radius * 0.52));
 }
 
 export function addMuzzleFlashEffect(
@@ -400,8 +686,11 @@ export function addMuzzleFlashEffect(
     blending: THREE.AdditiveBlending 
   });
   const sprite = new THREE.Sprite(spriteMaterial);
-  sprite.position.copy(position);
-  sprite.scale.set(0.8, 0.8, 1);
+  sprite.position.copy(worldPointToFxGroupLocal(fxGroup, position));
+  const sfx = fxGroup.scale.x;
+  const sfxOk =
+    sfx > 1.001 && Math.abs(sfx - fxGroup.scale.z) < 0.02 && fxGroup.scale.y <= 1.05;
+  sprite.scale.set(0.8 * (sfxOk ? 1 / sfx : 1), 0.8, 1);
   fxGroup.add(sprite);
   effects.push({ object: sprite, ttl: 0.08, maxTtl: 0.08, grow: 1.5 });
 }
@@ -414,7 +703,10 @@ export function addTrailEffect(
   color: number = 0xffffff,
   lineOpacity = 0.42,
 ): void {
-  const geometry = new THREE.BufferGeometry().setFromPoints([from, to]);
+  const geometry = new THREE.BufferGeometry().setFromPoints([
+    worldPointToFxGroupLocal(fxGroup, from.clone()),
+    worldPointToFxGroupLocal(fxGroup, to.clone()),
+  ]);
   const material = new THREE.LineBasicMaterial({
     color,
     transparent: true,
@@ -436,8 +728,12 @@ export function addStatusOutlineEffect(
   const group = new THREE.Group();
   target.traverse((child) => {
     if (child instanceof THREE.Mesh && child.visible && !child.userData.isRangeRing && !child.userData.isEnemyHealthBar) {
+      const geo = child.geometry;
+      if (!geo) {
+        return;
+      }
       const outline = new THREE.Mesh(
-        child.geometry,
+        geo.clone(),
         new THREE.MeshBasicMaterial({
           color,
           transparent: true,
@@ -455,27 +751,71 @@ export function addStatusOutlineEffect(
   group.position.copy(target.position);
   group.rotation.copy(target.rotation);
   fxGroup.add(group);
-  effects.push({ object: group, ttl, maxTtl: ttl, grow: 0.05 });
+  effects.push({ object: group, ttl, maxTtl: ttl, grow: 0.05, baseOpacity: 0.4 });
+}
+
+function disposeObject3D(obj: THREE.Object3D): void {
+  obj.traverse((child) => {
+    const mesh = child as THREE.Mesh | THREE.Line | THREE.Points;
+    if ((mesh as THREE.Mesh).geometry) {
+      (mesh as THREE.Mesh).geometry.dispose();
+    }
+    const mats = (mesh as THREE.Mesh).material;
+    if (mats) {
+      const list = Array.isArray(mats) ? mats : [mats];
+      for (const m of list) (m as THREE.Material).dispose();
+    }
+  });
+}
+
+/** 防止特效条目丢失时 fxGroup 里残留网格（会导致“只有切换模式全清才消失”）。 */
+function pruneFxGroupOrphans(fxGroup: THREE.Group, effects: TimedEffect[]): void {
+  const keep = new Set<THREE.Object3D>();
+  for (const e of effects) {
+    keep.add(e.object);
+  }
+  const extras = fxGroup.children.filter((ch) => !keep.has(ch));
+  for (const ch of extras) {
+    fxGroup.remove(ch);
+    disposeObject3D(ch);
+  }
 }
 
 export function updateTimedEffects(effects: TimedEffect[], fxGroup: THREE.Group, dt: number): TimedEffect[] {
   const nextEffects: TimedEffect[] = [];
-  for (const effect of effects) {
+  /**
+   * 必须用下标遍历：炮弹 tick 内会同步 push 命中火花 / 环等到同一数组；
+   * for...of 会漏掉这些新条目，导致 nextEffects 丢失引用、网格永不 dispose（尤其关闭 GEO 底板时更明显）。
+   */
+  let i = 0;
+  while (i < effects.length) {
+    const effect = effects[i];
+    i += 1;
     effect.tick?.(dt);
     effect.ttl -= dt;
-    const alpha = Math.max(effect.ttl / effect.maxTtl, 0);
+    if (!Number.isFinite(effect.ttl)) {
+      effect.ttl = 0;
+    }
+    const denom = effect.maxTtl > 0 && Number.isFinite(effect.maxTtl) ? effect.maxTtl : 1;
+    const alpha = Math.max(effect.ttl / denom, 0);
     if (!effect.suppressOpacityFade) {
-      setObjectOpacity(effect.object, alpha);
+      // Use baseOpacity so rings fade from their designed peak opacity, not from 1.0
+      const displayOpacity = effect.baseOpacity !== undefined ? effect.baseOpacity * alpha : alpha;
+      setObjectOpacity(effect.object, displayOpacity);
     }
     if (effect.grow > 0) {
       const scale = 1 + (1 - alpha) * effect.grow;
       effect.object.scale.setScalar(scale);
     }
     if (effect.ttl <= 0) {
-      fxGroup.remove(effect.object);
+      if (!effect.runtimeDisposed) {
+        fxGroup.remove(effect.object);
+        disposeObject3D(effect.object);
+      }
     } else {
       nextEffects.push(effect);
     }
   }
+  pruneFxGroupOrphans(fxGroup, nextEffects);
   return nextEffects;
 }

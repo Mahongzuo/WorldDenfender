@@ -8,11 +8,14 @@ export class ToastController {
     private readonly sideToastElement: HTMLElement,
   ) {}
 
-  show(message: string, critical = false): void {
+  /**
+   * @param critical 为 true 时用顶栏大号提示（红框）；可为顶栏单独指定滞留秒数，默认 1.65s。
+   */
+  show(message: string, critical = false, topBarHoldSeconds?: number): void {
     if (critical) {
       this.toastElement.textContent = message;
       this.toastElement.classList.add("show");
-      this.toastTimer = 1.65;
+      this.toastTimer = topBarHoldSeconds ?? 1.65;
       return;
     }
     this.pushSide(message);

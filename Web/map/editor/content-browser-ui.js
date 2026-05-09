@@ -192,7 +192,7 @@ export function renderContentBrowser(refs, env) {
     if (!assets.length) {
         env.setSelectedContentBrowserAssetId('');
         list.innerHTML =
-            '<div class="empty-state">暂无模型。将 .glb/.gltf 放进项目 <code>public/GameModels/</code> 或使用右侧「上传模型」，在「内容浏览器」窗口中点「刷新」。</div>';
+            '<div class="empty-state">暂无模型。将文件放入项目 <code>public/GameModels/</code>，或切到顶部「模型」工作台上传；然后在此窗口点「刷新」。</div>';
         showContentBrowserMiniPreview(refs, env, '');
         return;
     }

@@ -39,7 +39,13 @@ export class BuildingDefenseHud {
   }
 
   getVisualTopLocal(building: Building, fallback: number): number {
-    const visual = building.mesh.children[0];
+    const visual =
+      building.mesh.children.find(
+        ch =>
+          ch !== building.healthBarGroup &&
+          ch !== building.skillHudAnchor &&
+          !ch.userData?.isRangeRing,
+      ) ?? building.mesh.children[0];
     if (!visual) {
       return fallback;
     }
@@ -51,15 +57,14 @@ export class BuildingDefenseHud {
       return fallback;
     }
 
-    const corner = new THREE.Vector3();
-    let maxLocalY = -Infinity;
-    const b = worldBox;
-    for (let i = 0; i < 8; i++) {
-      corner.set(i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z);
-      mesh.worldToLocal(corner);
-      maxLocalY = Math.max(maxLocalY, corner.y);
-    }
-    return Number.isFinite(maxLocalY) ? maxLocalY : fallback;
+    const apexWorld = new THREE.Vector3(
+      (worldBox.min.x + worldBox.max.x) * 0.5,
+      worldBox.max.y,
+      (worldBox.min.z + worldBox.max.z) * 0.5,
+    );
+    mesh.worldToLocal(apexWorld);
+    const y = apexWorld.y;
+    return Number.isFinite(y) ? y : fallback;
   }
 
   layoutAll(buildings: Building[]): void {
@@ -75,8 +80,9 @@ export class BuildingDefenseHud {
     }
 
     const hudScale = this.hudScale();
-    const top = this.getVisualTopLocal(building, 2.05);
-    building.healthBarGroup.position.set(0, Math.max(top + 0.22 * hudScale, 2.05), 0);
+    const top = this.getVisualTopLocal(building, 2.15);
+    const pad = Math.max(0.26 * hudScale, 0.34);
+    building.healthBarGroup.position.set(0, Math.max(top + pad, 0.55), 0);
   }
 
   attachToBuilding(building: Building): void {
@@ -267,6 +273,9 @@ export class BuildingDefenseHud {
           building.healthBarFill.position.x = -(1 - ratio) * 0.59 * hudScale;
           const material = building.healthBarFill.material as THREE.MeshBasicMaterial;
           material.color.set(ratio > 0.55 ? 0x52ff7f : ratio > 0.25 ? 0xffd166 : 0xff5e73);
+          const top = this.getVisualTopLocal(building, 2.15);
+          const pad = Math.max(0.26 * hudScale, 0.34);
+          building.healthBarGroup.position.y = Math.max(top + pad, 0.55);
         }
       }
 

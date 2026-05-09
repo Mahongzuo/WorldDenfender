@@ -49,14 +49,7 @@ export function bindEditorEvents(refs, env) {
     refs.levelSearch.addEventListener('input', env.renderLevelTree);
     refs.btnResizeMap.addEventListener('click', env.applyMapSize);
     refs.btnDeleteSelection.addEventListener('click', env.deleteSelection);
-    refs.btnCreateActorTemplate.addEventListener('click', env.createActorTemplateFromSelection);
     env.bindWaveEditorUi();
-
-    refs.modelUpload.addEventListener('change', function () {
-        if (refs.modelUpload.files && refs.modelUpload.files[0]) {
-            env.uploadModelAsset(refs.modelUpload.files[0]);
-        }
-    });
 
     if (refs.workbenchTabs) {
         refs.workbenchTabs.addEventListener('click', function (event) {
@@ -240,7 +233,6 @@ export function bindEditorEvents(refs, env) {
         if (!Number.isFinite(col) || !Number.isFinite(row)) return;
         var payload = readDragPayload(event);
         if (!payload) return;
-        if (payload.kind === 'template') env.placeActorFromTemplate(payload.id, col, row);
         if (payload.kind === 'actor') env.moveActor(payload.id, col, row);
         if (payload.kind === 'marker') env.moveMarker(payload.markerKind, payload.id, col, row);
     });

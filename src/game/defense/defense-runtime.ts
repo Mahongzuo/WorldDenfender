@@ -1,7 +1,12 @@
 import * as THREE from "three";
 
 import { TILE_SIZE, cellToWorld, distanceXZ } from "../core/runtime-grid";
-import type { Building, Enemy, EnemyType } from "../core/types";
+import { DEFENSE_STANDARD_WAVE_COUNT } from "../core/game-config";
+import {
+  clampDefenseDifficulty,
+  getDefenseDifficultyRuntimeParams,
+} from "./defense-difficulty";
+import type { Building, DefenseMapFlavor, Enemy, EnemyType } from "../core/types";
 import { getDefenseEnemyArchetypeSpec } from "./defense-enemy-archetypes";
 
 export function createEnemyForWave(options: {
@@ -9,23 +14,33 @@ export function createEnemyForWave(options: {
   wave: number;
   start: THREE.Vector3;
   random?: () => number;
+  flavor?: DefenseMapFlavor;
+  defenseEndless?: boolean;
+  defenseDifficulty?: number;
 }): Enemy {
-  const { uid, wave, start, random = Math.random } = options;
+  const { uid, wave, start, random = Math.random, flavor, defenseEndless, defenseDifficulty } = options;
   let type: EnemyType = "basic";
+  const tier = clampDefenseDifficulty(defenseDifficulty ?? 3);
+  const diff = getDefenseDifficultyRuntimeParams(tier);
+  const typeWave = wave + diff.typeWaveBias;
   const rand = random();
-  if (wave >= 10 && rand < 0.15) {
+  if (typeWave >= 10 && rand < 0.15) {
     type = "swarm";
-  } else if (wave >= 8 && rand < 0.25) {
+  } else if (typeWave >= 8 && rand < 0.25) {
     type = "tank";
-  } else if (wave >= 5 && rand < 0.35) {
+  } else if (typeWave >= 5 && rand < 0.35) {
     type = "hacker";
-  } else if (wave >= 3 && rand < 0.5) {
+  } else if (typeWave >= 3 && rand < 0.5) {
     type = "scout";
   }
 
-  let hp = 78 + wave * 22;
-  let speed = 2.0 + wave * 0.06;
-  let reward = 12 + wave * 2;
+  /** 攻城 DPS（秒）与世界半径——hacker 为远程投掷/干扰，scout 皮薄骚扰 */
+  let towerSiegeDps = 11;
+  let towerSiegeRadiusWorld = TILE_SIZE * 0.94;
+
+  let hp = Math.round((78 + wave * 23) * 1.06 * diff.hpMult);
+  let speed = (2.02 + wave * 0.055) * diff.speedMult;
+  let reward = Math.round((12 + wave * 2) * diff.waveEconomyMult);
   let color = 0xff5c75;
   let scale = 1;
 
@@ -35,11 +50,15 @@ export function createEnemyForWave(options: {
       speed *= 1.8;
       color = 0x5c8fff;
       scale = 0.8;
+      towerSiegeDps = 7;
+      towerSiegeRadiusWorld = TILE_SIZE * 0.86;
       break;
     case "hacker":
       hp *= 1.2;
       color = 0x9d5cff;
       reward *= 1.5;
+      towerSiegeDps = 32;
+      towerSiegeRadiusWorld = TILE_SIZE * 2.58;
       break;
     case "tank":
       hp *= 3.5;
@@ -47,13 +66,30 @@ export function createEnemyForWave(options: {
       color = 0xff8c00;
       scale = 1.3;
       reward *= 2;
+      towerSiegeDps = 15;
+      towerSiegeRadiusWorld = TILE_SIZE * 1.04;
       break;
     case "swarm":
       hp *= 1.5;
       color = 0x24a317;
       reward *= 1.8;
       scale = 1.1;
+      towerSiegeDps = 9;
+      towerSiegeRadiusWorld = TILE_SIZE * 0.92;
       break;
+  }
+
+  towerSiegeDps *= diff.siegeMult;
+  towerSiegeRadiusWorld *= 1 + (diff.siegeMult - 1) * 0.52;
+
+  if (defenseEndless && wave > DEFENSE_STANDARD_WAVE_COUNT) {
+    const over = wave - DEFENSE_STANDARD_WAVE_COUNT;
+    const ramp = 1 + over * 0.15 + over * over * 0.014;
+    hp = Math.round(hp * ramp);
+    towerSiegeDps *= ramp;
+    speed *= 1 + Math.min(0.48, over * 0.028);
+    reward *= 1 + over * 0.07;
+    towerSiegeRadiusWorld *= 1 + Math.min(0.22, over * 0.016);
   }
 
   reward = Math.round(reward);
@@ -76,6 +112,8 @@ export function createEnemyForWave(options: {
   healthBarGroup.userData.isEnemyHealthBarRoot = true;
   healthBarGroup.add(healthBarBack, healthBar);
 
+  const localized = flavor?.enemyNames?.[type];
+
   const enemy: Enemy = {
     uid,
     type,
@@ -92,6 +130,9 @@ export function createEnemyForWave(options: {
     slowFactor: 1,
     blockedBy: null,
     stunUntil: 0,
+    ...(localized ? { displayName: localized } : {}),
+    towerSiegeDps,
+    towerSiegeRadiusWorld,
   };
 
   const bodyMaterial = new THREE.MeshStandardMaterial({

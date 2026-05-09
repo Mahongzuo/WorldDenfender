@@ -806,6 +806,79 @@ textarea:focus {
     min-height: 120px;
 }
 
+.theme-cutscene-stack {
+    display: grid;
+    gap: 18px;
+    max-width: 1180px;
+}
+
+.theme-audio-stack {
+    display: grid;
+    gap: 14px;
+    margin-top: 4px;
+    padding: 18px 20px;
+    border: 1px solid rgba(143, 184, 174, 0.16);
+    border-radius: 22px;
+    background:
+        radial-gradient(circle at top right, rgba(103, 232, 249, 0.08), transparent 34%),
+        linear-gradient(180deg, rgba(9, 18, 28, 0.92), rgba(6, 13, 20, 0.88));
+}
+
+.theme-audio-location {
+    margin-bottom: 0;
+    white-space: pre-line;
+}
+
+.theme-audio-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 14px;
+}
+
+.theme-audio-card {
+    display: grid;
+    gap: 12px;
+    min-width: 0;
+    padding: 16px;
+    border-radius: 18px;
+    border: 1px solid rgba(143, 184, 174, 0.12);
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.theme-audio-card--wide {
+    grid-column: 1 / -1;
+}
+
+.theme-audio-upload {
+    min-height: 38px;
+}
+
+.level-audio-tower-rows {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 12px;
+}
+
+.theme-audio-stack .level-audio-tower-row {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    gap: 10px;
+    padding: 14px 16px;
+    border-radius: 16px;
+    background: rgba(16, 28, 40, 0.82);
+}
+
+.theme-audio-tower-controls {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+}
+
+.theme-audio-inline-upload {
+    min-width: 92px;
+}
+
 .theme-board-ai-stack {
     gap: 14px;
 }
@@ -2296,8 +2369,7 @@ input[type="range"].audio-volume-slider {
 }
 
 .selection-inspector,
-.compact-list,
-.actor-palette {
+.compact-list {
     display: grid;
     gap: 8px;
 }
@@ -2860,7 +2932,6 @@ input[type="range"].audio-volume-slider {
     text-align: center;
 }
 
-.actor-template,
 .list-item {
     display: grid;
     gap: 4px;
@@ -2870,53 +2941,17 @@ input[type="range"].audio-volume-slider {
     background: rgba(255, 255, 255, 0.045);
 }
 
-.actor-template {
-    cursor: grab;
-}
-
-.actor-template:hover,
 .list-item:hover {
     border-color: var(--editor-line-strong);
 }
 
-.actor-template strong,
 .list-item strong {
     font-size: 13px;
 }
 
-.actor-template span,
 .list-item span {
     color: var(--editor-muted);
     font-size: 11px;
-}
-
-.actor-palette-hint {
-    margin: -4px 0 6px;
-    font-size: 11px;
-    line-height: 1.45;
-    color: var(--editor-muted);
-}
-
-.actor-template-wrap {
-    border-radius: 16px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    background: rgba(255, 255, 255, 0.04);
-    overflow: hidden;
-}
-
-.actor-template-wrap--selected {
-    border-color: rgba(103, 232, 249, 0.4);
-    box-shadow: 0 0 0 1px rgba(103, 232, 249, 0.12);
-}
-
-.actor-template-wrap .actor-template {
-    border: none;
-    border-radius: 0;
-    background: transparent;
-}
-
-.actor-template-model {
-    margin: 0 10px 10px;
 }
 
 .wave-card {
@@ -3145,19 +3180,26 @@ input[type="range"].audio-volume-slider {
 }
 .game-asset-upload,
 label.game-asset-upload {
-    display: block;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-height: 38px;
+    box-sizing: border-box;
     border: 1px solid var(--editor-line);
     border-radius: 12px;
-    padding: 8px 10px;
+    padding: 8px 12px;
     font-size: 12px;
     font-weight: 700;
+    line-height: 1.2;
     text-align: center;
     cursor: pointer;
     background: rgba(255, 255, 255, 0.04);
 }
 
 .game-asset-upload.tight {
-    padding: 6px 8px;
+    min-height: 34px;
+    padding: 6px 10px;
     font-size: 11px;
 }
 
@@ -3200,6 +3242,26 @@ label.game-asset-upload {
 
 .asset-url-hint.empty {
     color: rgba(255, 255, 255, 0.28);
+}
+
+@media (max-width: 860px) {
+    .theme-audio-stack {
+        padding: 16px;
+    }
+
+    .theme-audio-grid,
+    .level-audio-tower-rows {
+        grid-template-columns: 1fr;
+    }
+
+    .theme-audio-stack .panel-head {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .theme-audio-tower-controls {
+        grid-template-columns: 1fr;
+    }
 }
 
 .preview-scene-outline-item {
