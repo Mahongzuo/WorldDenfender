@@ -147,6 +147,7 @@ import {
         btnReload: document.getElementById('btnReload'),
         btnExport: document.getElementById('btnExport'),
         btnSave: document.getElementById('btnSave'),
+        btnPlaytestLevel: document.getElementById('btnPlaytestLevel'),
         levelSearch: document.getElementById('levelSearch'),
         statusFilters: document.getElementById('statusFilters'),
         levelTree: document.getElementById('levelTree'),
@@ -725,6 +726,28 @@ import {
             _persistLocalBackup(state);
             setStatus('保存失败，已保留本地备份: ' + error.message, 'error');
         }
+    }
+
+    async function openLevelPlaytest() {
+        if (!selectedLevelId) {
+            setStatus('请先选择一个关卡再试玩', 'error');
+            return;
+        }
+        if (isDirty) {
+            if (!window.confirm('当前有未保存修改，是否先保存到项目再打开试玩？（取消则中止）')) {
+                return;
+            }
+            await saveState();
+            if (isDirty) {
+                setStatus('保存未完成，未打开试玩', 'error');
+                return;
+            }
+        }
+        var url = new URL('/', window.location.origin);
+        url.searchParams.set('levelId', selectedLevelId);
+        url.searchParams.set('playtest', '1');
+        window.open(url.toString(), '_blank', 'noopener,noreferrer');
+        setStatus('已在新标签页打开关卡试玩', 'success');
     }
 
     async function loadRegionSources() {
@@ -2915,6 +2938,7 @@ import {
             getActiveEditorMode: function () {
                 return activeEditorMode;
             },
+            getAvailableEnemyTypes: getAvailableEnemyTypes,
             getSelectedActorPlacementModelId: function () {
                 return resolveActorPlacementModelId();
             },
@@ -2958,6 +2982,7 @@ import {
             },
             findSelectedObject: findSelectedObject,
             getBrowsableModelAssets: getBrowsableModelAssets,
+            getAvailableEnemyTypes: getAvailableEnemyTypes,
             markDirty: markDirty,
             renderMap: renderMap,
             renderOverview: renderOverview,
@@ -3001,6 +3026,7 @@ import {
             },
             reloadState: reloadState,
             saveState: saveState,
+            openLevelPlaytest: openLevelPlaytest,
             exportState: function () {
                 _exportState(state, setStatus);
             },
@@ -3077,6 +3103,9 @@ import {
             },
             setActiveEditorMode: function (value) {
                 activeEditorMode = value || 'defense';
+            },
+            getActiveTool: function () {
+                return activeTool;
             },
             setSelectedObject: function (value) {
                 selectedObject = value;

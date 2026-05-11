@@ -57,15 +57,27 @@ export interface RuntimeMapState {
   pathWorldPoints: THREE.Vector3[];
 }
 
+function runtimePathGroups(map: MapDefinition): GridCell[][] {
+  const authored = map.enemyPaths
+    ?.map((path) => path.cells)
+    .filter((cells): cells is GridCell[] => Array.isArray(cells) && cells.length > 0);
+  return authored?.length ? authored : [map.path];
+}
+
 export function buildRuntimeMapState(map: MapDefinition): RuntimeMapState {
   setActiveRuntimeGrid(map);
-  const pathCells = expandPath(map.path);
+  const pathCells = new Set<string>();
+  for (const path of runtimePathGroups(map)) {
+    for (const key of expandPath(path)) {
+      pathCells.add(key);
+    }
+  }
   const obstacleCells = new Set(
     map.obstacles
       .filter((cell) => !pathCells.has(cellKey(cell)))
       .map((cell) => cellKey(cell)),
   );
-  const pathTrace = expandPathToOrderedCells(map.path);
+  const pathTrace = expandPathToOrderedCells(runtimePathGroups(map)[0] ?? map.path);
 
   return {
     pathCells,
@@ -382,7 +394,9 @@ export function renderRuntimeMapScene(options: {
         console.warn("[renderRuntimeMapScene] board texture load failed, using procedural fallback:", planeUrl);
       },
     );
-    addJinanPathGuides(mapGroup, map.path, map.theme.path, softPathGuideCenter(map.theme.path, map.theme.accent));
+    for (const path of runtimePathGroups(map)) {
+      addJinanPathGuides(mapGroup, path, map.theme.path, softPathGuideCenter(map.theme.path, map.theme.accent));
+    }
   }
 
   /* 略高于程序性格子 / flat 整块底板，低于路径高亮与安全区 */
@@ -396,7 +410,10 @@ export function renderRuntimeMapScene(options: {
   addBoardDecorImageLayers(mapGroup, map, decorY, xzScale);
 
   if (mode === "defense") {
-    addEndpointMarker(mapGroup, map.path[0], 0x6bbf90, "入口", geoVerticalStretch);
+    const spawnPoints = map.spawnPoints?.length ? map.spawnPoints : [map.path[0]];
+    for (const spawn of spawnPoints) {
+      addEndpointMarker(mapGroup, spawn, 0x6bbf90, "入口", geoVerticalStretch);
+    }
     addEndpointMarker(mapGroup, map.path[map.path.length - 1], 0xd87880, "基地", geoVerticalStretch);
   } else {
     addEndpointMarker(mapGroup, map.path[0], map.theme.accent, "探索起点", geoVerticalStretch);

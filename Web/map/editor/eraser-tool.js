@@ -111,7 +111,9 @@ export function updateEraserBrushPreview(refs, clientX, clientY, env) {
             '"][data-row="' +
             String(cells[i].row) +
             '"]';
-        var el = refs.mapGrid.querySelector(sel);
+        var el =
+            refs.mapGrid.querySelector('.map-grid-cells--floor ' + sel) ||
+            refs.mapGrid.querySelector('.map-grid-cells--path-overlay ' + sel);
         if (el) el.classList.add('map-cell--eraser-preview');
     }
 }

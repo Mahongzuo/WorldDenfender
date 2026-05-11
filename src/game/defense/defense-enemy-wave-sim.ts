@@ -82,6 +82,7 @@ export function tickDefenseEnemyWave(deps: DefenseEnemyWaveDeps): void {
   };
 
   for (const enemy of [...enemies]) {
+    const pathWorldPoints = enemy.pathWorldPoints?.length ? enemy.pathWorldPoints : defensePathWorldPoints;
     if (enemy.stunUntil > elapsed) {
       continue;
     }
@@ -102,8 +103,8 @@ export function tickDefenseEnemyWave(deps: DefenseEnemyWaveDeps): void {
       continue;
     }
 
-    while (distance > 0 && enemy.segment < defensePathWorldPoints.length - 1) {
-      const target = defensePathWorldPoints[enemy.segment + 1]!;
+    while (distance > 0 && enemy.segment < pathWorldPoints.length - 1) {
+      const target = pathWorldPoints[enemy.segment + 1]!;
       const current = enemy.mesh.position;
       const dx = target.x - current.x;
       const dz = target.z - current.z;
@@ -124,7 +125,7 @@ export function tickDefenseEnemyWave(deps: DefenseEnemyWaveDeps): void {
 
     tryBlockEnemy(enemy);
 
-    if (enemy.segment >= defensePathWorldPoints.length - 1) {
+    if (enemy.segment >= pathWorldPoints.length - 1) {
       enemyGroup.remove(enemy.mesh);
       const idxLeak = enemies.indexOf(enemy);
       if (idxLeak >= 0) enemies.splice(idxLeak, 1);

@@ -291,6 +291,7 @@ export class TowerDefenseGame {
   private nextWaveDelay = 3;
   private spawnRemaining = 0;
   private spawnCooldown = 0;
+  private currentWaveSpawned = 0;
   private waveActive = false;
   /** 塔防运行时难度 1–5；仅影响后续刷怪与波规模，不重载棋盘 */
   private defenseDifficulty: DefenseDifficultyTier = DEFENSE_DIFFICULTY_DEFAULT;
@@ -344,6 +345,8 @@ export class TowerDefenseGame {
   private requestedRegionName = "";
   private requestedDefIdx = -1;
   private requestedExpIdx = -1;
+  /** URL `playtest=1`：初始化完成后直接进入塔防试玩（需配合 `levelId` 且项目关卡已同步） */
+  private playtestFromUrl = false;
   /** 首次挂载前快照，编辑器多次同步时需先清空 `syncEditorLevelsToRuntime` 追加的地图条目 */
   private bundledCityMapJson = "";
   private bundledBuildSpecsJson = "";
@@ -449,12 +452,23 @@ export class TowerDefenseGame {
     this.requestedLevelId = params.get("levelId") || "";
     this.requestedRegionCode = params.get("regionCode") || "";
     this.requestedRegionName = params.get("regionName") || "";
+    this.playtestFromUrl = params.get("playtest") === "1";
     void (async () => {
       await this.loadGameAssetConfig();
       await this.loadEditorRuntimeMaps();
       this.renderShopItems();
       this.loadInitialCityMap();
       await this.loadDefaultPlayer();
+      if (this.playtestFromUrl) {
+        if (this.requestedLevelId && this.requestedDefIdx >= 0) {
+          this.startNewGame();
+        } else {
+          this.showToast(
+            "无法试玩：未同步到该关卡（请先在使用编辑器的标签页保存项目，或检查 levelId）",
+            true,
+          );
+        }
+      }
     })();
     this.animate();
   }
@@ -770,6 +784,7 @@ export class TowerDefenseGame {
       nextWaveDelay: this.nextWaveDelay,
       spawnRemaining: this.spawnRemaining,
       spawnCooldown: this.spawnCooldown,
+      currentWaveSpawned: this.currentWaveSpawned,
       waveActive: this.waveActive,
       defenseDifficulty: this.defenseDifficulty,
       defenseEndless: this.defenseEndless,
@@ -836,6 +851,7 @@ export class TowerDefenseGame {
       this.nextWaveDelay = data.nextWaveDelay ?? 3;
       this.spawnRemaining = data.spawnRemaining ?? 0;
       this.spawnCooldown = data.spawnCooldown ?? 0;
+      this.currentWaveSpawned = data.currentWaveSpawned ?? 0;
       this.waveActive = !!data.waveActive;
 
       this.defenseDifficulty = clampDefenseDifficulty(data.defenseDifficulty ?? DEFENSE_DIFFICULTY_DEFAULT);
@@ -1595,6 +1611,7 @@ export class TowerDefenseGame {
     this.nextWaveDelay = 3;
     this.spawnRemaining = 0;
     this.spawnCooldown = 0;
+    this.currentWaveSpawned = 0;
     this.waveActive = false;
     this.cameraPan.set(0, 0, 0);
 
@@ -2240,10 +2257,12 @@ export class TowerDefenseGame {
         nextWaveDelay: this.nextWaveDelay,
         spawnRemaining: this.spawnRemaining,
         spawnCooldown: this.spawnCooldown,
+        currentWaveSpawned: this.currentWaveSpawned,
       },
       enemiesLength: this.enemies.length,
       defenseEndless: this.defenseEndless,
       defenseDifficulty: this.defenseDifficulty,
+      waveRules: MAPS[this.defenseMapIndex].waveRules,
       defenseVictoryAwaitingChoice: this.defenseVictoryAwaitingChoice,
     });
     this.wave = out.timers.wave;
@@ -2251,6 +2270,7 @@ export class TowerDefenseGame {
     this.nextWaveDelay = out.timers.nextWaveDelay;
     this.spawnRemaining = out.timers.spawnRemaining;
     this.spawnCooldown = out.timers.spawnCooldown;
+    this.currentWaveSpawned = out.timers.currentWaveSpawned ?? 0;
     for (const fx of out.effects) {
       if (fx.kind === "economyGrant") {
         this.economy.addMoney(fx.amount);
@@ -2264,7 +2284,7 @@ export class TowerDefenseGame {
         this.syncDefenseVictoryPromptVisibility();
         this.saveGame(false);
       } else if (fx.kind === "spawnEnemy") {
-        this.spawnEnemy();
+        this.spawnEnemy(fx.spawnOrdinal, fx.waveRuleId);
       }
     }
   }
@@ -2306,10 +2326,12 @@ export class TowerDefenseGame {
     });
   }
 
-  private spawnEnemy(): void {
+  private spawnEnemy(spawnOrdinal?: number, waveRuleId?: string): void {
     spawnDefenseWaveEnemy({
       defenseMapIndex: this.defenseMapIndex,
       wave: this.wave,
+      spawnOrdinal,
+      waveRuleId,
       defenseEndless: this.defenseEndless,
       defenseDifficulty: this.defenseDifficulty,
       enemies: this.enemies,
@@ -2401,7 +2423,7 @@ export class TowerDefenseGame {
       fxGroup: this.fxGroup,
       elapsed: this.elapsed,
       aimWorldCenter: (e) => this.enemyDefenseVisuals.aimWorldCenter(e),
-      damageEnemy: (e, d, source) => this.damageEnemy(e, d, source),
+      damageEnemy: (e, d, source, meta) => this.damageEnemy(e, d, source, meta),
       addBeam: (from, to, color) => this.addBeam(from, to, color),
       onTowerFired: (b) => playTowerFire(b.spec.id, "defense"),
     });
@@ -2413,7 +2435,7 @@ export class TowerDefenseGame {
       enemies: this.enemies,
       buildGroup: this.buildGroup,
       addExplosion: (c, r, col) => this.addExplosion(c, r, col),
-      damageEnemy: (e, d, source) => this.damageEnemy(e, d, source),
+      damageEnemy: (e, d, source, meta) => this.damageEnemy(e, d, source, meta),
       onMineExploded: (m) => playTowerFire(m.spec.id, "defense"),
     });
   }
@@ -2426,7 +2448,7 @@ export class TowerDefenseGame {
       getBuildings: () => this.buildings,
       addExplosion: (center, radius, color) => this.addExplosion(center, radius, color),
       addBeam: (from, to, color) => this.addBeam(from, to, color),
-      damageEnemy: (enemy, damage, source) => this.damageEnemy(enemy, damage, source),
+      damageEnemy: (enemy, damage, source, meta) => this.damageEnemy(enemy, damage, source, meta),
       showToast: (message, critical) => this.showToast(message, critical),
       refreshUi: () => this.updateUi(),
     });
@@ -2501,6 +2523,7 @@ export class TowerDefenseGame {
     this.nextWaveDelay = 5;
     this.waveActive = false;
     this.spawnRemaining = 0;
+    this.currentWaveSpawned = 0;
     this.saveGame(false);
     this.showToast("\u65e0\u5c3d\u6a21\u5f0f\u5df2\u5f00\u542f\uff0c\u6bcf\u6ce2\u589e\u5f3a", true);
     this.updateUi();

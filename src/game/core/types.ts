@@ -101,6 +101,7 @@ export interface SaveData {
   nextWaveDelay: number;
   spawnRemaining: number;
   spawnCooldown: number;
+  currentWaveSpawned?: number;
   waveActive: boolean;
   /** 塔防运行时难度 1–5（见 defense-difficulty） */
   defenseDifficulty?: number;
@@ -119,6 +120,37 @@ export interface SaveData {
 export interface GridCell {
   col: number;
   row: number;
+}
+
+export interface DefenseEnemyPath {
+  id?: string;
+  name?: string;
+  cells: GridCell[];
+}
+
+export interface DefenseSpawnPoint extends GridCell {
+  id?: string;
+  name?: string;
+  pathId?: string;
+  enemyTypeId?: string;
+  /** 多选出生波次；保留 waveNumber 作为旧数据/摘要用的首个波次。 */
+  waveNumbers?: number[];
+  waveNumber?: number;
+  count?: number;
+  interval?: number;
+}
+
+export interface DefenseWaveRule {
+  id?: string;
+  waveNumber: number;
+  enemyTypeId?: string;
+  count: number;
+  interval?: number;
+  spawnPointId?: string;
+  pathId?: string;
+  reward?: number;
+  overrideModelPath?: string;
+  overrideModelScale?: number;
 }
 
 export interface MapTheme {
@@ -334,6 +366,9 @@ export interface MapDefinition {
   theme: MapTheme;
   geo?: GeoMapConfig;
   path: GridCell[];
+  enemyPaths?: DefenseEnemyPath[];
+  spawnPoints?: DefenseSpawnPoint[];
+  waveRules?: DefenseWaveRule[];
   obstacles: GridCell[];
   actors?: MapActorDef[];
   /** Explore-mode safe zone cells: enemies will not attack the player here */
@@ -390,7 +425,7 @@ export interface EditorLevelMap {
   roads?: EditorCell[];
   enemyPaths?: Array<{ id?: string; name?: string; cells?: EditorCell[] }>;
   obstacles?: EditorCell[];
-  spawnPoints?: Array<EditorCell & { id?: string; name?: string }>;
+  spawnPoints?: Array<EditorCell & { id?: string; name?: string; pathId?: string; enemyTypeId?: string; waveNumbers?: number[]; waveNumber?: number; count?: number; interval?: number }>;
   objectivePoint?: EditorCell & { id?: string; name?: string };
   explorationPoints?: Array<EditorCell & { id?: string; name?: string }>;
   exploreBosses?: Array<Record<string, unknown>>;
@@ -534,6 +569,7 @@ export interface EditorLevel {
     geo?: GeoMapConfig;
   };
   map?: EditorLevelMap;
+  waveRules?: DefenseWaveRule[];
 }
 
 export interface BuildSpec {
@@ -612,6 +648,8 @@ export interface Enemy {
   speed: number;
   reward: number;
   segment: number;
+  /** 多出口塔防：每个敌人可绑定独立路径；未设置时沿用当前地图主路径。 */
+  pathWorldPoints?: readonly THREE.Vector3[];
   slowUntil: number;
   slowFactor: number;
   blockedBy: Building | null;

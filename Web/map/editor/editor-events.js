@@ -41,6 +41,11 @@ export function bindEditorEvents(refs, env) {
 
     refs.btnReload.addEventListener('click', env.reloadState);
     if (refs.btnSave) refs.btnSave.addEventListener('click', env.saveState);
+    if (refs.btnPlaytestLevel) {
+        refs.btnPlaytestLevel.addEventListener('click', function () {
+            void env.openLevelPlaytest();
+        });
+    }
     refs.btnExport.addEventListener('click', env.exportState);
     refs.btnCreateLevel.addEventListener('click', env.createManualLevel);
     refs.btnGenerateRegions.addEventListener('click', function () {
@@ -183,6 +188,12 @@ export function bindEditorEvents(refs, env) {
             return;
         }
         var cell = event.target.closest('[data-col][data-row]');
+        if (!cell) {
+            var level = env.getLevel();
+            var activeTool = env.getActiveTool ? env.getActiveTool() : 'select';
+            if (!level || !level.map || !level.map.grid || activeTool === 'select' || activeTool === 'boardImage') return;
+            cell = env.mapGridPickCellFromClientPoint(event.clientX, event.clientY, level.map.grid);
+        }
         if (!cell) return;
         env.handleCellAction(Number(cell.dataset.col), Number(cell.dataset.row));
     });

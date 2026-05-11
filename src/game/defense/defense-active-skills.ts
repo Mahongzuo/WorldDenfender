@@ -15,7 +15,7 @@ export interface DefenseActiveSkillHost {
   getBuildings(): Building[];
   addExplosion(center: THREE.Vector3, radius: number, color: number): void;
   addBeam(from: THREE.Vector3, to: THREE.Vector3, color: number): void;
-  damageEnemy(enemy: Enemy, damage: number, source?: DefenseDamageSource): void;
+  damageEnemy(enemy: Enemy, damage: number, source?: DefenseDamageSource, meta?: { critical?: boolean }): void;
   showToast(message: string, critical?: boolean): void;
   refreshUi(): void;
 }

@@ -657,6 +657,23 @@ textarea:focus {
     background: linear-gradient(135deg, rgba(195, 255, 120, 0.28), rgba(103, 232, 249, 0.26));
 }
 
+.action-button.topbar-playtest-button {
+    min-height: 34px;
+    padding: 0 16px;
+    font-size: 12px;
+    font-weight: 600;
+    flex-shrink: 0;
+    background: rgba(103, 232, 249, 0.12);
+    border-color: rgba(103, 232, 249, 0.35);
+    color: #d4faf0;
+}
+
+.action-button.topbar-playtest-button:hover {
+    border-color: rgba(103, 232, 249, 0.5);
+    color: #e8fff4;
+    background: rgba(103, 232, 249, 0.2);
+}
+
 .action-button.accent,
 .mode-button.active,
 .tool-button.active,
@@ -2351,6 +2368,61 @@ input[type="range"].audio-volume-slider {
 
 .form-grid.two {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.field-block--full {
+    grid-column: 1 / -1;
+}
+
+.spawn-wave-field-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 2px;
+}
+
+.spawn-wave-checks {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    align-items: center;
+}
+
+.spawn-wave-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 6px;
+    min-height: 22px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    color: var(--editor-text);
+    background: rgba(255, 255, 255, 0.045);
+    cursor: pointer;
+    box-sizing: border-box;
+}
+
+.spawn-wave-chip input {
+    accent-color: var(--editor-accent);
+    width: 14px;
+    height: 14px;
+    margin: 0;
+    flex-shrink: 0;
+}
+
+.spawn-wave-num {
+    font-size: 12px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    min-width: 1.1em;
+    text-align: center;
+}
+
+.spawn-wave-select-all {
+    flex-shrink: 0;
 }
 
 .form-grid.three {

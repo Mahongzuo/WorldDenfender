@@ -280,6 +280,23 @@ export function normalizeWaveRules(waveRules, seed) {
     });
 }
 
+function normalizeWaveNumberList(value) {
+    var raw = Array.isArray(value) ? value : value != null ? [value] : [];
+    var seen = {};
+    return raw
+        .map(function (item) {
+            return Math.max(1, Math.round(Number(item) || 0));
+        })
+        .filter(function (item) {
+            if (!item || seen[item]) return false;
+            seen[item] = true;
+            return true;
+        })
+        .sort(function (a, b) {
+            return a - b;
+        });
+}
+
 export function normalizeModeProfiles(modeProfiles) {
     var source = modeProfiles && typeof modeProfiles === 'object' ? modeProfiles : {};
     return {
@@ -300,13 +317,27 @@ export function normalizeSpawnPoints(points, legacyTd) {
         });
     }
     return list.map(function (point, index) {
-        return {
+        var hasWaveNumbers = Array.isArray(point.waveNumbers);
+        var waveNumbers = normalizeWaveNumberList(point.waveNumbers);
+        if (!hasWaveNumbers) {
+            waveNumbers = normalizeWaveNumberList(point.waveNumber != null ? point.waveNumber : index + 1);
+        }
+        var hasWaveConfig = point.enemyTypeId != null || hasWaveNumbers || point.waveNumber != null || point.count != null || point.interval != null;
+        var out = {
             id: String(point.id || 'spawn-' + (index + 1)),
             name: String(point.name || point.label || '敌人出口 ' + (index + 1)),
             col: clamp(Number(point.col) || 0, 0, 79),
             row: clamp(Number(point.row) || (2 + index * 3), 0, 79),
             pathId: String(point.pathId || 'path-main')
         };
+        if (hasWaveConfig) {
+            out.enemyTypeId = String(point.enemyTypeId || '');
+            out.waveNumbers = waveNumbers;
+            if (waveNumbers.length) out.waveNumber = waveNumbers[0];
+            out.count = Math.max(1, Math.round(Number(point.count) || 12));
+            out.interval = Math.max(0.1, Number(point.interval) || 1.2);
+        }
+        return out;
     });
 }
 

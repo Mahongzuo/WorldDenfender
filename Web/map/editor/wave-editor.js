@@ -71,7 +71,7 @@ export function addWaveRule(refs, env) {
         count: 12,
         interval: 1.2,
         spawnPointId: spawn ? spawn.id : '',
-        pathId: 'path-main',
+        pathId: spawn && spawn.pathId ? spawn.pathId : 'path-main',
         reward: 50,
         overrideModelPath: '',
         overrideModelScale: 1
@@ -99,6 +99,19 @@ function editWaveRule(refs, env, index) {
     if (count !== null) wave.count = Math.max(1, Number(count) || wave.count);
     var interval = window.prompt('刷新间隔（秒）', String(wave.interval));
     if (interval !== null) wave.interval = Math.max(0.1, Number(interval) || wave.interval);
+    var waveNumber = window.prompt('第几波出', String(wave.waveNumber || index + 1));
+    if (waveNumber !== null) wave.waveNumber = Math.max(1, Math.round(Number(waveNumber) || wave.waveNumber || index + 1));
+    var spawns = (level.map.spawnPoints || []).map(function (spawn) {
+        return spawn.id + ':' + (spawn.name || spawn.id);
+    }).join('\n');
+    if (spawns) {
+        var spawnPointId = window.prompt('出口 ID（可用候选）\n' + spawns, String(wave.spawnPointId || ''));
+        if (spawnPointId !== null) {
+            wave.spawnPointId = String(spawnPointId || '');
+            var spawn = level.map.spawnPoints.find(function (item) { return item.id === wave.spawnPointId; });
+            if (spawn && spawn.pathId) wave.pathId = spawn.pathId;
+        }
+    }
     env.markDirty('已更新波次');
     renderWaveList(refs, env);
 }

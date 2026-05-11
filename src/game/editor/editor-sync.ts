@@ -21,6 +21,9 @@ import type {
   MapDefinition,
   BuildId,
   DefenseMapFlavor,
+  DefenseEnemyPath,
+  DefenseSpawnPoint,
+  DefenseWaveRule,
   EnemyType,
 } from "../core/types";
 import { sanitizeDefenseElement } from "../defense/defense-taxonomy";
@@ -499,6 +502,124 @@ function extractTowerModelUrlsFromCityConfigs(
   return undefined;
 }
 
+function sanitizeDefenseSpawnPoints(
+  raw: EditorLevelMap["spawnPoints"] | undefined,
+  project: (cell: EditorCell) => GridCell,
+): DefenseSpawnPoint[] {
+  return (raw ?? []).map((point, index) => {
+    const hasWaveNumbers = Array.isArray(point.waveNumbers);
+    const waveNumbers = sanitizeSpawnWaveNumbers(
+      hasWaveNumbers ? point.waveNumbers : point.waveNumber != null ? [point.waveNumber] : [index + 1],
+    );
+    const count = Math.max(1, Math.round(Number(point.count) || 12));
+    const interval = Math.max(0.1, Number(point.interval) || 1.2);
+    return {
+      ...project(point),
+      id: String(point.id || `spawn-${index + 1}`),
+      name: String(point.name || `敌人出口 ${index + 1}`),
+      pathId: String(point.pathId || `path-${index + 1}`),
+      ...(point.enemyTypeId ? { enemyTypeId: String(point.enemyTypeId) } : {}),
+      waveNumbers,
+      ...(waveNumbers.length ? { waveNumber: waveNumbers[0] } : {}),
+      count,
+      interval,
+    };
+  });
+}
+
+function sanitizeSpawnWaveNumbers(raw: unknown): number[] {
+  const values = Array.isArray(raw) ? raw : raw != null ? [raw] : [];
+  const seen = new Set<number>();
+  const out: number[] = [];
+  for (const item of values) {
+    const waveNumber = Math.max(1, Math.round(Number(item) || 0));
+    if (!waveNumber || seen.has(waveNumber)) continue;
+    seen.add(waveNumber);
+    out.push(waveNumber);
+  }
+  return out.sort((a, b) => a - b);
+}
+
+function sanitizeEditorWaveRules(
+  level: EditorLevel,
+  spawnPoints: readonly DefenseSpawnPoint[],
+): DefenseWaveRule[] | undefined {
+  const explicit = (level.waveRules ?? []).map((rule, index) => ({
+    id: String(rule.id || `wave-${index + 1}`),
+    waveNumber: Math.max(1, Math.round(Number(rule.waveNumber) || index + 1)),
+    enemyTypeId: String(rule.enemyTypeId || ""),
+    count: Math.max(1, Math.round(Number(rule.count) || 10)),
+    interval: Math.max(0.1, Number(rule.interval) || 1),
+    spawnPointId: String(rule.spawnPointId || ""),
+    pathId: String(rule.pathId || "path-main"),
+    reward: Math.max(0, Number(rule.reward) || 0),
+    overrideModelPath: String(rule.overrideModelPath || ""),
+    overrideModelScale: Math.max(0.1, Number(rule.overrideModelScale) || 1),
+  }));
+  const rawSpawns = level.map?.spawnPoints ?? [];
+  const spawnRules = spawnPoints
+    .map((spawn, index) => ({ spawn, raw: rawSpawns[index], index }))
+    .filter(({ raw }) => !!raw && (raw.enemyTypeId || Array.isArray(raw.waveNumbers) || raw.waveNumber != null || raw.count != null || raw.interval != null))
+    .flatMap(({ spawn, index }) => {
+      const waveNumbers = sanitizeSpawnWaveNumbers(
+        spawn.waveNumbers?.length ? spawn.waveNumbers : spawn.waveNumber != null ? [spawn.waveNumber] : [],
+      );
+      return waveNumbers.map((waveNumber) => ({
+        id: `${spawn.id || `spawn-${index + 1}`}-wave-${waveNumber}-rule`,
+        waveNumber,
+        enemyTypeId: String(spawn.enemyTypeId || "basic"),
+        count: Math.max(1, Math.round(Number(spawn.count) || 12)),
+        interval: Math.max(0.1, Number(spawn.interval) || 1.2),
+        spawnPointId: String(spawn.id || ""),
+        pathId: String(spawn.pathId || `path-${index + 1}`),
+        reward: 50,
+      }));
+    });
+  const merged = [...explicit, ...spawnRules];
+  return merged.length ? merged : undefined;
+}
+
+function buildEditorDefensePaths(
+  editorMap: EditorLevelMap,
+  spawnPoints: readonly DefenseSpawnPoint[],
+  objective: GridCell,
+  project: (cell: EditorCell) => GridCell,
+  sourceCols: number,
+  sourceRows: number,
+): DefenseEnemyPath[] {
+  const sourcePaths = editorMap.enemyPaths?.filter((path) => path.cells?.length) ?? [];
+  if (!spawnPoints.length && !sourcePaths.length) {
+    return [{
+      id: "path-main",
+      name: "主敌人路径",
+      cells: orderEditorPathCells(uniqueCells((editorMap.roads ?? []).map(project), sourceCols, sourceRows), { col: 0, row: objective.row }, objective, sourceCols, sourceRows),
+    }];
+  }
+  const paths = sourcePaths.map((path, index) => {
+    const spawn = spawnPoints.find((point) => point.pathId === path.id) ?? spawnPoints[index] ?? spawnPoints[0] ?? { col: 0, row: objective.row };
+    return {
+      id: String(path.id || `path-${index + 1}`),
+      name: String(path.name || `敌人路径 ${index + 1}`),
+      cells: orderEditorPathCells(uniqueCells((path.cells ?? []).map(project), sourceCols, sourceRows), spawn, objective, sourceCols, sourceRows),
+    };
+  });
+  for (const [index, spawn] of spawnPoints.entries()) {
+    if (paths.some((path) => path.id === spawn.pathId)) {
+      continue;
+    }
+    const midpoint = {
+      col: clamp(Math.floor((spawn.col + objective.col) / 2), 0, sourceCols - 1),
+      row: spawn.row,
+    };
+    paths.push({
+      id: String(spawn.pathId || `path-${index + 1}`),
+      name: `敌人路径 ${index + 1}`,
+      cells: orderEditorPathCells([spawn, midpoint, { col: midpoint.col, row: objective.row }, objective], spawn, objective, sourceCols, sourceRows),
+    });
+  }
+  return paths.length ? paths : [{ id: "path-main", name: "主敌人路径", cells: [] }];
+}
+
 export function editorLevelToRuntimeMap(
   level: EditorLevel,
   mode: GameMode,
@@ -519,24 +640,24 @@ export function editorLevelToRuntimeMap(
     : editorMap.objectivePoint
       ? project(editorMap.objectivePoint)
       : { col: sourceCols - 1, row: Math.floor(sourceRows / 2) };
-  const spawn = editorMap.spawnPoints?.[0] ? project(editorMap.spawnPoints[0]) : { col: 0, row: objective.row };
+  const spawnPoints = sanitizeDefenseSpawnPoints(editorMap.spawnPoints, project);
+  const spawn = spawnPoints[0] ?? { col: 0, row: objective.row };
   const exploreStart = exploreLayout?.startPoint
     ? project(exploreLayout.startPoint)
     : editorMap.explorationPoints?.[0]
       ? project(editorMap.explorationPoints[0])
       : spawn;
-  const pathSource = mode === "explore"
-    ? exploreLayout?.path ?? editorMap.explorationPoints ?? []
-    : editorMap.enemyPaths?.find((path) => path.cells?.length)?.cells
-      ?? editorMap.roads
-      ?? [];
-  const projectedPath = orderEditorPathCells(
-    uniqueCells(pathSource.map(project), sourceCols, sourceRows),
-    mode === "explore" ? exploreStart : spawn,
-    objective,
-    sourceCols,
-    sourceRows,
-  );
+  const defenseEnemyPaths = buildEditorDefensePaths(editorMap, spawnPoints, objective, project, sourceCols, sourceRows);
+  const pathSource = mode === "explore" ? exploreLayout?.path ?? editorMap.explorationPoints ?? [] : defenseEnemyPaths[0]?.cells ?? editorMap.roads ?? [];
+  const projectedPath = mode === "explore"
+    ? orderEditorPathCells(
+        uniqueCells(pathSource.map(project), sourceCols, sourceRows),
+        exploreStart,
+        objective,
+        sourceCols,
+        sourceRows,
+      )
+    : defenseEnemyPaths[0]?.cells ?? [];
   const fallbackPath = mode === "explore"
     ? buildFallbackPath(exploreStart, objective, sourceCols, sourceRows)
     : buildFallbackPath(spawn, objective, sourceCols, sourceRows);
@@ -595,6 +716,7 @@ export function editorLevelToRuntimeMap(
       hoverColorBad: parseEditorColor(theme.hoverColorBad, 0xd87880),
     },
     path,
+    ...(mode === "defense" ? { enemyPaths: defenseEnemyPaths, spawnPoints, waveRules: sanitizeEditorWaveRules(level, spawnPoints) } : {}),
     obstacles,
     actors: extractEditorActors(editorMap),
     safeZones: mode === "explore"

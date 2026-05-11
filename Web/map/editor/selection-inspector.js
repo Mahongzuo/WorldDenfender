@@ -9,6 +9,68 @@ function setEmptyState(refs, text) {
     refs.selectionInspector.innerHTML = text;
 }
 
+var DEFENSE_SPAWN_WAVE_COUNT = 20;
+
+function normalizeWaveNumbers(value, fallback) {
+    var raw = Array.isArray(value) ? value : value != null ? [value] : [];
+    if (!raw.length && fallback != null) raw = Array.isArray(fallback) ? fallback : [fallback];
+    var seen = {};
+    return raw
+        .map(function (item) {
+            return Math.max(1, Math.round(Number(item) || 0));
+        })
+        .filter(function (item) {
+            if (!item || seen[item]) return false;
+            seen[item] = true;
+            return true;
+        })
+        .sort(function (a, b) {
+            return a - b;
+        });
+}
+
+function buildSpawnWaveChecklist(level, item) {
+    var selected = normalizeWaveNumbers(item.waveNumbers, item.waveNumber);
+    var selectedLookup = {};
+    selected.forEach(function (wave) {
+        selectedLookup[wave] = true;
+    });
+    var maxWave = DEFENSE_SPAWN_WAVE_COUNT;
+    if (level && Array.isArray(level.waveRules)) {
+        level.waveRules.forEach(function (wave) {
+            maxWave = Math.max(maxWave, Math.round(Number(wave.waveNumber) || 0));
+        });
+    }
+    selected.forEach(function (wave) {
+        maxWave = Math.max(maxWave, wave);
+    });
+    maxWave = Math.min(Math.max(1, maxWave), 60);
+    var boxes = [];
+    for (var waveNumber = 1; waveNumber <= maxWave; waveNumber += 1) {
+        boxes.push(
+            '<label class="spawn-wave-chip">' +
+                '<input type="checkbox" data-spawn-wave-number="' +
+                String(waveNumber) +
+                '"' +
+                (selectedLookup[waveNumber] ? ' checked' : '') +
+                '>' +
+                '<span class="spawn-wave-num">' +
+                String(waveNumber) +
+                '</span></label>'
+        );
+    }
+    return (
+        '<div class="field-block field-block--full spawn-wave-field">' +
+        '<div class="spawn-wave-field-head">' +
+        '<span>出生波次（可多选）</span>' +
+        '<button type="button" class="mini-button spawn-wave-select-all" data-spawn-wave-select-all="1">全选</button>' +
+        '</div>' +
+        '<div class="spawn-wave-checks">' +
+        boxes.join('') +
+        '</div></div>'
+    );
+}
+
 function buildInspectorForm(env, kind, item) {
     var modelOptions = ['<option value="">未绑定模型</option>']
         .concat(
@@ -68,6 +130,23 @@ function buildInspectorForm(env, kind, item) {
         base.push(fieldHtml('冷却', 'stats.cooldown', item.stats.cooldown || 0, 'number', '0.1'));
     }
     if (kind === 'spawn') {
+        var level = env.getLevel();
+        var enemyOptions = env.getAvailableEnemyTypes(env.getLevel()).map(function (enemy) {
+            return (
+                '<option value="' +
+                escapeAttr(enemy.id) +
+                '"' +
+                (enemy.id === item.enemyTypeId ? ' selected' : '') +
+                '>' +
+                escapeHtml(enemy.name || enemy.id) +
+                '</option>'
+            );
+        }).join('');
+        if (!enemyOptions) enemyOptions = '<option value="basic">标准敌人</option>';
+        base.push(selectHtml('出怪类型', 'enemyTypeId', enemyOptions));
+        base.push(buildSpawnWaveChecklist(level, item));
+        base.push(fieldHtml('出怪数量', 'count', item.count || 12, 'number'));
+        base.push(fieldHtml('刷新间隔(秒)', 'interval', item.interval || 1.2, 'number', '0.1'));
         base.push(fieldHtml('路径 ID', 'pathId', item.pathId || 'path-main'));
     }
     if (kind === 'explorePoint') {
@@ -173,6 +252,38 @@ function updateSelectedField(env, input) {
     env.schedulePreviewRefresh();
 }
 
+function syncSpawnWaveSelectAllButtonLabel(root) {
+    var btn = root.querySelector('[data-spawn-wave-select-all]');
+    if (!btn) return;
+    var inputs = root.querySelectorAll('[data-spawn-wave-number]');
+    if (!inputs.length) {
+        btn.textContent = '全选';
+        return;
+    }
+    var allChecked = Array.prototype.every.call(inputs, function (input) {
+        return input.checked;
+    });
+    btn.textContent = allChecked ? '取消全选' : '全选';
+}
+
+function updateSpawnWaveNumbers(env, root) {
+    var target = env.findSelectedObject(env.getLevel());
+    if (!target || target.kind !== 'spawn') return;
+    var values = Array.prototype.slice
+        .call(root.querySelectorAll('[data-spawn-wave-number]:checked'))
+        .map(function (input) {
+            return Number(input.getAttribute('data-spawn-wave-number'));
+        });
+    var waves = normalizeWaveNumbers(values, []);
+    target.item.waveNumbers = waves;
+    if (waves.length) target.item.waveNumber = waves[0];
+    else delete target.item.waveNumber;
+    env.markDirty('已更新出生点波次');
+    env.renderOverview();
+    env.schedulePreviewRefresh();
+    syncSpawnWaveSelectAllButtonLabel(root);
+}
+
 export function renderSelectionInspector(refs, env) {
     if (!refs.selectionInspector) return;
     var level = env.getLevel();
@@ -232,4 +343,26 @@ export function renderSelectionInspector(refs, env) {
             updateSelectedField(env, input);
         });
     });
+    refs.selectionInspector.querySelectorAll('[data-spawn-wave-number]').forEach(function (input) {
+        input.addEventListener('change', function () {
+            updateSpawnWaveNumbers(env, refs.selectionInspector);
+        });
+    });
+    var selectAllBtn = refs.selectionInspector.querySelector('[data-spawn-wave-select-all]');
+    if (selectAllBtn) {
+        syncSpawnWaveSelectAllButtonLabel(refs.selectionInspector);
+        selectAllBtn.addEventListener('click', function () {
+            var inputs = refs.selectionInspector.querySelectorAll('[data-spawn-wave-number]');
+            var allChecked =
+                inputs.length > 0 &&
+                Array.prototype.every.call(inputs, function (el) {
+                    return el.checked;
+                });
+            var nextChecked = !allChecked;
+            refs.selectionInspector.querySelectorAll('[data-spawn-wave-number]').forEach(function (el) {
+                el.checked = nextChecked;
+            });
+            updateSpawnWaveNumbers(env, refs.selectionInspector);
+        });
+    }
 }

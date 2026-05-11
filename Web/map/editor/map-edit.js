@@ -1,4 +1,4 @@
-import { toggleCell, uid, byId, removeCell, notAtCell } from './utils.js';
+import { toggleCell, uid, byId, removeCell, notAtCell, clamp } from './utils.js';
 import { ensureExplorationLayout } from './layout-presets.js';
 
 function togglePathCell(level, col, row) {
@@ -8,8 +8,93 @@ function togglePathCell(level, col, row) {
     toggleCell(level.map.enemyPaths[0].cells, col, row);
 }
 
+function cellKey(cell) {
+    return String(cell.col) + ',' + String(cell.row);
+}
+
+function uniqueCells(cells, cols, rows) {
+    var seen = {};
+    var out = [];
+    cells.forEach(function (cell) {
+        var normalized = {
+            col: clamp(Math.round(Number(cell.col) || 0), 0, cols - 1),
+            row: clamp(Math.round(Number(cell.row) || 0), 0, rows - 1)
+        };
+        var key = cellKey(normalized);
+        if (seen[key]) return;
+        seen[key] = true;
+        out.push(normalized);
+    });
+    return out;
+}
+
+function expandPathVertices(vertices, cols, rows) {
+    var out = [];
+    for (var i = 0; i < vertices.length - 1; i += 1) {
+        var current = {
+            col: clamp(Math.round(Number(vertices[i].col) || 0), 0, cols - 1),
+            row: clamp(Math.round(Number(vertices[i].row) || 0), 0, rows - 1)
+        };
+        var end = {
+            col: clamp(Math.round(Number(vertices[i + 1].col) || 0), 0, cols - 1),
+            row: clamp(Math.round(Number(vertices[i + 1].row) || 0), 0, rows - 1)
+        };
+        out.push({ col: current.col, row: current.row });
+        while (current.col !== end.col) {
+            current = { col: current.col + Math.sign(end.col - current.col), row: current.row };
+            out.push({ col: current.col, row: current.row });
+        }
+        while (current.row !== end.row) {
+            current = { col: current.col, row: current.row + Math.sign(end.row - current.row) };
+            out.push({ col: current.col, row: current.row });
+        }
+    }
+    return uniqueCells(out, cols, rows);
+}
+
+function buildAutoPathForSpawn(level, spawn) {
+    var grid = level.map.grid || {};
+    var cols = Math.max(8, Number(grid.cols) || 28);
+    var rows = Math.max(8, Number(grid.rows) || 18);
+    var objective = level.map.objectivePoint || { col: cols - 2, row: Math.floor(rows / 2) };
+    var mergeCol = clamp(Math.floor(cols * 0.48), 1, cols - 3);
+    var mergeRow = clamp(Number(objective.row) || Math.floor(rows / 2), 0, rows - 1);
+    var vertices = [
+        spawn,
+        { col: mergeCol, row: spawn.row },
+        { col: mergeCol, row: mergeRow },
+        objective
+    ];
+    return expandPathVertices(vertices, cols, rows);
+}
+
+function rebuildAutoDefensePaths(level) {
+    if (!level || !level.map || !Array.isArray(level.map.spawnPoints)) return;
+    if (!Array.isArray(level.map.enemyPaths)) level.map.enemyPaths = [];
+    level.map.spawnPoints.forEach(function (spawn, index) {
+        if (!spawn.pathId) spawn.pathId = 'path-' + (index + 1);
+        var path = level.map.enemyPaths.find(function (item) { return item.id === spawn.pathId; });
+        if (!path) {
+            path = { id: spawn.pathId, name: '敌人路径 ' + (index + 1), cells: [] };
+            level.map.enemyPaths.push(path);
+        }
+        path.cells = buildAutoPathForSpawn(level, spawn);
+    });
+    var roadsByKey = {};
+    level.map.roads = [];
+    level.map.enemyPaths.forEach(function (path) {
+        (path.cells || []).forEach(function (cell) {
+            var key = cellKey(cell);
+            if (roadsByKey[key]) return;
+            roadsByKey[key] = true;
+            level.map.roads.push({ col: cell.col, row: cell.row });
+        });
+    });
+}
+
 function addSpawnPoint(env, col, row) {
     var level = env.getLevel();
+    if (!Array.isArray(level.map.spawnPoints)) level.map.spawnPoints = [];
     var existing = level.map.spawnPoints.find(function (point) {
         return point.col === col && point.row === row;
     });
@@ -18,13 +103,23 @@ function addSpawnPoint(env, col, row) {
         return;
     }
     var id = uid('spawn');
+    var enemies = env.getAvailableEnemyTypes(level);
+    var enemy = enemies[level.map.spawnPoints.length % Math.max(1, enemies.length)] || { id: 'basic' };
+    var pathId = 'path-' + (level.map.spawnPoints.length + 1);
+    var waveNumber = level.map.spawnPoints.length + 1;
     level.map.spawnPoints.push({
         id: id,
         name: '敌人出口 ' + (level.map.spawnPoints.length + 1),
         col: col,
         row: row,
-        pathId: 'path-main'
+        pathId: pathId,
+        enemyTypeId: enemy.id,
+        waveNumber: waveNumber,
+        waveNumbers: [waveNumber],
+        count: 12,
+        interval: 1.2
     });
+    rebuildAutoDefensePaths(level);
     env.setSelectedObject({ kind: 'spawn', id: id });
 }
 
@@ -36,6 +131,7 @@ function setObjectivePoint(env, col, row) {
         col: col,
         row: row
     };
+    rebuildAutoDefensePaths(level);
     env.setSelectedObject({ kind: 'objective', id: level.map.objectivePoint.id });
 }
 
@@ -229,6 +325,9 @@ export function moveMarker(env, kind, id, col, row) {
     if (!item) return;
     item.col = col;
     item.row = row;
+    if (env.getActiveEditorMode() !== 'explore' && (kind === 'spawn' || kind === 'objective')) {
+        rebuildAutoDefensePaths(level);
+    }
     env.setSelectedObject({ kind: kind, id: id });
     env.markDirty('已移动地图标记');
     env.renderAll();
@@ -249,6 +348,7 @@ export function eraseCellAt(env, col, row) {
     removeCell(level.map.roads, c, r);
     removeCell(level.map.obstacles, c, r);
     removeCell(level.map.buildSlots, c, r);
+    if (!Array.isArray(level.map.enemyPaths)) level.map.enemyPaths = [];
     level.map.enemyPaths.forEach(function (path) {
         removeCell(path.cells, c, r);
     });

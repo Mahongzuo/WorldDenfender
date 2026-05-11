@@ -13,24 +13,25 @@ export function createEnemyForWave(options: {
   uid: number;
   wave: number;
   start: THREE.Vector3;
+  enemyType?: EnemyType;
   random?: () => number;
   flavor?: DefenseMapFlavor;
   defenseEndless?: boolean;
   defenseDifficulty?: number;
 }): Enemy {
-  const { uid, wave, start, random = Math.random, flavor, defenseEndless, defenseDifficulty } = options;
-  let type: EnemyType = "basic";
+  const { uid, wave, start, enemyType, random = Math.random, flavor, defenseEndless, defenseDifficulty } = options;
+  let type: EnemyType = enemyType ?? "basic";
   const tier = clampDefenseDifficulty(defenseDifficulty ?? 3);
   const diff = getDefenseDifficultyRuntimeParams(tier);
   const typeWave = wave + diff.typeWaveBias;
   const rand = random();
-  if (typeWave >= 10 && rand < 0.15) {
+  if (!enemyType && typeWave >= 10 && rand < 0.15) {
     type = "swarm";
-  } else if (typeWave >= 8 && rand < 0.25) {
+  } else if (!enemyType && typeWave >= 8 && rand < 0.25) {
     type = "tank";
-  } else if (typeWave >= 5 && rand < 0.35) {
+  } else if (!enemyType && typeWave >= 5 && rand < 0.35) {
     type = "hacker";
-  } else if (typeWave >= 3 && rand < 0.5) {
+  } else if (!enemyType && typeWave >= 3 && rand < 0.5) {
     type = "scout";
   }
 

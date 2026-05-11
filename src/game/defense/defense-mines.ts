@@ -10,7 +10,7 @@ export interface DefenseMinesTickDeps {
   enemies: readonly Enemy[];
   buildGroup: THREE.Group;
   addExplosion(center: THREE.Vector3, radius: number, color: number): void;
-  damageEnemy(enemy: Enemy, damage: number, source?: DefenseDamageSource): void;
+  damageEnemy(enemy: Enemy, damage: number, source?: DefenseDamageSource, meta?: { critical?: boolean }): void;
   onMineExploded?(mine: Building): void;
 }
 

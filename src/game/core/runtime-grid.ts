@@ -53,6 +53,76 @@ export function expandPathToOrderedCells(points: GridCell[]): GridCell[] {
   return ordered;
 }
 
+/**
+ * 仅在「已绘制的格子」集合内用 BFS 连接出生点与终点，避免对乱序/分叉的格子数组做
+ * expandPathToOrderedCells 时在未绘制格子上插值穿墙。
+ */
+export function traceDefensePathAlongPaintedCells(
+  paintedCells: readonly GridCell[],
+  spawn: GridCell,
+  goal: GridCell,
+  cols: number,
+  rows: number,
+): GridCell[] | null {
+  const normalized = uniqueCells([...paintedCells], cols, rows);
+  if (!normalized.length) {
+    return null;
+  }
+  const allowed = new Set(normalized.map((c) => cellKey(c)));
+  const spawnN = {
+    col: clamp(Math.round(spawn.col), 0, cols - 1),
+    row: clamp(Math.round(spawn.row), 0, rows - 1),
+  };
+  const goalN = {
+    col: clamp(Math.round(goal.col), 0, cols - 1),
+    row: clamp(Math.round(goal.row), 0, rows - 1),
+  };
+  if (sameCell(spawnN, goalN)) {
+    return [spawnN];
+  }
+
+  const goalK = cellKey(goalN);
+  const canEnter = (c: GridCell): boolean => allowed.has(cellKey(c)) || cellKey(c) === goalK;
+
+  const q: GridCell[] = [spawnN];
+  const seen = new Set<string>([cellKey(spawnN)]);
+  const parent = new Map<string, string>();
+
+  const deltas: GridCell[] = [
+    { col: 1, row: 0 },
+    { col: -1, row: 0 },
+    { col: 0, row: 1 },
+    { col: 0, row: -1 },
+  ];
+
+  while (q.length) {
+    const cur = q.shift()!;
+    const curK = cellKey(cur);
+    if (curK === goalK) {
+      const path: GridCell[] = [];
+      let trace: string | undefined = goalK;
+      while (trace) {
+        path.push(keyToCell(trace));
+        if (trace === cellKey(spawnN)) break;
+        trace = parent.get(trace);
+      }
+      path.reverse();
+      return path;
+    }
+    for (const d of deltas) {
+      const nb = { col: cur.col + d.col, row: cur.row + d.row };
+      if (nb.col < 0 || nb.col >= cols || nb.row < 0 || nb.row >= rows) continue;
+      const nk = cellKey(nb);
+      if (seen.has(nk)) continue;
+      if (!canEnter(nb)) continue;
+      seen.add(nk);
+      parent.set(nk, curK);
+      q.push(nb);
+    }
+  }
+  return null;
+}
+
 function walkOrthogonalSegment(start: GridCell, end: GridCell): GridCell[] {
   const out: GridCell[] = [];
   let current = { ...start };

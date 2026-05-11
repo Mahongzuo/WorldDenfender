@@ -223,22 +223,34 @@ export function getDefenseEditorPathKeys(level) {
     var objective = map.objectivePoint
         ? projectGridCellDefense(map.objectivePoint, cols, rows)
         : objectiveDefault;
-    var spawn = Array.isArray(map.spawnPoints) && map.spawnPoints[0]
-        ? projectGridCellDefense(map.spawnPoints[0], cols, rows)
-        : { col: 0, row: objective.row };
-
-    var raw = defensePathSourceCells(map);
-    var projected = uniqueDefenseCells(
-        raw.map(function (c) {
-            return projectGridCellDefense(c, cols, rows);
-        }),
-        cols,
-        rows
-    );
-
-    var orderedPath = orderEditorPathCellsDefense(projected, spawn, objective, cols, rows);
-    var fallbackPath = buildDefenseFallbackVertexList(spawn, objective, cols, rows);
-    /** 与 main：`path = projectedPath.length >= 2 ? projectedPath : fallbackPath` */
-    var pathVerts = orderedPath.length >= 2 ? orderedPath : fallbackPath;
-    return expandPathWaypointPolyline(pathVerts);
+    var spawnPoints = Array.isArray(map.spawnPoints) && map.spawnPoints.length
+        ? map.spawnPoints.map(function (point) { return projectGridCellDefense(point, cols, rows); })
+        : [{ col: 0, row: objective.row }];
+    var out = new Set();
+    var paths = Array.isArray(map.enemyPaths) && map.enemyPaths.length ? map.enemyPaths : [{ id: 'path-main', cells: defensePathSourceCells(map) }];
+    paths.forEach(function (path, index) {
+        var spawnSource = Array.isArray(map.spawnPoints)
+            ? map.spawnPoints.find(function (point) { return point.pathId && point.pathId === path.id; })
+            : null;
+        var spawn = spawnSource ? projectGridCellDefense(spawnSource, cols, rows) : spawnPoints[index] || spawnPoints[0];
+        var raw = path && path.cells && path.cells.length ? path.cells : null;
+        if (raw && raw.length) {
+            uniqueDefenseCells(
+                raw.map(function (c) {
+                    return projectGridCellDefense(c, cols, rows);
+                }),
+                cols,
+                rows
+            ).forEach(function (c) {
+                out.add(String(c.col) + ',' + String(c.row));
+            });
+            return;
+        }
+        var projected = [];
+        var orderedPath = orderEditorPathCellsDefense(projected, spawn, objective, cols, rows);
+        var fallbackPath = buildDefenseFallbackVertexList(spawn, objective, cols, rows);
+        var pathVerts = orderedPath.length >= 2 ? orderedPath : fallbackPath;
+        expandPathWaypointPolyline(pathVerts).forEach(function (key) { out.add(key); });
+    });
+    return out;
 }

@@ -52,14 +52,24 @@ export function hasEditorExploreLayout(map: EditorLevelMap): boolean {
 
 export function runtimeMapToEditorMap(map: MapDefinition, current: EditorLevelMap): EditorLevelMap {
   const path = cloneCells(map.path);
+  const enemyPaths = map.enemyPaths?.length
+    ? map.enemyPaths.map((item, index) => ({
+        id: item.id || `path-${index + 1}`,
+        name: item.name || `敌人路径 ${index + 1}`,
+        cells: cloneCells(item.cells),
+      }))
+    : [{ id: "path-main", name: "主敌人路径", cells: path }];
+  const spawnPoints = map.spawnPoints?.length
+    ? map.spawnPoints.map((point, index) => ({ id: point.id || `spawn-${index + 1}`, name: point.name || `敌人入口 ${index + 1}`, ...point }))
+    : [{ id: "spawn-main", name: "敌人入口", ...path[0] }];
   return {
     ...current,
     grid: { cols: map.cols ?? GRID_COLS, rows: map.rows ?? GRID_ROWS, tileSize: TILE_SIZE },
     theme: runtimeThemeToEditorTheme(map.theme),
     roads: path,
-    enemyPaths: [{ id: "path-main", name: "主敌人路径", cells: path }],
+    enemyPaths,
     obstacles: cloneCells(map.obstacles),
-    spawnPoints: [{ id: "spawn-main", name: "敌人入口", ...path[0] }],
+    spawnPoints,
     objectivePoint: { id: "objective-main", name: "防守核心", ...path[path.length - 1] },
     ...(map.defenseFlavor ? { defenseFlavor: JSON.parse(JSON.stringify(map.defenseFlavor)) as EditorLevelMap["defenseFlavor"] } : {}),
     ...(map.levelAudio ? { levelAudio: map.levelAudio } : {}),

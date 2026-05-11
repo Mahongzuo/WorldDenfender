@@ -9,8 +9,9 @@ export interface DamageFloatOptions {
 
 function buildDamageLabelCanvas(amount: number, critical: boolean): THREE.CanvasTexture {
   const canvas = document.createElement("canvas");
-  const w = critical ? 512 : 336;
-  const h = critical ? 200 : 128;
+  /** 暴击：相对原稿约 1.5 倍画布与字号，配色为红字 */
+  const w = critical ? 768 : 336;
+  const h = critical ? 300 : 128;
   const dpr = Math.min(typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1, 2);
   canvas.width = Math.floor(w * dpr);
   canvas.height = Math.floor(h * dpr);
@@ -26,30 +27,31 @@ function buildDamageLabelCanvas(amount: number, critical: boolean): THREE.Canvas
   ctx.clearRect(0, 0, w, h);
 
   if (critical) {
-    ctx.font = `900 40px ui-sans-serif, "Segoe UI","Microsoft YaHei",sans-serif`;
+    ctx.font = `900 60px ui-sans-serif, "Segoe UI","Microsoft YaHei",sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
-    const gradCrit = ctx.createLinearGradient(w * 0.5, 0, w * 0.5, 56);
-    gradCrit.addColorStop(0, "#fff8a8");
-    gradCrit.addColorStop(0.5, "#ffcc22");
-    gradCrit.addColorStop(1, "#ff5a08");
-    ctx.strokeStyle = "rgba(96,12,12,0.92)";
-    ctx.lineWidth = 6;
+    const gradCrit = ctx.createLinearGradient(w * 0.5, 0, w * 0.5, 84);
+    gradCrit.addColorStop(0, "#ff8a8a");
+    gradCrit.addColorStop(0.45, "#ff3333");
+    gradCrit.addColorStop(1, "#cc0000");
+    ctx.strokeStyle = "rgba(48, 0, 0, 0.95)";
+    ctx.lineWidth = 9;
     ctx.lineJoin = "round";
     const critLine = "\u7206\u51fb"; // 暴击
-    ctx.strokeText(critLine, w / 2, 8);
+    ctx.strokeText(critLine, w / 2, 12);
     ctx.fillStyle = gradCrit;
-    ctx.fillText(critLine, w / 2, 8);
+    ctx.fillText(critLine, w / 2, 12);
 
-    const numGrad = ctx.createLinearGradient(w * 0.5, 56, w * 0.5, 190);
+    const numGrad = ctx.createLinearGradient(w * 0.5, 84, w * 0.5, h - 8);
     numGrad.addColorStop(0, "#ffffff");
-    numGrad.addColorStop(0.35, "#fffb00");
-    numGrad.addColorStop(1, "#ff6600");
+    numGrad.addColorStop(0.25, "#ff6b6b");
+    numGrad.addColorStop(0.6, "#ff2222");
+    numGrad.addColorStop(1, "#b80000");
 
-    ctx.font = `900 96px ui-sans-serif, "Segoe UI","Microsoft YaHei",sans-serif`;
+    ctx.font = `900 144px ui-sans-serif, "Segoe UI","Microsoft YaHei",sans-serif`;
     ctx.textBaseline = "alphabetic";
-    ctx.strokeStyle = "rgba(80, 0, 12, 0.95)";
-    ctx.lineWidth = 10;
+    ctx.strokeStyle = "rgba(60, 0, 0, 0.96)";
+    ctx.lineWidth = 15;
     ctx.strokeText(display, w / 2, h * 0.56);
     ctx.fillStyle = numGrad;
     ctx.fillText(display, w / 2, h * 0.56);
@@ -76,7 +78,7 @@ function buildDamageLabelCanvas(amount: number, critical: boolean): THREE.Canvas
 }
 
 /**
- * 在场景内上浮的伤害数字 Sprite；塔防暴击使用更大画布与饱和度更高的配色。
+ * 在场景内上浮的伤害数字 Sprite；塔防暴击使用更大画布、约 1.5 倍字号与红色配色。
  */
 export function addDamageFloatEffect(
   effects: TimedEffect[],
@@ -104,7 +106,7 @@ export function addDamageFloatEffect(
       depthTest: false,
       depthWrite: false,
       fog: false,
-      blending: critical ? THREE.AdditiveBlending : THREE.NormalBlending,
+      blending: THREE.NormalBlending,
     }),
   );
   sprite.renderOrder = 48;
@@ -112,7 +114,7 @@ export function addDamageFloatEffect(
   sprite.position.copy(worldPointToFxGroupLocal(fxGroup, position));
 
   const aspect = texture.image.width / Math.max(texture.image.height, 1);
-  const worldH = critical ? 2.05 : 1.25;
+  const worldH = critical ? 3.08 : 1.25;
   const sfx = fxGroup.scale.x;
   const sfxOk =
     sfx > 1.001 && Math.abs(sfx - fxGroup.scale.z) < 0.02 && fxGroup.scale.y <= 1.05;

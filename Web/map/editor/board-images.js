@@ -336,6 +336,8 @@ export function bindBoardImageGlobalHandlers(refs, env) {
             if (env.getActiveWorkbench() !== 'level' || env.getViewportViewMode() !== 'board') return;
             var spriteEl = event.target.closest('.map-board-image-sprite');
             if (!spriteEl) return;
+            var activeTool = env.getActiveTool ? env.getActiveTool() : 'select';
+            if (activeTool !== 'boardImage' && activeTool !== 'select') return;
             var layerId = spriteEl.getAttribute('data-board-image-id') || '';
             if (!layerId) return;
             var level = env.getLevel();
