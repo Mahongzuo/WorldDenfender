@@ -1,6 +1,7 @@
 import { MODEL_CATEGORY_CONFIG } from './content.js';
 import { escapeAttr, escapeHtml, fileToBase64 } from './utils.js';
 import { parseFetchErrorBody } from './fetch-utils.js';
+import { clampGlobalPathModelScale, canonicalModelPathScaleKey, lookupGlobalModelPathScale } from './model-path-scale.js';
 
 function getActiveModelCategory(env) {
     return env.getActiveModelCategory() || 'all';
@@ -63,6 +64,21 @@ function renderModelDetail(refs, env, asset) {
     if (refs.modelDetailCategory) refs.modelDetailCategory.value = catLabel;
     if (refs.modelDetailPath) refs.modelDetailPath.value = asset ? asset.path || asset.publicUrl || '' : '';
 
+    var pathForScale = asset ? asset.path || asset.publicUrl || '' : '';
+    var st = typeof env.getState === 'function' ? env.getState() : null;
+    var scaleTable =
+        st && st.gameAssetConfig ? st.gameAssetConfig.globalModelPathScales || {} : {};
+    var pathKey = canonicalModelPathScaleKey(pathForScale);
+    var persisted = pathKey ? scaleTable[pathKey] : undefined;
+    var curScale =
+        persisted != null && Number.isFinite(Number(persisted))
+            ? clampGlobalPathModelScale(Number(persisted))
+            : 1;
+    if (refs.modelDetailGlobalScale) {
+        refs.modelDetailGlobalScale.disabled = !asset;
+        refs.modelDetailGlobalScale.value = String(asset ? curScale : 1);
+    }
+
     if (refs.modelPreviewEmpty) refs.modelPreviewEmpty.classList.toggle('view-hidden', !!asset);
     if (refs.modelPreviewHost) refs.modelPreviewHost.classList.toggle('view-hidden', !asset);
     if (refs.modelPreviewMeta) refs.modelPreviewMeta.textContent = asset ? asset.name + ' · 模型预览' : '未绑定模型';
@@ -71,7 +87,9 @@ function renderModelDetail(refs, env, asset) {
         env.disposeModelAssetPreview();
         return;
     }
-    env.ensureModelAssetPreview(asset.publicUrl || asset.path || '');
+    var url = asset.publicUrl || asset.path || '';
+    var mult = lookupGlobalModelPathScale(scaleTable, url);
+    env.ensureModelAssetPreview(url, mult);
 }
 
 function renderModelInspector(refs, env, counts) {

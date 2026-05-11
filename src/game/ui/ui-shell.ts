@@ -262,11 +262,11 @@ export function renderGameUiShell(app: HTMLElement, requiredElement: RequiredEle
         <section class="game-over-overlay" id="defenseVictoryPromptPanel" aria-hidden="true">
           <div class="game-over-vignette"></div>
           <div class="game-over-card">
-            <h2 class="game-over-title">通关</h2>
-            <p>你已经完成标准 20 波塔防攻势。可以选择<strong>无尽模式</strong>继续挑战不断增强的敌军，或直接<strong>结算胜利</strong>。</p>
+            <h2 class="game-over-title">防线守住了</h2>
+            <p>你已经完成标准 20 波塔防攻势。可以选择<strong>无尽模式</strong>继续挑战不断增强的敌军，或先<strong>确认塔防目标</strong>，再去击败本图全部 Boss。</p>
             <div class="game-over-actions" style="flex-wrap: wrap; gap: 10px; justify-content: center;">
               <button class="premium" type="button" id="defenseEndlessConfirmBtn">开启无尽模式</button>
-              <button type="button" id="defenseStandardCompleteBtn">结算胜利</button>
+              <button type="button" id="defenseStandardCompleteBtn">确认塔防目标</button>
             </div>
           </div>
         </section>

@@ -4,6 +4,7 @@
 import { CONTENT_BROWSER_FLOAT_GEOM_KEY } from './content.js';
 import { escapeAttr, escapeHtml } from './utils.js';
 import { clampContentBrowserGeom } from './html-builders.js';
+import { lookupGlobalModelPathScale } from './model-path-scale.js';
 
 export function isContentBrowserFloatOpen(refs) {
     return refs.contentBrowserFloatPanel && !refs.contentBrowserFloatPanel.classList.contains('view-hidden');
@@ -301,7 +302,7 @@ export function showContentBrowserMiniPreview(refs, env, url) {
             '<div class="empty-state content-browser-mini-empty">按工具条「内容浏览器」或 Ctrl+空格 打开窗口后查看三维预览。</div>';
         return;
     }
-    import('./content-browser-model-preview.js')
+    import('../content-browser-model-preview.js')
         .then(function (mod) {
             if (!refs.contentBrowserPreviewHost) return;
             var prev = env.getContentBrowserMiniApi();
@@ -310,7 +311,9 @@ export function showContentBrowserMiniPreview(refs, env, url) {
             }
             var api = mod.createContentBrowserMiniPreview({ host: refs.contentBrowserPreviewHost });
             env.setContentBrowserMiniApi(api);
-            return api.setUrl(url);
+            var scales = typeof env.getGlobalModelPathScales === 'function' ? env.getGlobalModelPathScales() : {};
+            var pathScale = url ? lookupGlobalModelPathScale(scales, url) : 1;
+            return api.setUrl(url, pathScale);
         })
         .catch(function (e) {
             console.warn('[ContentBrowser preview]', e);

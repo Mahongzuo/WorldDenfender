@@ -1,8 +1,11 @@
 import * as THREE from "three";
+import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 import { clone as skeletonClone } from "three/examples/jsm/utils/SkeletonUtils.js";
 import {
+  attachEmbeddedAnimationClips,
+  getEmbeddedAnimationClips,
   loadAnimationAsset,
   loadCustomModelAsset,
   loadPersistedGameAssetConfig,
@@ -150,6 +153,7 @@ import type {
   SaveData,
   TimedEffect,
 } from "../core/types";
+import type { DefenseAuthoredSpawnState } from "../defense/defense-wave-spawner";
 import type { DefenseDamageSource } from "../core/defense-types";
 import { UI_THEME_STORAGE_KEY, applyUiColorMode, getUiColorMode, toggleUiColorMode } from "../ui/ui-theme";
 
@@ -163,9 +167,10 @@ export class TowerDefenseGame {
   private readonly renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true });
   private readonly gltfLoader = new GLTFLoader();
   private readonly objLoader = new OBJLoader();
+  private readonly fbxLoader = new FBXLoader();
   private readonly textureLoader = new THREE.TextureLoader();
   /** 默认敌人 GLB 首包缓存（按 URL），实例用 SkeletonUtils.clone。 */
-  private readonly enemyDefaultGltfTemplateByUrl = new Map<string, THREE.Object3D>();
+  private readonly enemyDefaultGltfTemplateByUrl = new Map<string, { scene: THREE.Object3D; animations: readonly THREE.AnimationClip[] }>();
   private mapActorGen = 0;
   private readonly textures: Record<string, THREE.Texture> = {};
   private readonly raycaster = new THREE.Raycaster();
@@ -269,7 +274,9 @@ export class TowerDefenseGame {
   private gameOverActive = false;
   private gameVictoryActive = false;
   private defenseVictoryAwaitingChoice = false;
+  private defenseStandardVictoryCleared = false;
   private defenseEndless = false;
+  private defeatedExploreBossIds: string[] = [];
   // Safe-zone shop state
   private inSafeZone = false;
 
@@ -292,6 +299,7 @@ export class TowerDefenseGame {
   private spawnRemaining = 0;
   private spawnCooldown = 0;
   private currentWaveSpawned = 0;
+  private authoredSpawnStates: DefenseAuthoredSpawnState[] = [];
   private waveActive = false;
   /** 塔防运行时难度 1–5；仅影响后续刷怪与波规模，不重载棋盘 */
   private defenseDifficulty: DefenseDifficultyTier = DEFENSE_DIFFICULTY_DEFAULT;
@@ -352,6 +360,7 @@ export class TowerDefenseGame {
   private bundledBuildSpecsJson = "";
   /** level-editor-state.json 中全局塔模型 URL；切换防御地图时与 map.towerModelUrls 合并 */
   private globalCustomModelUrls: Partial<Record<BuildId, string>> = {};
+  private globalModelScales: Partial<Record<ModelTarget, number>> = {};
 
   /** 从编辑器标签页保存后返回时防抖热重载 */
   private editorProjectReloadTimer = 0;
@@ -657,28 +666,52 @@ export class TowerDefenseGame {
 
   private renderMapButtons(): void {
     const maps = this.currentMapList();
+    const sourceMode = this.mode;
     this.mapButtonsElement.innerHTML = "";
-    maps.forEach((map, index) => {
+    const designedMaps = maps
+      .map((map, index) => ({ map, index }))
+      .filter(({ map }) => map.editorStatus === "designed")
+      .sort((a, b) => a.map.name.localeCompare(b.map.name, "zh-Hans-CN", { sensitivity: "base" }));
+    designedMaps.forEach(({ map, index }) => {
       const button = document.createElement("button");
       button.className = "map-button";
       button.dataset.map = String(index);
-      button.innerHTML = `<strong>${index + 1}. ${map.name}</strong><br /><span>${map.description}</span>`;
+      button.innerHTML = `<strong>${map.name}</strong><br /><span>${map.description}</span>`;
       button.addEventListener("click", () => {
-        // Keep city-specific build cards in sync with the selected map.
-        const matchedCity = Object.entries(CITY_MAP).find(([, info]) => {
-          return this.mode === "explore" ? info.exploreIndex === index : info.defenseIndex === index;
-        });
-        if (matchedCity) {
-          this.currentCity = matchedCity[0];
-          this.currentCityLabel = CITY_MAP[this.currentCity].label;
-        } else {
-          this.currentCity = "";
-          this.currentCityLabel = "";
-        }
-        this.loadMap(index);
+        this.selectMapForNewRun(index, sourceMode);
       });
       this.mapButtonsElement.append(button);
     });
+  }
+
+  private syncModePairForSelectedMap(index: number, sourceMode: GameMode = this.mode): void {
+    const matchedCity = Object.entries(CITY_MAP).find(([, info]) => {
+      return sourceMode === "explore" ? info.exploreIndex === index : info.defenseIndex === index;
+    });
+    if (matchedCity) {
+      this.currentCity = matchedCity[0];
+      this.currentCityLabel = CITY_MAP[this.currentCity].label;
+      this.defenseMapIndex = matchedCity[1].defenseIndex;
+      this.exploreMapIndex = matchedCity[1].exploreIndex;
+      return;
+    }
+    this.currentCity = "";
+    this.currentCityLabel = "";
+    if (sourceMode === "explore") {
+      this.exploreMapIndex = index;
+      if (this.defenseMapIndex < 0) this.defenseMapIndex = index;
+    } else {
+      this.defenseMapIndex = index;
+      if (this.exploreMapIndex < 0) this.exploreMapIndex = index;
+    }
+  }
+
+  private selectMapForNewRun(index: number, sourceMode: GameMode): void {
+    this.syncModePairForSelectedMap(index, sourceMode);
+    this.requestedLevelId = "";
+    this.requestedDefIdx = this.defenseMapIndex;
+    this.requestedExpIdx = this.exploreMapIndex;
+    this.startNewGame();
   }
 
   private startNewGame(): void {
@@ -691,6 +724,8 @@ export class TowerDefenseGame {
     this.defenseMapIndex = this.requestedDefIdx >= 0 ? this.requestedDefIdx : this.defenseMapIndex;
     this.exploreMapIndex = this.requestedExpIdx >= 0 ? this.requestedExpIdx : this.exploreMapIndex;
     this.exploreMapInitialized = false;
+    this.defenseStandardVictoryCleared = false;
+    this.defeatedExploreBossIds = [];
     this.modelCustomization.resetForFreshRun();
     void this.finishNewGameAfterModels();
   }
@@ -785,10 +820,13 @@ export class TowerDefenseGame {
       spawnRemaining: this.spawnRemaining,
       spawnCooldown: this.spawnCooldown,
       currentWaveSpawned: this.currentWaveSpawned,
+      authoredSpawnStates: this.authoredSpawnStates.map((lane) => ({ ...lane })),
       waveActive: this.waveActive,
       defenseDifficulty: this.defenseDifficulty,
       defenseEndless: this.defenseEndless,
       defenseVictoryAwaitingChoice: this.defenseVictoryAwaitingChoice,
+      defenseStandardVictoryCleared: this.defenseStandardVictoryCleared,
+      defeatedExploreBossIds: this.defeatedExploreBossIds,
       buildings: this.buildings.map((building) => ({
         id: building.spec.id,
         cell: building.cell,
@@ -852,12 +890,26 @@ export class TowerDefenseGame {
       this.spawnRemaining = data.spawnRemaining ?? 0;
       this.spawnCooldown = data.spawnCooldown ?? 0;
       this.currentWaveSpawned = data.currentWaveSpawned ?? 0;
+      this.authoredSpawnStates = Array.isArray(data.authoredSpawnStates)
+        ? data.authoredSpawnStates
+            .map((lane) => ({
+              waveRuleId: typeof lane?.waveRuleId === "string" ? lane.waveRuleId : undefined,
+              remaining: Math.max(0, Math.round(Number(lane?.remaining) || 0)),
+              cooldown: Math.max(0, Number(lane?.cooldown) || 0),
+              interval: Math.max(0.1, Number(lane?.interval) || 1),
+            }))
+            .filter((lane) => lane.remaining > 0)
+        : [];
       this.waveActive = !!data.waveActive;
 
       this.defenseDifficulty = clampDefenseDifficulty(data.defenseDifficulty ?? DEFENSE_DIFFICULTY_DEFAULT);
       this.reflectDefenseDifficultySliders(this.defenseDifficulty);
       this.defenseEndless = !!data.defenseEndless;
       this.defenseVictoryAwaitingChoice = !!data.defenseVictoryAwaitingChoice;
+      this.defenseStandardVictoryCleared = !!data.defenseStandardVictoryCleared;
+      this.defeatedExploreBossIds = Array.isArray(data.defeatedExploreBossIds)
+        ? data.defeatedExploreBossIds.filter((id): id is string => typeof id === "string")
+        : [];
       this.gameVictoryActive = false;
       this.syncDefenseVictoryPromptVisibility();
 
@@ -884,6 +936,7 @@ export class TowerDefenseGame {
           blockingEnemies: [],
           skillCooldownTimer: 0,
         };
+        this.bindBuildingEmbeddedAnimation(building);
         this.buildingDefenseHud.attachToBuilding(building);
         this.nextUid += 1;
         const position = cellToWorld(building.cell);
@@ -919,6 +972,7 @@ export class TowerDefenseGame {
 
       this.modelCustomization.assignFromLoadedEditorBundle(loaded);
       this.globalCustomModelUrls = { ...this.modelCustomization.customModelUrls };
+      this.globalModelScales = { ...this.modelCustomization.modelScales };
       this.playerExploreTransform = loaded.playerExploreTransform;
       setGlobalGameAudio(loaded.globalAudio);
     } catch (error) {
@@ -938,6 +992,17 @@ export class TowerDefenseGame {
       }
     }
     this.modelCustomization.customModelUrls = merged;
+    this.modelCustomization.modelScales = { ...this.globalModelScales };
+    const scaleOverrides = map.towerModelScales;
+    if (scaleOverrides) {
+      for (const [rawKey, rawScale] of Object.entries(scaleOverrides)) {
+        const id = rawKey as BuildId;
+        const scale = typeof rawScale === "number" && Number.isFinite(rawScale) ? rawScale : Number(rawScale);
+        if (Number.isFinite(scale) && scale > 0 && Object.prototype.hasOwnProperty.call(BUILD_SPECS, id)) {
+          this.modelCustomization.modelScales[id] = clamp(scale, 0.05, 8);
+        }
+      }
+    }
     try {
       await this.modelCustomization.restoreMeshesFromStoredUrls({
         gltfLoader: this.gltfLoader,
@@ -1124,11 +1189,52 @@ export class TowerDefenseGame {
       }
 
       const position = building.mesh.position.clone();
+      building.animationMixer?.stopAllAction();
+      building.animationMixer = undefined;
       this.buildGroup.remove(building.mesh);
       building.mesh = this.createBuildingMesh(building.spec);
+      this.bindBuildingEmbeddedAnimation(building);
       this.buildingDefenseHud.attachToBuilding(building);
       building.mesh.position.copy(position);
       this.buildGroup.add(building.mesh);
+    }
+  }
+
+  private pickEmbeddedAutoplayClip(clips: readonly THREE.AnimationClip[], preferred: readonly string[]): THREE.AnimationClip | null {
+    if (!clips.length) {
+      return null;
+    }
+    for (const token of preferred) {
+      const matched = clips.find((clip) => clip.name.toLowerCase().includes(token));
+      if (matched) {
+        return matched;
+      }
+    }
+    return clips[0] ?? null;
+  }
+
+  private bindBuildingEmbeddedAnimation(building: Building): void {
+    building.animationMixer?.stopAllAction();
+    building.animationMixer = undefined;
+    const clips = getEmbeddedAnimationClips(building.mesh);
+    const clip = this.pickEmbeddedAutoplayClip(clips, ["idle", "default", "loop", "spin", "attack"]);
+    if (!clip) {
+      return;
+    }
+    const mixer = new THREE.AnimationMixer(building.mesh);
+    const action = mixer.clipAction(clip);
+    action.reset();
+    action.setLoop(THREE.LoopRepeat, Infinity);
+    action.play();
+    building.animationMixer = mixer;
+  }
+
+  private updateDefenseEmbeddedAnimations(dt: number): void {
+    for (const building of this.buildings) {
+      building.animationMixer?.update(dt);
+    }
+    for (const enemy of this.enemies) {
+      enemy.animationMixer?.update(dt);
     }
   }
 
@@ -1208,7 +1314,16 @@ export class TowerDefenseGame {
       },
       showExploreEnemyDamageFloat: (worldPos, dmg, opts) =>
         this.effectsFacade.spawnDamageFloat(worldPos, dmg, opts),
-      onExploreBasicAttackFired: () => playExploreBasicAttack(),
+      onExploreBasicAttackFired: () => {
+        playExploreBasicAttack();
+        this.playerAnimator.playAction("attack");
+      },
+      onExploreSkillEUsed: () => {
+        this.playerAnimator.playAction("skillE");
+      },
+      onExploreSkillRUsed: () => {
+        this.playerAnimator.playAction("skillR");
+      },
       onExploreEnemyKilled: () => playExploreEnemyKilled(),
       loadExploreGltfScene: async (url) => {
         const trimmed = url.trim();
@@ -1226,8 +1341,11 @@ export class TowerDefenseGame {
         }
       },
       onExploreBossDefeated: () => {
+        this.captureExploreBossProgress();
         this.scheduleExploreBossVictoryCutscene();
+        this.maybePresentFinalVictory();
       },
+      orientHudToCamera: (obj) => this.hudBillboardOrient.orient(this.camera, this.mode, this.cameraMode, obj),
     };
   }
 
@@ -1593,10 +1711,11 @@ export class TowerDefenseGame {
   }
 
   private loadMap(index: number): void {
+    this.syncModePairForSelectedMap(index);
     if (this.mode === "explore") {
-      this.loadExploreMap(index, true);
+      this.loadExploreMap(this.exploreMapIndex, true);
     } else {
-      this.loadDefenseMap(index, true);
+      this.loadDefenseMap(this.defenseMapIndex, true);
     }
   }
 
@@ -1612,10 +1731,12 @@ export class TowerDefenseGame {
     this.spawnRemaining = 0;
     this.spawnCooldown = 0;
     this.currentWaveSpawned = 0;
+    this.authoredSpawnStates = [];
     this.waveActive = false;
     this.cameraPan.set(0, 0, 0);
 
     if (resetEncounter) {
+      this.defenseStandardVictoryCleared = false;
       this.defenseEndless = false;
       this.defenseVictoryAwaitingChoice = false;
       this.gameVictoryActive = false;
@@ -1667,6 +1788,7 @@ export class TowerDefenseGame {
       bosses: map.exploreBosses,
       spawners: map.exploreSpawners,
     });
+    this.exploreCombat.restoreDefeatedBossIds(this.defeatedExploreBossIds);
     const runtimeState = buildRuntimeMapState(map);
     this.explorePathCells = runtimeState.pathCells;
     this.exploreObstacleCells = runtimeState.obstacleCells;
@@ -1691,6 +1813,8 @@ export class TowerDefenseGame {
       this.exploreProgress.hp = this.exploreProgress.maxHp;
       this.spawnPlacedExplorePickups(map);
     }
+
+    this.captureExploreBossProgress();
 
     if (options?.skipViewRefresh) {
       return;
@@ -1752,6 +1876,9 @@ export class TowerDefenseGame {
       group: this.mapGroup,
       map,
       gltfLoader: this.gltfLoader,
+      objLoader: this.objLoader,
+      fbxLoader: this.fbxLoader,
+      globalModelPathScales: this.modelCustomization.globalModelPathScales,
       isStale: () => this.mapActorGen !== defActorGen,
       playfieldScale: this.playfieldVisualScale,
       yOffset: defYOffset,
@@ -1813,6 +1940,9 @@ export class TowerDefenseGame {
       group: this.mapGroup,
       map,
       gltfLoader: this.gltfLoader,
+      objLoader: this.objLoader,
+      fbxLoader: this.fbxLoader,
+      globalModelPathScales: this.modelCustomization.globalModelPathScales,
       isStale: () => this.mapActorGen !== expActorGen,
     }).catch((e) => console.warn("[MapActors]", e));
     this.buildGroup.visible = false;
@@ -1974,9 +2104,13 @@ export class TowerDefenseGame {
   }
 
   private positionPlayerAtStart(): void {
-    const start = this.currentMap().path[0];
+    const map = this.currentMap();
+    const start = this.mode === "explore" ? map.exploreStart ?? map.path[0] : map.path[0];
+    if (!start) {
+      return;
+    }
     const fallback = { col: Math.min(start.col + 2, getActiveGridCols() - 1), row: start.row };
-    const cell = this.isBuildBlocked(fallback) ? start : fallback;
+    const cell = this.mode === "explore" ? start : this.isBuildBlocked(fallback) ? start : fallback;
     const position = cellToWorld(cell);
     const t = this.playerExploreTransform;
     this.player.position.set(
@@ -2044,11 +2178,14 @@ export class TowerDefenseGame {
   }
 
   private toggleMode(): void {
-    this.mode = this.mode === "defense" ? "explore" : "defense";
+    const previousMode = this.mode;
+    const previousIndex = previousMode === "defense" ? this.defenseMapIndex : this.exploreMapIndex;
+    this.syncModePairForSelectedMap(previousIndex);
+    this.mode = previousMode === "defense" ? "explore" : "defense";
     this.renderMapButtons();
     if (this.mode === "explore") {
       this.exploreWalkMode = false;
-      this.showExploreView();
+      this.loadExploreMap(this.exploreMapIndex, true, { silent: true });
     } else {
       this.showDefenseView();
     }
@@ -2102,6 +2239,7 @@ export class TowerDefenseGame {
       blockingEnemies: [],
       skillCooldownTimer: 0,
     };
+    this.bindBuildingEmbeddedAnimation(building);
     this.buildingDefenseHud.attachToBuilding(building);
     this.nextUid += 1;
 
@@ -2124,7 +2262,8 @@ export class TowerDefenseGame {
       return;
     }
 
-    this.economy.addMoney(Math.floor(building.spec.cost * 0.5));
+    const refundRatio = THREE.MathUtils.clamp(building.spec.refundRatio ?? 0.5, 0, 1);
+    this.economy.addMoney(Math.floor(building.spec.cost * refundRatio));
     this.buildGroup.remove(building.mesh);
     this.buildings = this.buildings.filter((item) => item !== building);
     this.showToast(`\u5df2\u62c6\u9664\uff1a${building.spec.name}`);
@@ -2180,6 +2319,7 @@ export class TowerDefenseGame {
     const root = new THREE.Group();
     this.applyGeoPlayfieldSquashCompensation(visual);
     root.add(visual);
+    attachEmbeddedAnimationClips(root, getEmbeddedAnimationClips(visual));
     return root;
   }
 
@@ -2204,6 +2344,7 @@ export class TowerDefenseGame {
       /** 对战进行中探索与塔防并行模拟（切视图也不断探索侧计时/战斗） */
       this.updateExplore(dt);
       this.updateDrops(dt);
+      this.updateDefenseEmbeddedAnimations(dt);
     }
     this.updateCamera(dt);
     this.geoTilesRuntime.update();
@@ -2258,6 +2399,7 @@ export class TowerDefenseGame {
         spawnRemaining: this.spawnRemaining,
         spawnCooldown: this.spawnCooldown,
         currentWaveSpawned: this.currentWaveSpawned,
+        authoredSpawnStates: this.authoredSpawnStates,
       },
       enemiesLength: this.enemies.length,
       defenseEndless: this.defenseEndless,
@@ -2271,6 +2413,7 @@ export class TowerDefenseGame {
     this.spawnRemaining = out.timers.spawnRemaining;
     this.spawnCooldown = out.timers.spawnCooldown;
     this.currentWaveSpawned = out.timers.currentWaveSpawned ?? 0;
+    this.authoredSpawnStates = out.timers.authoredSpawnStates?.map((lane) => ({ ...lane })) ?? [];
     for (const fx of out.effects) {
       if (fx.kind === "economyGrant") {
         this.economy.addMoney(fx.amount);
@@ -2282,6 +2425,7 @@ export class TowerDefenseGame {
       } else if (fx.kind === "defenseStandardVictoryAwaitChoice") {
         this.defenseVictoryAwaitingChoice = true;
         this.syncDefenseVictoryPromptVisibility();
+        this.maybePresentFinalVictory();
         this.saveGame(false);
       } else if (fx.kind === "spawnEnemy") {
         this.spawnEnemy(fx.spawnOrdinal, fx.waveRuleId);
@@ -2506,7 +2650,47 @@ export class TowerDefenseGame {
       safeZoneShopPanel: this.safeZoneShopPanel,
       showToast: (message, critical) => this.showToast(message, critical),
     });
-    this.maybeTriggerExploreVictory();
+    this.captureExploreBossProgress();
+    this.maybePresentFinalVictory();
+  }
+
+  private captureExploreBossProgress(): void {
+    this.defeatedExploreBossIds = this.exploreCombat.getDefeatedBossIds();
+  }
+
+  private hasDefenseVictoryObjectiveCompleted(): boolean {
+    return this.defenseStandardVictoryCleared;
+  }
+
+  private hasExploreVictoryObjectiveCompleted(): boolean {
+    return this.exploreCombat.allPermanentBossesCleared();
+  }
+
+  private maybePresentFinalVictory(): boolean {
+    if (!this.gameStarted || this.paused || this.cutsceneActive) return false;
+    if (this.gameOverActive || this.gameVictoryActive) return false;
+    if (this.homeOverlay.classList.contains("show")) return false;
+    if (!this.hasDefenseVictoryObjectiveCompleted()) return false;
+    if (!this.hasExploreVictoryObjectiveCompleted()) return false;
+    this.defenseStandardVictoryCleared = true;
+    if (this.defenseVictoryAwaitingChoice) {
+      this.defenseVictoryAwaitingChoice = false;
+      this.syncDefenseVictoryPromptVisibility();
+    }
+    presentVictoryScreen(
+      {
+        getVictoryActive: () => this.gameVictoryActive,
+        setVictoryActive: (v) => {
+          this.gameVictoryActive = v;
+        },
+        victoryReasonElement: this.gameVictoryReason,
+        victoryPanel: this.gameVictoryPanel,
+        victoryTitleElement: this.gameVictoryTitle,
+      },
+      "已守住全部塔防攻势，并击败本图全部 Boss",
+    );
+    this.saveGame(false);
+    return true;
   }
 
   private syncDefenseVictoryPromptVisibility(): void {
@@ -2523,7 +2707,9 @@ export class TowerDefenseGame {
     this.nextWaveDelay = 5;
     this.waveActive = false;
     this.spawnRemaining = 0;
+    this.spawnCooldown = 0;
     this.currentWaveSpawned = 0;
+    this.authoredSpawnStates = [];
     this.saveGame(false);
     this.showToast("\u65e0\u5c3d\u6a21\u5f0f\u5df2\u5f00\u542f\uff0c\u6bcf\u6ce2\u589e\u5f3a", true);
     this.updateUi();
@@ -2532,41 +2718,11 @@ export class TowerDefenseGame {
   private completeDefenseStandardVictory(): void {
     if (!this.defenseVictoryAwaitingChoice) return;
     this.defenseVictoryAwaitingChoice = false;
+    this.defenseStandardVictoryCleared = true;
     this.syncDefenseVictoryPromptVisibility();
-    presentVictoryScreen(
-      {
-        getVictoryActive: () => this.gameVictoryActive,
-        setVictoryActive: (v) => {
-          this.gameVictoryActive = v;
-        },
-        victoryReasonElement: this.gameVictoryReason,
-        victoryPanel: this.gameVictoryPanel,
-        victoryTitleElement: this.gameVictoryTitle,
-      },
-      `\u5854\u9632\u5df2\u5b8c\u6210\u6807\u51c6 ${DEFENSE_STANDARD_WAVE_COUNT} \u6ce2`,
-    );
-    this.saveGame(false);
-  }
-
-  private maybeTriggerExploreVictory(): void {
-    if (this.mode !== "explore") return;
-    if (!this.gameStarted || this.paused || this.cutsceneActive) return;
-    if (this.gameOverActive || this.gameVictoryActive) return;
-    if (this.defenseVictoryAwaitingChoice) return;
-    if (this.homeOverlay.classList.contains("show")) return;
-    if (!this.exploreCombat.allPermanentBossesCleared()) return;
-    presentVictoryScreen(
-      {
-        getVictoryActive: () => this.gameVictoryActive,
-        setVictoryActive: (v) => {
-          this.gameVictoryActive = v;
-        },
-        victoryReasonElement: this.gameVictoryReason,
-        victoryPanel: this.gameVictoryPanel,
-        victoryTitleElement: this.gameVictoryTitle,
-      },
-      "\u63a2\u7d22\u5df2\u51fb\u8d25\u672c\u56fe\u5168\u90e8 Boss",
-    );
+    if (!this.maybePresentFinalVictory()) {
+      this.showToast("塔防目标已完成，还需击败本图全部 Boss 才能最终胜利", true);
+    }
     this.saveGame(false);
   }
 
@@ -2645,6 +2801,8 @@ export class TowerDefenseGame {
       safeZoneShopHide: () => this.safeZoneShopPanel.setAttribute("aria-hidden", "true"),
       renderInventoryGrid: () => this.renderInventoryGrid(),
     });
+    this.defenseStandardVictoryCleared = false;
+    this.defeatedExploreBossIds = [];
   }
 
   private restartAfterGameOver(): void {

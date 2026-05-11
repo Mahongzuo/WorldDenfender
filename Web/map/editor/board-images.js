@@ -96,6 +96,9 @@ export function addBoardImageLayerFromUrl(level, src, options) {
                     if (Number.isFinite(Number(level.map.boardImageLayers[index].order))) {
                         layer.order = Number(level.map.boardImageLayers[index].order);
                     }
+                    if (level.map.boardImageLayers[index].editorHidden === true) {
+                        layer.editorHidden = true;
+                    }
                     level.map.boardImageLayers.splice(index, 1, layer);
                     resolve(layer);
                     return;
@@ -137,7 +140,9 @@ export function renderBoardImagesPanel(refs, env) {
     var sid = selectedObject && selectedObject.kind === 'boardImage' ? selectedObject.id : '';
     var rows = raw
         .map(function (layer, idx) {
+            var hid = layer.editorHidden === true;
             var selCls = layer.id === sid ? ' board-images-layer-row--selected' : '';
+            var hidCls = hid ? ' board-images-layer-row--editor-hidden' : '';
             var thumb =
                 '<img class="board-images-layer-thumb" alt="" draggable="false" src="' +
                 escapeAttr(layer.src) +
@@ -145,6 +150,7 @@ export function renderBoardImagesPanel(refs, env) {
             return (
                 '<div class="board-images-layer-row' +
                 selCls +
+                hidCls +
                 '" data-board-panel-id="' +
                 escapeAttr(layer.id) +
                 '" role="group">' +
@@ -163,6 +169,13 @@ export function renderBoardImagesPanel(refs, env) {
                 escapeHtml(String(layer.widthPct)) +
                 '%</span>' +
                 '<div class="board-images-layer-actions">' +
+                '<label class="board-images-layer-hide">' +
+                '<input type="checkbox" class="board-images-layer-hide-input" data-board-panel-id="' +
+                escapeAttr(layer.id) +
+                '"' +
+                (hid ? ' checked' : '') +
+                ' title="仅在棋盘编辑视图中隐藏，预览与游戏内仍会显示">' +
+                '隐藏</label>' +
                 '<button type="button" class="mini-button" data-board-panel-act="bil-up" data-board-panel-id="' +
                 escapeAttr(layer.id) +
                 '">上移</button>' +
@@ -182,7 +195,24 @@ export function renderBoardImagesPanel(refs, env) {
 export function ensureBoardImagesPanelDelegated(refs, env) {
     if (!refs.boardImagesPanel || refs.boardImagesPanel.dataset.bilDelegated === '1') return;
     refs.boardImagesPanel.dataset.bilDelegated = '1';
+    refs.boardImagesPanel.addEventListener('change', function (event) {
+        var inp = event.target && event.target.closest ? event.target.closest('.board-images-layer-hide-input') : null;
+        if (!inp || !refs.boardImagesPanel.contains(inp)) return;
+        var id = inp.getAttribute('data-board-panel-id') || '';
+        var level = env.getLevel();
+        if (!id || !level || !level.map.boardImageLayers) return;
+        var lyr = level.map.boardImageLayers.find(function (L) {
+            return L && L.id === id;
+        });
+        if (!lyr) return;
+        lyr.editorHidden = !!inp.checked;
+        env.markDirty(inp.checked ? '已在棋盘上隐藏棋盘配图图层' : '已显示棋盘配图图层');
+        env.renderMap();
+        env.schedulePreviewRefresh();
+        renderBoardImagesPanel(refs, env);
+    });
     refs.boardImagesPanel.addEventListener('click', function (event) {
+        if (event.target.closest('.board-images-layer-hide-input')) return;
         var level = env.getLevel();
         var btn = event.target.closest('[data-board-panel-act]');
         var row = event.target.closest('.board-images-layer-row[data-board-panel-id]');

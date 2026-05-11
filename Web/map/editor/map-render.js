@@ -16,6 +16,7 @@ function boardSpriteLayersHtml(env, level) {
         });
     return list
         .map(function (layer) {
+            if (layer.editorHidden === true) return '';
             var stretchFill = Number(layer.widthPct) >= 100;
             var selected =
                 selectedObject &&
@@ -115,6 +116,18 @@ function buildCellMarkersFragments(env, level, col, row) {
         if (exploreLayout.exitPoint && exploreLayout.exitPoint.col === col && exploreLayout.exitPoint.row === row) {
             markers.push(markerHtml('objective', exploreLayout.exitPoint.id, 'E', 'cell-marker objective', selectedObject));
         }
+        level.map.explorationPoints.filter(atCell(col, row)).forEach(function (point) {
+            markers.push(markerHtml('explorePoint', point.id, 'P', 'cell-marker explore', selectedObject));
+        });
+        (level.map.exploreBosses || []).filter(atCell(col, row)).forEach(function (boss) {
+            markers.push(markerHtml('exploreBoss', boss.id, 'AI', 'cell-marker objective', selectedObject));
+        });
+        (level.map.exploreSpawners || []).filter(atCell(col, row)).forEach(function (spawner) {
+            markers.push(markerHtml('exploreSpawner', spawner.id, 'SP', 'cell-marker spawn', selectedObject));
+        });
+        (level.map.explorePickups || []).filter(atCell(col, row)).forEach(function (pickup) {
+            markers.push(markerHtml('explorePickup', pickup.id, pickup.type === 'item' ? 'I' : '$', 'cell-marker explore', selectedObject));
+        });
     } else {
         level.map.spawnPoints.filter(atCell(col, row)).forEach(function (point) {
             markers.push(markerHtml('spawn', point.id, 'S', 'cell-marker spawn', selectedObject));
@@ -123,18 +136,6 @@ function buildCellMarkersFragments(env, level, col, row) {
             markers.push(markerHtml('objective', level.map.objectivePoint.id, 'O', 'cell-marker objective', selectedObject));
         }
     }
-    level.map.explorationPoints.filter(atCell(col, row)).forEach(function (point) {
-        markers.push(markerHtml('explorePoint', point.id, 'P', 'cell-marker explore', selectedObject));
-    });
-    (level.map.exploreBosses || []).filter(atCell(col, row)).forEach(function (boss) {
-        markers.push(markerHtml('exploreBoss', boss.id, 'AI', 'cell-marker objective', selectedObject));
-    });
-    (level.map.exploreSpawners || []).filter(atCell(col, row)).forEach(function (spawner) {
-        markers.push(markerHtml('exploreSpawner', spawner.id, 'SP', 'cell-marker spawn', selectedObject));
-    });
-    (level.map.explorePickups || []).filter(atCell(col, row)).forEach(function (pickup) {
-        markers.push(markerHtml('explorePickup', pickup.id, pickup.type === 'item' ? 'I' : '$', 'cell-marker explore', selectedObject));
-    });
     level.map.actors.filter(atCell(col, row)).forEach(function (actor) {
         markers.push(markerHtml('actor', actor.id, actor.icon || actor.name.charAt(0), 'actor-marker ' + actor.category, selectedObject));
     });

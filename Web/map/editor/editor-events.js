@@ -139,6 +139,24 @@ export function bindEditorEvents(refs, env) {
             }
         });
     }
+    var modelGlobalScaleDirtyTimer = null;
+    if (refs.modelDetailGlobalScale) {
+        refs.modelDetailGlobalScale.addEventListener('input', function () {
+            if (typeof env.ensureModelAssetPreview !== 'function' || typeof env.commitModelWorkbenchGlobalScale !== 'function') {
+                return;
+            }
+            var path = refs.modelDetailPath ? String(refs.modelDetailPath.value || '').trim() : '';
+            if (!path) return;
+            var sc = Number(refs.modelDetailGlobalScale.value);
+            if (!Number.isFinite(sc)) return;
+            var previewSc = Math.min(1000, Math.max(0.01, sc));
+            env.ensureModelAssetPreview(path, previewSc);
+            clearTimeout(modelGlobalScaleDirtyTimer);
+            modelGlobalScaleDirtyTimer = setTimeout(function () {
+                env.commitModelWorkbenchGlobalScale();
+            }, 360);
+        });
+    }
     if (refs.modelInspectorUpload) {
         refs.modelInspectorUpload.addEventListener('change', function () {
             if (refs.modelInspectorUpload.files && refs.modelInspectorUpload.files[0]) {

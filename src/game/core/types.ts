@@ -81,6 +81,8 @@ export interface GameAssetConfig {
   customPlayerModelUrl: string;
   customAnimationUrls: Partial<Record<string, string>>;
   modelScales: Partial<Record<ModelTarget, number>>;
+  /** 按模型文件路径（normalize 后与 normalizeEditorModelPathKey 一致）的全局缩放，关卡 Actor 等与实例 scale 相乘 */
+  globalModelPathScales?: Record<string, number>;
   playerExploreTransform?: PlayerExploreTransform;
   globalAudio?: GlobalGameAudioConfig;
   globalScreenUi?: GlobalScreenUiConfig;
@@ -102,6 +104,12 @@ export interface SaveData {
   spawnRemaining: number;
   spawnCooldown: number;
   currentWaveSpawned?: number;
+  authoredSpawnStates?: Array<{
+    waveRuleId?: string;
+    remaining: number;
+    cooldown: number;
+    interval: number;
+  }>;
   waveActive: boolean;
   /** 塔防运行时难度 1–5（见 defense-difficulty） */
   defenseDifficulty?: number;
@@ -109,6 +117,10 @@ export interface SaveData {
   defenseEndless?: boolean;
   /** 塔防已完成标准波数，正在等待无尽/结算抉择（读档恢复原状态） */
   defenseVictoryAwaitingChoice?: boolean;
+  /** 已完成塔防标准波次目标，可与探索 Boss 目标组合触发最终胜利。 */
+  defenseStandardVictoryCleared?: boolean;
+  /** 已击倒的探索 Boss 占位 id；用于切模式/读档恢复探索目标进度。 */
+  defeatedExploreBossIds?: string[];
   buildings: Array<{ id: BuildId; cell: GridCell }>;
   customModelUrls: Partial<Record<BuildId, string>>;
   customDropModelUrl: string;
@@ -151,6 +163,17 @@ export interface DefenseWaveRule {
   reward?: number;
   overrideModelPath?: string;
   overrideModelScale?: number;
+}
+
+export interface DefenseEnemyRuntimeConfig {
+  id: string;
+  name?: string;
+  modelPath?: string;
+  modelScale?: number;
+  hp?: number;
+  speed?: number;
+  reward?: number;
+  towerSiegeDps?: number;
 }
 
 export interface MapTheme {
@@ -325,6 +348,8 @@ export interface MapBoardImageLayer {
   opacity?: number;
   /** 同关多张图 stacking，数值越小越靠下（先绘制） */
   order?: number;
+  /** 仅在关卡编辑器棋盘视图中隐藏，便于编辑格点；关卡预览与游戏内仍照常绘制（运行于 editor-sync 同步时剥离）。 */
+  editorHidden?: boolean;
 }
 
 /** 单条过场视频（开场或波次间） */
@@ -361,6 +386,7 @@ export interface MapDefinition {
   id: string;
   name: string;
   description: string;
+  editorStatus?: string;
   cols?: number;
   rows?: number;
   theme: MapTheme;
@@ -369,10 +395,13 @@ export interface MapDefinition {
   enemyPaths?: DefenseEnemyPath[];
   spawnPoints?: DefenseSpawnPoint[];
   waveRules?: DefenseWaveRule[];
+  defenseEnemyConfigs?: DefenseEnemyRuntimeConfig[];
   obstacles: GridCell[];
   actors?: MapActorDef[];
   /** Explore-mode safe zone cells: enemies will not attack the player here */
   safeZones?: GridCell[];
+  exploreStart?: GridCell;
+  exploreExit?: GridCell;
   boardImageLayers?: MapBoardImageLayer[];
   /** 由 explorationLayout.gameplay 同步；探索模式运行时读取 */
   exploreGameplay?: ExploreGameplaySettings;
@@ -382,6 +411,7 @@ export interface MapDefinition {
   levelAudio?: LevelMapAudioConfig;
   /** 本关防御玩法在城市玩法库中为各塔 id 绑定的模型 URL（优先于全局 gameAssetConfig.customModelUrls） */
   towerModelUrls?: Partial<Record<BuildId, string>>;
+  towerModelScales?: Partial<Record<BuildId, number>>;
   /** Explore RPG: placed AI bosses, configurable minion spawners and authored pickups. */
   exploreBosses?: ExploreBossPlacement[];
   exploreSpawners?: ExploreSpawnerPlacement[];
@@ -523,6 +553,7 @@ export interface ExploreEnemy {
   id: string;
   name?: string;
   mesh: THREE.Group;
+  hpBillboard: THREE.Group;
   hpBar: THREE.Mesh;
   hp: number;
   maxHp: number;
@@ -577,6 +608,8 @@ export interface BuildSpec {
   key: string;
   name: string;
   cost: number;
+  /** 0-1，未设置时拆除/右键回收默认返还 50% 造价。 */
+  refundRatio?: number;
   category: BuildCategory;
   role?: BuildRole;
   city?: string;
@@ -600,6 +633,7 @@ export interface BuildSpec {
   maxBlockCount?: number;
   healRange?: number;
   healAmount?: number;
+  modelScale?: number;
   /** 0–1，未设置时防御塔普攻基础按 5% 暴击掷骰 */
   critChance?: number;
   critDamageMult?: number;
@@ -615,6 +649,7 @@ export interface Building {
   spec: BuildSpec;
   cell: GridCell;
   mesh: THREE.Group;
+  animationMixer?: THREE.AnimationMixer;
   cooldown: number;
   armed: boolean;
   hp: number;
@@ -639,6 +674,7 @@ export interface Enemy {
   /** 占位球体半径（格子单位）；仅用于替换为 GLB 时的缩放；未设时按类型默认（与球体占位一致）。 */
   bodyRadius?: number;
   mesh: THREE.Group;
+  animationMixer?: THREE.AnimationMixer;
   healthBar: THREE.Mesh;
   hp: number;
   maxHp: number;
@@ -656,6 +692,9 @@ export interface Enemy {
   stunUntil: number;
   /** HUD/提示用本地化名称（地图上 flavor 写入） */
   displayName?: string;
+  /** 城市玩法库里对该敌人类型绑定的模型文件；未设置时回落到默认敌人 GLB。 */
+  modelPath?: string;
+  modelScale?: number;
   /** 行进或驻足时对周身防御建筑的每秒伤害（hacker 为高射程掷射） */
   towerSiegeDps?: number;
   towerSiegeRadiusWorld?: number;

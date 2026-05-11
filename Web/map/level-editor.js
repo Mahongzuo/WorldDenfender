@@ -2,7 +2,7 @@
 import { BUILT_IN_CITY_LAYOUTS, matchBuiltInCity } from './editor/built-in-layouts.js';
 import { clamp, clone, normalizeChineseCityName, escapeHtml, escapeAttr, uid, slugify, updatePath, cellsRect, toggleCell, removeCell, hasCell, cloneCells, atCell, notAtCell, inBounds, byId, editorVol01, editorPctFromVol01, readDragPayload, fileToBase64 } from './editor/utils.js';
 import { splitRegion, buildRegionLabel, inferCountryCode, normalizeCell, normalizeCells, normalizePoint, defaultObjectivePoint, normalizeStatus, normalizeLocation, normalizeEnvironment, normalizeBoardImageLayers, normalizeStats, normalizeActorTemplate, normalizeActors, normalizeEnemyTypes, normalizeWaveRules, normalizeModeProfiles, normalizeSpawnPoints, normalizeExplorePoints, EXPLORE_GAMEPLAY_STORE_KEYS, normalizeExploreGameplayNormalized, normalizeGeoConfig, makeGeoConfig, visitCoordinatePairs, geometryCenter, fetchCountryCapitalCoords, countryGeoFromFeature, geoFromLonLatArray, normalizeEditorThemeColorHex, normalizeTheme, normalizeEnemyPaths, normalizeExplorationLayout, normalizeCatalog, normalizeCatalogItem, normalizeEditorAssetsCatalog, defaultGlobalAudio, normalizeGlobalAudio, normalizeLevelAudioSource, defaultGlobalScreenUi, normalizeGlobalScreenUi, normalizeGameAssetConfig, mergeDistinctStrings, normalizeGameplayPlacement, normalizeGameplayEntries, normalizeCityGameplayConfigs, createDefaultMap, trimMapToBounds, normalizeMap, normalizeLevel, sortLevels, normalizeState } from './editor/normalizers.js';
-import { API_URL, LOCAL_BACKUP_KEY, LEGACY_BACKUP_KEY, ENGINE_VERSION, DEFAULT_GRID_COLS, DEFAULT_GRID_ROWS, DEFAULT_TILE_SIZE, GEO_MAPPING_STORAGE_KEY, SHELL_LEFT_COLLAPSE_KEY, SHELL_RIGHT_COLLAPSE_KEY, TOOL_LABELS, MODEL_CATEGORY_CONFIG, DEFAULT_ACTOR_TEMPLATES, DEFAULT_TOWER_GAMEPLAY_STATS, GAMEPLAY_RESOURCE_CONFIG } from './editor/content.js';
+import { API_URL, LOCAL_BACKUP_KEY, LEGACY_BACKUP_KEY, ENGINE_VERSION, DEFAULT_GRID_COLS, DEFAULT_GRID_ROWS, DEFAULT_TILE_SIZE, GEO_MAPPING_STORAGE_KEY, SHELL_LEFT_COLLAPSE_KEY, SHELL_RIGHT_COLLAPSE_KEY, TOOL_LABELS, MODEL_CATEGORY_CONFIG, DEFAULT_ACTOR_TEMPLATES, DEFAULT_TOWER_GAMEPLAY_STATS, GAMEPLAY_RESOURCE_CONFIG, getToolLabel, isToolAllowedInMode } from './editor/content.js';
 import { sanitizeStateForSave as _sanitizeStateForSave, persistLocalBackup as _persistLocalBackup, readLocalBackup as _readLocalBackup, exportState as _exportState, persistShellCollapsedPrefs as _persistShellCollapsedPrefs } from './editor/storage.js';
 import {
     readShellCollapsedPrefsFromStorage as _readShellCollapsedPrefsFromStorage,
@@ -29,6 +29,11 @@ import { resolveSpecialGeoForLevel, cloneGeoConfig, applyDefenseLayout, applyExp
 import { mergeExploreGameplayDisplay, readExploreGameplayRawFromDomSection } from './editor/explore-gameplay-defaults.js';
 import { markerHtml, themeColorInput, findBoardImageLayerById } from './editor/html-builders.js';
 import { parseFetchErrorBody } from './editor/fetch-utils.js';
+import {
+    canonicalModelPathScaleKey,
+    clampGlobalPathModelScale,
+    lookupGlobalModelPathScale
+} from './editor/model-path-scale.js';
 import { ensureWorldOffset, mergeGameplayEntryList } from './editor/level-mutators.js';
 import { renderBoardImagesPanel, ensureBoardImagesPanelDelegated, tryConsumeBoardImageFileDrop, bindBoardImageGlobalHandlers, clearBoardImageInteractionState, addBoardImageLayerFromUrl } from './editor/board-images.js';
 import { renderLevelAudioFields, renderGlobalAudioPanel, bindLevelAudioUi, bindGlobalAudioUi } from './editor/audio.js';
@@ -121,6 +126,7 @@ import {
     var gameplayAssetPreviewApi = null;
     var previewInitGeneration = 0;
     var gameplayPreviewInitGeneration = 0;
+    var previewPanelHeights = readPreviewPanelHeightsFromStorage();
     var previewRefreshTimer = null;
     var shellLeftCollapsedPref = false;
     var shellRightCollapsedPref = false;
@@ -178,6 +184,7 @@ import {
         gameplayAssetPreviewEmpty: document.getElementById('gameplayAssetPreviewEmpty'),
         gameplayAssetPreviewImage: document.getElementById('gameplayAssetPreviewImage'),
         gameplayAssetPreviewHost: document.getElementById('gameplayAssetPreviewHost'),
+        gameplayPreviewResizeHandle: document.getElementById('gameplayPreviewResizeHandle'),
         gameplayEditorForm: document.getElementById('gameplayEditorForm'),
         gameplayName: document.getElementById('gameplayName'),
         gameplayId: document.getElementById('gameplayId'),
@@ -186,9 +193,20 @@ import {
         gameplaySummary: document.getElementById('gameplaySummary'),
         gameplayStatGrid: document.getElementById('gameplayStatGrid'),
         gameplayTaxonomyPanel: document.getElementById('gameplayTaxonomyPanel'),
+        gameplayAnimationPanel: document.getElementById('gameplayAnimationPanel'),
+        gameplayModelScale: document.getElementById('gameplayModelScale'),
+        gameplayWaveManagerPanel: document.getElementById('gameplayWaveManagerPanel'),
         gameplayInspectorMeta: document.getElementById('gameplayInspectorMeta'),
         gameplaySelectionMeta: document.getElementById('gameplaySelectionMeta'),
         gameplayTowerPreviewActions: document.getElementById('gameplayTowerPreviewActions'),
+        gameplayCardPreviewActions: document.getElementById('gameplayCardPreviewActions'),
+        btnToggleGameplayCardAi: document.getElementById('btnToggleGameplayCardAi'),
+        gameplayCardAiFields: document.getElementById('gameplayCardAiFields'),
+        gameplayCardAiPromptPresets: document.getElementById('gameplayCardAiPromptPresets'),
+        gameplayCardAiPrompt: document.getElementById('gameplayCardAiPrompt'),
+        btnGenerateGameplayCardAi: document.getElementById('btnGenerateGameplayCardAi'),
+        btnOpenGameplayCardAiLocation: document.getElementById('btnOpenGameplayCardAiLocation'),
+        gameplayCardAiStatus: document.getElementById('gameplayCardAiStatus'),
         gameplayAiModelImageUpload: document.getElementById('gameplayAiModelImageUpload'),
         gameplayAiModelStatus: document.getElementById('gameplayAiModelStatus'),
         gameplayTowerModelUpload: document.getElementById('gameplayTowerModelUpload'),
@@ -270,9 +288,11 @@ import {
         modelDetailName: document.getElementById('modelDetailName'),
         modelDetailCategory: document.getElementById('modelDetailCategory'),
         modelDetailPath: document.getElementById('modelDetailPath'),
+        modelDetailGlobalScale: document.getElementById('modelDetailGlobalScale'),
         modelPreviewEmpty: document.getElementById('modelPreviewEmpty'),
         modelPreviewHost: document.getElementById('modelPreviewHost'),
         modelPreviewMeta: document.getElementById('modelPreviewMeta'),
+        modelPreviewResizeHandle: document.getElementById('modelPreviewResizeHandle'),
         modelUploadReplace: document.getElementById('modelUploadReplace'),
         modelInspectorWorkspace: document.getElementById('modelInspectorWorkspace'),
         modelInspectorStats: document.getElementById('modelInspectorStats'),
@@ -495,6 +515,7 @@ import {
         _prefetchCesiumIonTokenForEditor();
         initGeoMappingToggle();
         readShellCollapsedPrefsFromStorage();
+        bindWorkbenchPreviewResizers();
         bindEvents();
         bindCreateLevelModalEvents();
         loadState();
@@ -507,6 +528,107 @@ import {
         var v = window.localStorage.getItem(GEO_MAPPING_STORAGE_KEY);
         if (v === null) return true;
         return v !== '0' && v !== 'false';
+    }
+
+    function readPreviewPanelHeightsFromStorage() {
+        try {
+            var raw = window.localStorage.getItem('earth-guardian.previewPanelHeights');
+            if (!raw) return {};
+            var parsed = JSON.parse(raw);
+            return parsed && typeof parsed === 'object' ? parsed : {};
+        } catch (_err) {
+            return {};
+        }
+    }
+
+    function persistPreviewPanelHeightsToStorage() {
+        try {
+            window.localStorage.setItem('earth-guardian.previewPanelHeights', JSON.stringify(previewPanelHeights));
+        } catch (_err) {}
+    }
+
+    function getPreviewPanelBounds(surface) {
+        var editorColumn = surface ? surface.closest('.gameplay-column-editor') : null;
+        var columnHeight = editorColumn && editorColumn.clientHeight ? editorColumn.clientHeight : window.innerHeight;
+        var min = 160;
+        var max = Math.max(min + 40, Math.round(columnHeight - 260));
+        return { min: min, max: max };
+    }
+
+    function applyPreviewPanelHeight(surface, storageKey, height) {
+        if (!surface || !storageKey) return;
+        var bounds = getPreviewPanelBounds(surface);
+        var next = clamp(Number(height) || bounds.min, bounds.min, bounds.max);
+        surface.style.setProperty('--preview-media-height', next + 'px');
+        previewPanelHeights[storageKey] = next;
+    }
+
+    function resizePreviewPanelCanvas(storageKey) {
+        var api = storageKey === 'gameplay' ? gameplayAssetPreviewApi : modelAssetPreviewApi;
+        if (api && typeof api.resize === 'function') api.resize();
+    }
+
+    function bindPreviewPanelResizer(handle, host, storageKey) {
+        if (!handle || !host || handle.dataset.previewResizeBound === '1') return;
+        handle.dataset.previewResizeBound = '1';
+        var surface = handle.closest('.gameplay-preview-surface');
+        if (!surface) return;
+        var savedHeight = Number(previewPanelHeights[storageKey]);
+        if (savedHeight > 0) applyPreviewPanelHeight(surface, storageKey, savedHeight);
+
+        handle.addEventListener('pointerdown', function (event) {
+            if (event.button !== 0) return;
+            event.preventDefault();
+            var startY = event.clientY;
+            var startHeight = parseFloat(window.getComputedStyle(surface).getPropertyValue('--preview-media-height')) || host.getBoundingClientRect().height;
+            surface.classList.add('is-resizing');
+            if (handle.setPointerCapture) handle.setPointerCapture(event.pointerId);
+
+            function stopResize() {
+                surface.classList.remove('is-resizing');
+                window.removeEventListener('pointermove', onPointerMove);
+                window.removeEventListener('pointerup', onPointerUp);
+                window.removeEventListener('pointercancel', onPointerUp);
+                persistPreviewPanelHeightsToStorage();
+            }
+
+            function onPointerMove(moveEvent) {
+                applyPreviewPanelHeight(surface, storageKey, startHeight + (moveEvent.clientY - startY));
+                resizePreviewPanelCanvas(storageKey);
+            }
+
+            function onPointerUp() {
+                stopResize();
+            }
+
+            window.addEventListener('pointermove', onPointerMove);
+            window.addEventListener('pointerup', onPointerUp, { once: true });
+            window.addEventListener('pointercancel', onPointerUp, { once: true });
+        });
+
+        handle.addEventListener('dblclick', function () {
+            delete previewPanelHeights[storageKey];
+            surface.style.removeProperty('--preview-media-height');
+            persistPreviewPanelHeightsToStorage();
+            resizePreviewPanelCanvas(storageKey);
+        });
+    }
+
+    function bindWorkbenchPreviewResizers() {
+        bindPreviewPanelResizer(refs.gameplayPreviewResizeHandle, refs.gameplayAssetPreviewHost, 'gameplay');
+        bindPreviewPanelResizer(refs.modelPreviewResizeHandle, refs.modelPreviewHost, 'model');
+        window.addEventListener('resize', function () {
+            var gameplaySurface = refs.gameplayPreviewResizeHandle && refs.gameplayPreviewResizeHandle.closest('.gameplay-preview-surface');
+            var modelSurface = refs.modelPreviewResizeHandle && refs.modelPreviewResizeHandle.closest('.gameplay-preview-surface');
+            if (gameplaySurface && previewPanelHeights.gameplay) {
+                applyPreviewPanelHeight(gameplaySurface, 'gameplay', previewPanelHeights.gameplay);
+                resizePreviewPanelCanvas('gameplay');
+            }
+            if (modelSurface && previewPanelHeights.model) {
+                applyPreviewPanelHeight(modelSurface, 'model', previewPanelHeights.model);
+                resizePreviewPanelCanvas('model');
+            }
+        });
     }
 
     function initGeoMappingToggle() {
@@ -547,6 +669,7 @@ import {
             console.warn('[GameModels catalog]', e);
             state.gameModelsCatalog = [];
         }
+        hydrateActorModelPathsFromCatalog();
     }
 
     async function uploadFileToProjectUrl(file, options) {
@@ -709,6 +832,8 @@ import {
     async function saveState() {
         try {
             setStatus('正在保存到项目文件…', 'idle');
+            hydrateActorModelPathsFromCatalog();
+            hydrateLevelEnemyTypesFromCityGameplay();
             var response = await fetch(API_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -1528,6 +1653,12 @@ import {
         return 'public/Arts/Maps/' + String(ctxInfo.cityName || '未命名城市') + '/';
     }
 
+    function getGameplayCardImageDirectoryHint(cityContextArg) {
+        var cityContext = cityContextArg || getGameplayCityContext();
+        var cityName = String(cityContext && cityContext.cityName || '未命名城市').trim() || '未命名城市';
+        return 'public/Arts/Cards/' + cityName + '/';
+    }
+
     async function generateBoardImageAsset(prompt, levelArg) {
         var level = levelArg || getLevel();
         if (!level || !level.map || !level.map.grid) throw new Error('当前关卡缺少棋盘数据');
@@ -1559,6 +1690,43 @@ import {
             throw new Error('服务器返回非 JSON');
         }
         _rememberEditorAsset(gameAssetEnv(), payload, 'board-image');
+        if (!payload.publicUrl) throw new Error('生图接口未返回有效图片 URL');
+        return payload;
+    }
+
+    async function generateGameplayCardImageAsset(prompt, cityContextArg, entryArg) {
+        var cityContext = cityContextArg || getGameplayCityContext();
+        var entry = entryArg || null;
+        var promptText = String(prompt || '').trim();
+        if (!cityContext) throw new Error('请先选择城市关卡');
+        if (!entry || typeof entry !== 'object') throw new Error('请先选择一张卡片');
+        if (!promptText) throw new Error('请先输入提示词');
+        var requestBody = {
+            prompt: promptText,
+            cityCode: String(cityContext.cityCode || ''),
+            cityName: String(cityContext.cityName || ''),
+            entryId: String(entry.id || ''),
+            entryName: String(entry.name || ''),
+            summary: String(entry.summary || ''),
+            rarity: String(entry.rarity || ''),
+            element: String(entry.element || ''),
+            tags: Array.isArray(entry.tags) ? entry.tags.map(String) : [],
+            functionTags: Array.isArray(entry.functionTags) ? entry.functionTags.map(String) : []
+        };
+        var res = await fetch('/api/generate-card-image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody)
+        });
+        var resText = await res.text();
+        if (!res.ok) throw new Error(parseFetchErrorBody(res.status, resText));
+        var payload = {};
+        try {
+            payload = JSON.parse(resText);
+        } catch (_e) {
+            throw new Error('服务器返回非 JSON');
+        }
+        _rememberEditorAsset(gameAssetEnv(), payload, String(payload.resourceKind || 'card-image-ai'));
         if (!payload.publicUrl) throw new Error('生图接口未返回有效图片 URL');
         return payload;
     }
@@ -1724,21 +1892,56 @@ import {
         _renderModelEditor(refs, modelEditorEnv());
     }
 
-    function ensureModelAssetPreview(modelUrl) {
+    function ensureModelAssetPreview(modelUrl, pathScaleMultiplier) {
         if (!refs.modelPreviewHost) return;
         if (!modelUrl) return;
+        var mult =
+            pathScaleMultiplier != null && Number.isFinite(Number(pathScaleMultiplier)) && Number(pathScaleMultiplier) > 0
+                ? Number(pathScaleMultiplier)
+                : 1;
         if (!modelAssetPreviewApi) {
             var generation = (modelPreviewInitGeneration += 1);
             import('./gameplay-asset-preview.js').then(function (mod) {
                 if (generation !== modelPreviewInitGeneration || !refs.modelPreviewHost) return;
                 modelAssetPreviewApi = mod.createGameplayAssetPreview({ host: refs.modelPreviewHost });
-                modelAssetPreviewApi.setAsset(modelUrl);
+                modelAssetPreviewApi.setAsset(modelUrl, mult);
             }).catch(function (error) {
                 setStatus('模型预览初始化失败: ' + error.message, 'error');
             });
             return;
         }
-        modelAssetPreviewApi.setAsset(modelUrl);
+        modelAssetPreviewApi.setAsset(modelUrl, mult);
+    }
+
+    function commitModelWorkbenchGlobalScale() {
+        if (!state || !state.gameAssetConfig) return;
+        if (!refs.modelDetailPath || !refs.modelDetailGlobalScale) return;
+        var rawUrl = String(refs.modelDetailPath.value || '').trim();
+        if (!rawUrl) return;
+        state.gameAssetConfig.globalModelPathScales = state.gameAssetConfig.globalModelPathScales || {};
+        var nk = canonicalModelPathScaleKey(rawUrl);
+        if (!nk) return;
+        var v = clampGlobalPathModelScale(Number(refs.modelDetailGlobalScale.value) || 1);
+        refs.modelDetailGlobalScale.value = String(v);
+        state.gameAssetConfig.globalModelPathScales[nk] = v;
+        markDirty('已更新模型全局缩放');
+        ensureModelAssetPreview(rawUrl, v);
+        if (viewportViewMode === 'preview' && previewApi && typeof previewApi.refresh === 'function') {
+            var prevSelActor = selectedObject && selectedObject.kind === 'actor' ? selectedObject.id : null;
+            previewApi.refresh({ preserveView: true, selectActorId: prevSelActor });
+        }
+        renderContentBrowser();
+        var mini = contentBrowserMiniApi;
+        var cba = selectedContentBrowserAssetId;
+        var cAssets = getBrowsableModelAssets();
+        var cCur = cAssets.find(function (a) {
+            return a.id === cba;
+        });
+        var selCu = cCur ? cCur.path || cCur.publicUrl || '' : '';
+        if (mini && typeof mini.setUrl === 'function' && selCu) {
+            var cps = lookupGlobalModelPathScale(state.gameAssetConfig.globalModelPathScales, selCu);
+            void mini.setUrl(selCu, cps);
+        }
     }
 
     async function replaceSelectedModel(file) {
@@ -1804,6 +2007,11 @@ import {
                       }
                     : { modelAssets: [], editorAssetsCatalog: [], gameModels: [] };
             },
+            getGlobalModelPathScales: function () {
+                return state && state.gameAssetConfig && state.gameAssetConfig.globalModelPathScales
+                    ? state.gameAssetConfig.globalModelPathScales
+                    : {};
+            },
             findActorTemplate: findActorTemplate,
             getBrowsableModelAssets: getBrowsableModelAssets,
             placeActorFromTemplate: placeActorFromTemplate,
@@ -1868,6 +2076,11 @@ import {
             setContentBrowserMiniApi: function (api) {
                 contentBrowserMiniApi = api;
             },
+            getGlobalModelPathScales: function () {
+                return state && state.gameAssetConfig && state.gameAssetConfig.globalModelPathScales
+                    ? state.gameAssetConfig.globalModelPathScales
+                    : {};
+            },
             clearContentBrowserFloatGeomTimer: function () {
                 clearTimeout(contentBrowserFloatGeomTimer);
                 contentBrowserFloatGeomTimer = null;
@@ -1920,6 +2133,16 @@ import {
         syncEditorCtx();
     }
 
+    function fallbackBrowsableAssetId(asset) {
+        var p = String((asset && (asset.path || asset.publicUrl || asset.summary || asset.name)) || '').trim();
+        if (!p) return '';
+        var h = 0;
+        for (var i = 0; i < p.length; i += 1) {
+            h = ((h << 5) - h + p.charCodeAt(i)) | 0;
+        }
+        return 'rel-' + Math.abs(h).toString(36);
+    }
+
     function getBrowsableModelAssets() {
         if (!state) return [];
         var merged = [];
@@ -1939,10 +2162,103 @@ import {
                 })
             )
             .forEach(function (asset) {
-                if (!asset || !asset.id || merged.some(function (item) { return item.id === asset.id; })) return;
-                merged.push(asset);
+                if (!asset) return;
+                var id = String(asset.id || '').trim();
+                if (!id) {
+                    id = fallbackBrowsableAssetId(asset);
+                }
+                if (!id) return;
+                var baseDup = id;
+                var dupN = 0;
+                while (merged.some(function (item) {
+                    return item.id === id;
+                })) {
+                    dupN += 1;
+                    id = baseDup + '~' + dupN;
+                }
+                merged.push(Object.assign({}, asset, { id: id }));
             });
         return merged;
+    }
+
+    /**
+     * 将城市玩法库（cityGameplayConfigs[*].enemies）里编辑的 modelScale / modelPath / modelId
+     * 回写到对应关卡 level.enemyTypes[*]（按 id 匹配），让游戏运行时（normalizeEnemyTypes 读
+     * 的是 level.enemyTypes[*].modelScale）能直接生效。
+     */
+    function hydrateLevelEnemyTypesFromCityGameplay() {
+        if (!state || !Array.isArray(state.levels)) return false;
+        var configs = state.cityGameplayConfigs || {};
+        if (!Object.keys(configs).length) return false;
+        var touched = false;
+        state.levels.forEach(function (level) {
+            if (!level || !Array.isArray(level.enemyTypes) || !level.enemyTypes.length) return;
+            var ctx = null;
+            var loc = level.location || {};
+            var cityName = String(loc.cityName || '').trim();
+            var cityCode = String(loc.cityCode || '').trim();
+            if (!cityName && !cityCode) return;
+            ctx = {
+                cityCode: cityCode || slugify(cityName || 'city'),
+                cityName: cityName || level.name || '未命名城市',
+                key: cityCode || slugify(cityName || level.name || 'city')
+            };
+            var key = resolveCityGameplayConfigKey(ctx);
+            var cfg = configs[key];
+            if (!cfg || !Array.isArray(cfg.enemies)) return;
+            var lookup = {};
+            cfg.enemies.forEach(function (entry) {
+                if (entry && entry.id) lookup[String(entry.id)] = entry;
+            });
+            level.enemyTypes.forEach(function (et) {
+                if (!et || !et.id) return;
+                var entry = lookup[String(et.id)];
+                if (!entry || !entry.assetRefs) return;
+                var refs = entry.assetRefs;
+                if (Object.prototype.hasOwnProperty.call(refs, 'modelScale')) {
+                    var scale = Number(refs.modelScale);
+                    if (Number.isFinite(scale) && scale > 0 && et.modelScale !== scale) {
+                        et.modelScale = scale;
+                        touched = true;
+                    }
+                }
+                if (refs.modelPath && et.modelPath !== refs.modelPath) {
+                    et.modelPath = String(refs.modelPath);
+                    touched = true;
+                }
+                if (refs.modelId && et.modelId !== refs.modelId) {
+                    et.modelId = String(refs.modelId);
+                    touched = true;
+                }
+            });
+        });
+        return touched;
+    }
+
+    /** 仅有 modelId、无 modelPath 的 Actor：从当前 catalog 回填路径，便于游戏端 loadMapActors 与全局缩放命中 */
+    function hydrateActorModelPathsFromCatalog() {
+        if (!state) return false;
+        var byId = {};
+        getBrowsableModelAssets().forEach(function (a) {
+            if (a && a.id) byId[String(a.id)] = a;
+        });
+        var touched = false;
+        (state.levels || []).forEach(function (level) {
+            if (!level || !level.map || !Array.isArray(level.map.actors)) return;
+            level.map.actors.forEach(function (actor) {
+                if (!actor) return;
+                if (String(actor.modelPath || '').trim()) return;
+                var mid = String(actor.modelId || '').trim();
+                if (!mid) return;
+                var asset = byId[mid];
+                if (!asset) return;
+                var p = String(asset.path || asset.publicUrl || '').trim();
+                if (!p) return;
+                actor.modelPath = p;
+                touched = true;
+            });
+        });
+        return touched;
     }
 
     function getEnemyTypeLookup(level) {
@@ -2000,6 +2316,7 @@ import {
     function renderLevelDetails() {
         var level = getLevel();
         var cityConfig = getCurrentCityGameplayConfig();
+        syncLayoutToolButtons();
         if (!level) {
             refs.currentLevelName.textContent = '请选择关卡';
             refs.currentLevelMeta.textContent = '无可编辑关卡。';
@@ -2011,8 +2328,8 @@ import {
             level.map.grid.cols + 'x' + level.map.grid.rows,
             activeEditorMode === 'explore' ? '探索布局' : '塔防布局',
             statusLabel(level.status)
-        ].concat(cityConfig && (cityConfig.characters.length || cityConfig.skills.length || cityConfig.enemies.length)
-            ? ['角色 ' + cityConfig.characters.length, '技能 ' + cityConfig.skills.length, '敌人 ' + cityConfig.enemies.length]
+        ].concat(cityConfig && (cityConfig.cards.length || cityConfig.towers.length || cityConfig.enemies.length || cityConfig.items.length)
+            ? ['卡片 ' + cityConfig.cards.length, '防御塔 ' + cityConfig.towers.length, '敌人 ' + cityConfig.enemies.length]
             : []).join(' · ');
         refs.levelSummary.textContent =
             '当前关卡：' +
@@ -2064,8 +2381,8 @@ import {
         var cards = activeEditorMode === 'explore' ? [
             { label: '探索尺寸', value: level.map.grid.cols + 'x' + level.map.grid.rows },
             { label: '探索路线', value: exploreLayout.path.length },
-            { label: '探索点', value: level.map.explorationPoints.length },
-            { label: 'Actor', value: level.map.actors.length }
+            { label: '玩家出生点', value: exploreLayout.startPoint ? '已设置' : '未设置' },
+            { label: '探索点', value: level.map.explorationPoints.length }
         ] : [
             { label: '地图尺寸', value: level.map.grid.cols + 'x' + level.map.grid.rows },
             { label: 'Actor', value: level.map.actors.length },
@@ -2079,6 +2396,20 @@ import {
 
     function renderMap() {
         _renderMap(refs, mapRenderEnv());
+    }
+
+    function syncLayoutToolButtons() {
+        var mode = activeEditorMode === 'explore' ? 'explore' : 'defense';
+        document.querySelectorAll('[data-tool]').forEach(function (item) {
+            var tool = item.getAttribute('data-tool') || '';
+            var allowed = isToolAllowedInMode(tool, mode);
+            item.classList.toggle('view-hidden', !allowed);
+            item.disabled = !allowed;
+            item.setAttribute('aria-hidden', allowed ? 'false' : 'true');
+            item.textContent = getToolLabel(tool, mode);
+        });
+        if (!isToolAllowedInMode(activeTool, mode)) activeTool = 'select';
+        if (refs.activeToolLabel) refs.activeToolLabel.textContent = '当前工具：' + getToolLabel(activeTool, mode);
     }
 
     function handleCellAction(col, row) {
@@ -2974,6 +3305,9 @@ import {
     function selectionInspectorEnv() {
         return {
             getLevel: getLevel,
+            getActiveEditorMode: function () {
+                return activeEditorMode;
+            },
             getSelectedObject: function () {
                 return selectedObject;
             },
@@ -3103,6 +3437,7 @@ import {
             },
             setActiveEditorMode: function (value) {
                 activeEditorMode = value || 'defense';
+                syncLayoutToolButtons();
             },
             getActiveTool: function () {
                 return activeTool;
@@ -3112,11 +3447,12 @@ import {
             },
             refreshPreviewNow: refreshPreviewNow,
             activateTool: function (tool) {
-                activeTool = tool || 'select';
+                activeTool = isToolAllowedInMode(tool || 'select', activeEditorMode) ? tool || 'select' : 'select';
+                syncLayoutToolButtons();
                 document.querySelectorAll('[data-tool]').forEach(function (item) {
                     item.classList.toggle('active', item.getAttribute('data-tool') === activeTool);
                 });
-                refs.activeToolLabel.textContent = '当前工具：' + TOOL_LABELS[activeTool];
+                refs.activeToolLabel.textContent = '当前工具：' + getToolLabel(activeTool, activeEditorMode);
                 updateEraserToolPanelVisibility(refs, activeWorkbench, activeTool);
                 updateStageHintText();
             },
@@ -3236,7 +3572,9 @@ import {
             },
             ensureBoardImagesPanelDelegated: function (refsArg) {
                 ensureBoardImagesPanelDelegated(refsArg, boardImagesEnv());
-            }
+            },
+            ensureModelAssetPreview: ensureModelAssetPreview,
+            commitModelWorkbenchGlobalScale: commitModelWorkbenchGlobalScale
         };
     }
 
@@ -3246,6 +3584,7 @@ import {
                 return state;
             },
             getGameplayCityContext: getGameplayCityContext,
+            getLevel: getLevel,
             getActiveGameplayTab: function () {
                 return activeGameplayTab;
             },
@@ -3267,13 +3606,17 @@ import {
             getActiveWorkbench: function () {
                 return activeWorkbench;
             },
+            selectLevel: selectLevel,
             resolveCityGameplayConfigKey: resolveCityGameplayConfigKey,
             markDirty: markDirty,
             setStatus: setStatus,
+            renderOverview: renderOverview,
             renderExploreGameplayPanels: renderExploreGameplayPanels,
             ensureGameplayAssetPreview: ensureGameplayAssetPreview,
             disposeGameplayAssetPreview: disposeGameplayAssetPreview,
             uploadFileToProjectUrl: uploadFileToProjectUrl,
+            generateGameplayCardImageForEntry: generateGameplayCardImageAsset,
+            getGameplayCardImageDirectoryHint: getGameplayCardImageDirectoryHint,
             revealProjectPathInExplorer: revealProjectPathInExplorer,
             getBrowsableModelAssets: getBrowsableModelAssets,
             refreshGameModelsCatalog: refreshGameModelsCatalog
@@ -3282,6 +3625,9 @@ import {
 
     function modelEditorEnv() {
         return {
+            getState: function () {
+                return state;
+            },
             getBrowsableModelAssets: getBrowsableModelAssets,
             getActiveWorkbench: function () {
                 return activeWorkbench;

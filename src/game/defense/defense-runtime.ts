@@ -9,33 +9,22 @@ import {
 import type { Building, DefenseMapFlavor, Enemy, EnemyType } from "../core/types";
 import { getDefenseEnemyArchetypeSpec } from "./defense-enemy-archetypes";
 
-export function createEnemyForWave(options: {
-  uid: number;
-  wave: number;
-  start: THREE.Vector3;
-  enemyType?: EnemyType;
-  random?: () => number;
-  flavor?: DefenseMapFlavor;
-  defenseEndless?: boolean;
-  defenseDifficulty?: number;
-}): Enemy {
-  const { uid, wave, start, enemyType, random = Math.random, flavor, defenseEndless, defenseDifficulty } = options;
-  let type: EnemyType = enemyType ?? "basic";
-  const tier = clampDefenseDifficulty(defenseDifficulty ?? 3);
-  const diff = getDefenseDifficultyRuntimeParams(tier);
-  const typeWave = wave + diff.typeWaveBias;
-  const rand = random();
-  if (!enemyType && typeWave >= 10 && rand < 0.15) {
-    type = "swarm";
-  } else if (!enemyType && typeWave >= 8 && rand < 0.25) {
-    type = "tank";
-  } else if (!enemyType && typeWave >= 5 && rand < 0.35) {
-    type = "hacker";
-  } else if (!enemyType && typeWave >= 3 && rand < 0.5) {
-    type = "scout";
-  }
+interface DefenseEnemyWaveBaseStats {
+  hp: number;
+  speed: number;
+  reward: number;
+  color: number;
+  scale: number;
+  towerSiegeDps: number;
+  towerSiegeRadiusWorld: number;
+}
 
-  /** 攻城 DPS（秒）与世界半径——hacker 为远程投掷/干扰，scout 皮薄骚扰 */
+function buildDefenseEnemyWaveBaseStats(
+  type: EnemyType,
+  wave: number,
+  diff: ReturnType<typeof getDefenseDifficultyRuntimeParams>,
+  defenseEndless: boolean,
+): DefenseEnemyWaveBaseStats {
   let towerSiegeDps = 11;
   let towerSiegeRadiusWorld = TILE_SIZE * 0.94;
 
@@ -93,8 +82,62 @@ export function createEnemyForWave(options: {
     towerSiegeRadiusWorld *= 1 + Math.min(0.22, over * 0.016);
   }
 
-  reward = Math.round(reward);
+  return {
+    hp,
+    speed,
+    reward: Math.round(reward),
+    color,
+    scale,
+    towerSiegeDps,
+    towerSiegeRadiusWorld,
+  };
+}
+
+function scaleAgainstWaveOneBaseline(current: number, waveOne: number, override: number | undefined, round = false): number {
+  const overrideValue = Number(override);
+  if (!Number.isFinite(overrideValue) || !Number.isFinite(current) || !Number.isFinite(waveOne) || waveOne <= 0) {
+    return current;
+  }
+  const next = current * (overrideValue / waveOne);
+  return round ? Math.round(next) : next;
+}
+
+export function createEnemyForWave(options: {
+  uid: number;
+  wave: number;
+  start: THREE.Vector3;
+  enemyType?: EnemyType;
+  random?: () => number;
+  flavor?: DefenseMapFlavor;
+  defenseEndless?: boolean;
+  defenseDifficulty?: number;
+}): Enemy {
+  const { uid, wave, start, enemyType, random = Math.random, flavor, defenseEndless, defenseDifficulty } = options;
+  let type: EnemyType = enemyType ?? "basic";
+  const tier = clampDefenseDifficulty(defenseDifficulty ?? 3);
+  const diff = getDefenseDifficultyRuntimeParams(tier);
+  const typeWave = wave + diff.typeWaveBias;
+  const rand = random();
+  if (!enemyType && typeWave >= 10 && rand < 0.15) {
+    type = "swarm";
+  } else if (!enemyType && typeWave >= 8 && rand < 0.25) {
+    type = "tank";
+  } else if (!enemyType && typeWave >= 5 && rand < 0.35) {
+    type = "hacker";
+  } else if (!enemyType && typeWave >= 3 && rand < 0.5) {
+    type = "scout";
+  }
+
   const archetype = getDefenseEnemyArchetypeSpec(type);
+  const waveStats = buildDefenseEnemyWaveBaseStats(type, wave, diff, !!defenseEndless);
+  const waveOneStats = buildDefenseEnemyWaveBaseStats(type, 1, diff, false);
+  const hp = Math.max(1, scaleAgainstWaveOneBaseline(waveStats.hp, waveOneStats.hp, archetype.hp, true));
+  const speed = scaleAgainstWaveOneBaseline(waveStats.speed, waveOneStats.speed, archetype.speed);
+  const reward = Math.max(0, scaleAgainstWaveOneBaseline(waveStats.reward, waveOneStats.reward, archetype.reward, true));
+  const towerSiegeDps = Math.max(0, scaleAgainstWaveOneBaseline(waveStats.towerSiegeDps, waveOneStats.towerSiegeDps, archetype.towerSiegeDps));
+  const towerSiegeRadiusWorld = waveStats.towerSiegeRadiusWorld;
+  const color = waveStats.color;
+  const scale = waveStats.scale;
 
   const healthBar = new THREE.Mesh(
     new THREE.BoxGeometry(1.18 * scale, 0.12, 0.1),
@@ -113,7 +156,7 @@ export function createEnemyForWave(options: {
   healthBarGroup.userData.isEnemyHealthBarRoot = true;
   healthBarGroup.add(healthBarBack, healthBar);
 
-  const localized = flavor?.enemyNames?.[type];
+  const localized = archetype.displayName?.trim() || flavor?.enemyNames?.[type];
 
   const enemy: Enemy = {
     uid,
@@ -132,6 +175,8 @@ export function createEnemyForWave(options: {
     blockedBy: null,
     stunUntil: 0,
     ...(localized ? { displayName: localized } : {}),
+    ...(archetype.modelPath ? { modelPath: archetype.modelPath } : {}),
+    ...(archetype.modelScale ? { modelScale: archetype.modelScale } : {}),
     towerSiegeDps,
     towerSiegeRadiusWorld,
   };

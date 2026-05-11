@@ -574,7 +574,7 @@ function gmEntryId(relPathPosix) {
 }
 
 async function collectGameModelEntries(absRoot, publicFolder) {
-  const modelExt = /\.(glb|gltf|obj)$/i;
+  const modelExt = /\.(glb|gltf|obj|fbx)$/i;
   /** @type {Array<{ id: string; relativePath: string; publicUrl: string; name: string }>} */
   const out = [];
 
@@ -898,6 +898,111 @@ export default defineConfig({
           } catch (error) {
             sendJson(response, 500, {
               error: error instanceof Error ? error.message : "failed to generate board image",
+            });
+          }
+        });
+
+        server.middlewares.use("/api/generate-card-image", async (request, response) => {
+          if (request.method !== "POST") {
+            sendJson(response, 405, { error: "Method not allowed" });
+            return;
+          }
+
+          try {
+            const apiKey = resolveVolcArkApiKey();
+            if (!apiKey) {
+              sendJson(response, 400, {
+                error: "Missing VOLCENGINE_ARK_API_KEY. Please add it to .env.local before generating card images.",
+              });
+              return;
+            }
+
+            const body = await readJsonBody(request);
+            const prompt = String(body.prompt ?? "").trim();
+            if (!prompt) {
+              sendJson(response, 400, { error: "Prompt is required" });
+              return;
+            }
+
+            const cityName = sanitizeProjectSegment(body.cityName ?? "未命名城市");
+            const cityCode = sanitizeProjectSegment(body.cityCode ?? "");
+            const entryName = sanitizeProjectSegment(body.entryName ?? body.entryId ?? "card");
+            const model = String(
+              process.env.VOLCENGINE_ARK_IMAGE_MODEL ||
+                loadedEnv.VOLCENGINE_ARK_IMAGE_MODEL ||
+                "doubao-seedream-5-0-260128",
+            ).trim();
+
+            const arkResponse = await fetch("https://ark.cn-beijing.volces.com/api/v3/images/generations", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${apiKey}`,
+              },
+              body: JSON.stringify({
+                model,
+                prompt,
+                sequential_image_generation: "disabled",
+                response_format: "url",
+                size: "2K",
+                stream: false,
+                watermark: true,
+              }),
+            });
+
+            const arkText = await arkResponse.text();
+            let arkPayload = {};
+            try {
+              arkPayload = arkText ? JSON.parse(arkText) : {};
+            } catch {
+              throw new Error(`Ark returned non-JSON response: ${arkText.slice(0, 240)}`);
+            }
+            if (!arkResponse.ok) {
+              throw new Error(String(arkPayload.error?.message || arkPayload.message || arkText || "image generation failed"));
+            }
+
+            const remoteUrl = extractGeneratedImageUrl(arkPayload);
+            if (!remoteUrl) {
+              throw new Error("Ark did not return an image URL");
+            }
+
+            const remoteImageResponse = await fetch(remoteUrl);
+            if (!remoteImageResponse.ok) {
+              throw new Error(`Failed to download generated image: ${remoteImageResponse.status}`);
+            }
+            const extension = inferRemoteImageExtension(remoteImageResponse.headers.get("content-type"), remoteUrl);
+            const assetType = "Cards";
+            const resourceKind = "card-image-ai";
+            const directory = path.join(artsDir, assetType, cityName);
+            const assetName = sanitizeProjectSegment(`${entryName}-card-ai`);
+            const baseName = sanitizeProjectSegment(`${cityCode || cityName}-${assetName}`);
+            const fileName = ensureUniqueFilename(directory, baseName, extension);
+            const absolutePath = path.join(directory, fileName);
+
+            await mkdir(directory, { recursive: true });
+            await writeFile(absolutePath, Buffer.from(await remoteImageResponse.arrayBuffer()));
+
+            const relativeSegments = path.relative(publicDir, absolutePath).split(path.sep).filter(Boolean);
+            const projectPath = path.posix.join("public", ...relativeSegments);
+            const publicUrl = buildPublicUrl(...relativeSegments);
+
+            sendJson(response, 200, {
+              id: `${Date.now()}-${sanitizeName(`${cityCode || cityName}-card-image-${assetName}`)}`,
+              name: assetName,
+              assetType,
+              resourceKind,
+              cityCode,
+              cityName,
+              fileName,
+              model,
+              prompt,
+              remoteUrl,
+              projectPath,
+              publicUrl,
+            });
+          } catch (error) {
+            sendJson(response, 500, {
+              error: error instanceof Error ? error.message : "failed to generate card image",
             });
           }
         });

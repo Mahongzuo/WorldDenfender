@@ -135,6 +135,12 @@ function setStatusEl(element, text, tone) {
     else if (tone === 'pending') element.classList.add('is-pending');
 }
 
+function resolveBoardImageOpenPath(env, level, result) {
+    var filePath = result && result.projectPath ? String(result.projectPath || '').trim() : '';
+    if (filePath) return filePath;
+    return level ? String(env.getBoardImageDirectoryHint(level) || '').trim().replace(/[\\/]+$/g, '') : '';
+}
+
 export function renderThemeBoardImageWorkbench(refs, env) {
     if (!refs.themeBoardAiPrompt || !refs.themeBoardAiStatus) return;
     var state = env.getThemeBoardImageState();
@@ -158,7 +164,13 @@ export function renderThemeBoardImageWorkbench(refs, env) {
     refs.themeBoardAiPrompt.value = state.prompt || '';
     refs.themeBoardAiGenerate.disabled = !!state.generating || !String(state.prompt || '').trim();
     refs.themeBoardAiGenerate.textContent = state.generating ? '\u6b63\u5728\u751f\u6210\u68cb\u76d8\u56fe...' : '\u751f\u6210\u5e76\u5e94\u7528\u5230\u5f53\u524d\u5173\u5361';
-    refs.themeBoardAiOpenLocation.disabled = !state.lastResult || !state.lastResult.projectPath;
+    var openPath = resolveBoardImageOpenPath(env, level, state.lastResult);
+    refs.themeBoardAiOpenLocation.disabled = !openPath;
+    refs.themeBoardAiOpenLocation.title = state.lastResult && state.lastResult.projectPath
+        ? '\u5728\u6587\u4ef6\u7ba1\u7406\u5668\u4e2d\u5b9a\u4f4d\u5f53\u524d\u68cb\u76d8\u56fe\u7247\u6587\u4ef6\uff0c\u4fbf\u4e8e\u624b\u52a8\u66ff\u6362'
+        : openPath
+            ? '\u6253\u5f00\u5f53\u524d\u5173\u5361\u7684\u68cb\u76d8\u56fe\u7247\u4fdd\u5b58\u76ee\u5f55\uff1b\u82e5\u76ee\u5f55\u4e0d\u5b58\u5728\u4f1a\u81ea\u52a8\u521b\u5efa'
+            : '\u5f53\u524d\u5173\u5361\u7f3a\u5c11\u68cb\u76d8\u56fe\u7247\u4fdd\u5b58\u76ee\u5f55';
     refs.themeBoardAiFocusLayout.disabled = false;
     if (refs.themeBoardAiContext) {
         refs.themeBoardAiContext.textContent =
@@ -256,8 +268,10 @@ export function bindThemeBoardImageWorkbenchEvents(refs, env) {
         }
         if (refs.themeBoardAiOpenLocation && event.target === refs.themeBoardAiOpenLocation) {
             var stateForOpen = env.getThemeBoardImageState();
-            if (!stateForOpen.lastResult || !stateForOpen.lastResult.projectPath) return;
-            void env.revealProjectPathInExplorer(stateForOpen.lastResult.projectPath).catch(function (error) {
+            var levelForOpen = env.getLevel();
+            var openPath = resolveBoardImageOpenPath(env, levelForOpen, stateForOpen.lastResult);
+            if (!openPath) return;
+            void env.revealProjectPathInExplorer(openPath).catch(function (error) {
                 env.setStatus((error && error.message) || '\u6253\u5f00\u56fe\u7247\u4fdd\u5b58\u4f4d\u7f6e\u5931\u8d25', 'error');
             });
             return;

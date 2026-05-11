@@ -18,6 +18,15 @@ export const DEFAULT_PLAYER_MODEL_URLS = [
   "https://threejs.org/examples/models/gltf/RobotExpressive/RobotExpressive.glb",
 ];
 
+export const DEFAULT_CUSTOM_ANIMATION_URLS = {
+  idle: "",
+  walk: "",
+  run: "",
+  attack: "",
+  skillE: "",
+  skillR: "",
+} as const;
+
 export const STELLAR_BLAST_COOLDOWN = 5;
 export const STELLAR_LASER_COOLDOWN = 10;
 export const STELLAR_BLAST_RADIUS = 3 * TILE_SIZE;

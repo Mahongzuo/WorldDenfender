@@ -2,6 +2,7 @@ import { clamp, escapeAttr, escapeHtml, updatePath } from './utils.js';
 import { DEFENSE_ELEMENT_OPTIONS, LCB_CELL_KIND_LABEL } from './content.js';
 import { fieldHtml, selectHtml, boardLayerFieldHtml, findBoardImageLayerById } from './html-builders.js';
 import { ensureWorldOffset } from './level-mutators.js';
+import { getSpawnPointWaveSummary } from './wave-editor.js';
 
 function setEmptyState(refs, text) {
     if (!refs.selectionInspector) return;
@@ -71,7 +72,57 @@ function buildSpawnWaveChecklist(level, item) {
     );
 }
 
+function buildSpawnWaveSummary(level, item, env) {
+    var enemyLookup = {};
+    env.getAvailableEnemyTypes(level).forEach(function (enemy) {
+        if (!enemy || !enemy.id) return;
+        enemyLookup[enemy.id] = enemy;
+    });
+    var rules = getSpawnPointWaveSummary(level, item && item.id);
+    if (!rules.length) {
+        return (
+            '<div class="field-block field-block--full spawn-wave-summary">' +
+            '<span>波次同步</span>' +
+            '<div class="empty-state">当前出生点还没有关联波次。请到卡片/玩法编辑器的“波次”页里配置。</div>' +
+            '</div>'
+        );
+    }
+    return [
+        '<div class="field-block field-block--full spawn-wave-summary">',
+        '  <span>波次同步</span>',
+        '  <div class="spawn-wave-summary-list">',
+        rules.map(function (rule) {
+            var enemy = enemyLookup[rule.enemyTypeId];
+            return '<div class="spawn-wave-summary-chip">第 ' +
+                escapeHtml(String(rule.waveNumber)) +
+                ' 波 · ' +
+                escapeHtml(enemy ? (enemy.name || enemy.id) : (rule.enemyTypeId || '未指定敌人')) +
+                ' · ' +
+                escapeHtml(String(rule.count)) +
+                ' 只 · 每 ' +
+                escapeHtml(String(rule.interval)) +
+                ' 秒</div>';
+        }).join(''),
+        '  </div>',
+        '  <p class="section-hint">出生点只负责入口与路径，刷怪内容统一在“波次管理器”里维护。</p>',
+        '</div>'
+    ].join('');
+}
+
+function selectedCellLabel(kind, mode) {
+    if (kind === 'pathCell') return mode === 'explore' ? '探索路径' : '敌人路径';
+    return LCB_CELL_KIND_LABEL[kind] || kind;
+}
+
+function selectionHintHtml(kind, mode) {
+    if (mode !== 'explore') return '';
+    if (kind === 'spawn') return '<p class="section-hint">探索玩家会从该格子出生。</p>';
+    if (kind === 'objective') return '<p class="section-hint">探索流程会以该格子作为终点。</p>';
+    return '';
+}
+
 function buildInspectorForm(env, kind, item) {
+    var activeEditorMode = env.getActiveEditorMode ? env.getActiveEditorMode() : 'defense';
     var modelOptions = ['<option value="">未绑定模型</option>']
         .concat(
             env.getBrowsableModelAssets().map(function (asset) {
@@ -129,25 +180,10 @@ function buildInspectorForm(env, kind, item) {
         base.push(fieldHtml('费用', 'stats.cost', item.stats.cost, 'number'));
         base.push(fieldHtml('冷却', 'stats.cooldown', item.stats.cooldown || 0, 'number', '0.1'));
     }
-    if (kind === 'spawn') {
+    if (kind === 'spawn' && activeEditorMode !== 'explore') {
         var level = env.getLevel();
-        var enemyOptions = env.getAvailableEnemyTypes(env.getLevel()).map(function (enemy) {
-            return (
-                '<option value="' +
-                escapeAttr(enemy.id) +
-                '"' +
-                (enemy.id === item.enemyTypeId ? ' selected' : '') +
-                '>' +
-                escapeHtml(enemy.name || enemy.id) +
-                '</option>'
-            );
-        }).join('');
-        if (!enemyOptions) enemyOptions = '<option value="basic">标准敌人</option>';
-        base.push(selectHtml('出怪类型', 'enemyTypeId', enemyOptions));
-        base.push(buildSpawnWaveChecklist(level, item));
-        base.push(fieldHtml('出怪数量', 'count', item.count || 12, 'number'));
-        base.push(fieldHtml('刷新间隔(秒)', 'interval', item.interval || 1.2, 'number', '0.1'));
         base.push(fieldHtml('路径 ID', 'pathId', item.pathId || 'path-main'));
+        base.push(buildSpawnWaveSummary(level, item, env));
     }
     if (kind === 'explorePoint') {
         base.push(selectHtml('模型', 'modelId', modelOptions));
@@ -288,9 +324,10 @@ export function renderSelectionInspector(refs, env) {
     if (!refs.selectionInspector) return;
     var level = env.getLevel();
     var selectedObject = env.getSelectedObject();
+    var activeEditorMode = env.getActiveEditorMode ? env.getActiveEditorMode() : 'defense';
     if (selectedObject && LCB_CELL_KIND_LABEL[selectedObject.kind]) {
         refs.selectionInspector.className = 'selection-inspector';
-        var label = LCB_CELL_KIND_LABEL[selectedObject.kind] || selectedObject.kind;
+        var label = selectedCellLabel(selectedObject.kind, activeEditorMode);
         refs.selectionInspector.innerHTML =
             '<p class="section-hint">已选「' +
             escapeHtml(label) +
@@ -310,7 +347,7 @@ export function renderSelectionInspector(refs, env) {
         }
         refs.selectionInspector.className = 'selection-inspector';
         refs.selectionInspector.innerHTML =
-            '<p class="section-hint">数据写入 <code>map.boardImageLayers</code>。Delete 移除该配图层。宽度设为 <strong>≥100%</strong> 时配图在预览与<strong>游戏中</strong>会<strong>铺满整盘格子并拉伸</strong>以适应棋盘比例（原为保持比例则另一边可能留白）。滚轮缩放或填入宽度即可触发。</p>' +
+            '<p class="section-hint">数据写入 <code>map.boardImageLayers</code>。Delete 移除该配图层；右侧棋盘配图列表可勾选「隐藏」仅在当前棋盘视图不绘制该层（预览与游戏中仍显示）。宽度设为 <strong>≥100%</strong> 时配图在预览与<strong>游戏中</strong>会<strong>铺满整盘格子并拉伸</strong>以适应棋盘比例（原为保持比例则另一边可能留白）。滚轮缩放或填入宽度即可触发。</p>' +
             '<div class="form-grid two">' +
             boardLayerFieldHtml('左上角 X%', 'centerX', layer.centerX, 0.5) +
             boardLayerFieldHtml('左上角 Y%', 'centerY', layer.centerY, 0.5) +
@@ -334,7 +371,7 @@ export function renderSelectionInspector(refs, env) {
         return;
     }
     refs.selectionInspector.className = 'selection-inspector';
-    refs.selectionInspector.innerHTML = buildInspectorForm(env, target.kind, target.item);
+    refs.selectionInspector.innerHTML = selectionHintHtml(target.kind, activeEditorMode) + buildInspectorForm(env, target.kind, target.item);
     refs.selectionInspector.querySelectorAll('[data-inspect-field]').forEach(function (input) {
         input.addEventListener('input', function () {
             updateSelectedField(env, input);

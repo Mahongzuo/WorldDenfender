@@ -12,6 +12,7 @@ import {
 } from './content.js';
 
 import { splitRegion, buildRegionLabel, inferCountryCode } from './normalize-region.js';
+import { canonicalModelPathScaleKey as normGlobalScaleKey, clampGlobalPathModelScale } from './model-path-scale.js';
 export { splitRegion, buildRegionLabel, inferCountryCode };
 
 // ---------------------------------------------------------------------------
@@ -122,6 +123,7 @@ export function normalizeBoardImageLayers(raw) {
             opacity: pOp(L.opacity),
             order: ord
         };
+        if (L.editorHidden === true) bilEntry.editorHidden = true;
         var ar = Number(L.aspect);
         if (Number.isFinite(ar) && ar > 0) bilEntry.aspect = Math.min(24, Math.max(0.04, ar));
         list.push(bilEntry);
@@ -163,7 +165,7 @@ export function normalizeActorTemplate(template) {
         modelPath: String(source.modelPath || ''),
         icon: String(source.icon || (source.name || 'A').charAt(0)).slice(0, 2),
         templateModelScale:
-            Number.isFinite(ms) && ms > 0 ? Math.min(Math.max(ms, 0.1), 8) : 1,
+            Number.isFinite(ms) && ms > 0 ? Math.min(Math.max(ms, 0.01), 1000) : 1,
         stats: normalizeStats(source.stats)
     };
 }
@@ -910,13 +912,57 @@ export function normalizeGlobalScreenUi(raw) {
     return d;
 }
 
+var DEFAULT_GAME_ASSET_ANIMATION_URLS = {
+    idle: '',
+    walk: '',
+    run: '',
+    attack: '',
+    skillE: '',
+    skillR: ''
+};
+
+function defaultGameplayAnimationPaths(kind) {
+    switch (String(kind || '')) {
+        case 'enemies':
+            return { move: '', attack: '' };
+        case 'bosses':
+            return { move: '', attack: '' };
+        case 'towers':
+            return { idle: '', attack: '' };
+        case 'characters':
+            return { idle: '', walk: '', run: '', attack: '', skillE: '', skillR: '' };
+        default:
+            return {};
+    }
+}
+
+function cloneGameplayAssetRefs(kind, raw) {
+    var source = raw && typeof raw === 'object' ? raw : {};
+    var next = Object.assign({}, source);
+    if (source.animationPaths && typeof source.animationPaths === 'object') {
+        next.animationPaths = Object.assign({}, source.animationPaths);
+        if (kind === 'characters' && next.animationPaths.basicAttack && !next.animationPaths.attack) {
+            next.animationPaths.attack = next.animationPaths.basicAttack;
+        }
+        if (kind === 'characters' && Object.prototype.hasOwnProperty.call(next.animationPaths, 'basicAttack')) {
+            delete next.animationPaths.basicAttack;
+        }
+    }
+    var defaults = defaultGameplayAnimationPaths(kind);
+    if (Object.keys(defaults).length) {
+        next.animationPaths = Object.assign({}, defaults, next.animationPaths && typeof next.animationPaths === 'object' ? next.animationPaths : {});
+    }
+    return next;
+}
+
 export function defaultGameAssetConfig() {
     return {
         customModelUrls: {},
         customDropModelUrl: '',
-        customPlayerModelUrl: '',
-        customAnimationUrls: { idle: '', walk: '', run: '' },
+        customPlayerModelUrl: '/Soldier.glb',
+        customAnimationUrls: Object.assign({}, DEFAULT_GAME_ASSET_ANIMATION_URLS),
         modelScales: { moneyDrop: 1, player: 1, machine: 1, cannon: 1, frost: 1, mine: 1, beacon: 1, stellar: 1, qinqiong: 1, liqingzhao: 1, bianque: 1 },
+        globalModelPathScales: {},
         playerExploreTransform: {
             offsetMeters: { x: 0, y: 0, z: 0 },
             rotationDeg: { x: 0, y: 0, z: 0 }
@@ -931,9 +977,20 @@ export function normalizeGameAssetConfig(raw) {
     var src = raw && typeof raw === 'object' ? raw : {};
     d.customModelUrls = src.customModelUrls && typeof src.customModelUrls === 'object' ? Object.assign({}, src.customModelUrls) : {};
     d.customDropModelUrl = String(src.customDropModelUrl || '');
-    d.customPlayerModelUrl = String(src.customPlayerModelUrl || '');
+    d.customPlayerModelUrl = String(src.customPlayerModelUrl || '').trim() || d.customPlayerModelUrl;
     d.customAnimationUrls = Object.assign({}, d.customAnimationUrls, src.customAnimationUrls && typeof src.customAnimationUrls === 'object' ? src.customAnimationUrls : {});
     d.modelScales = Object.assign({}, d.modelScales, src.modelScales && typeof src.modelScales === 'object' ? src.modelScales : {});
+    d.globalModelPathScales = {};
+    if (src.globalModelPathScales && typeof src.globalModelPathScales === 'object') {
+        Object.keys(src.globalModelPathScales).forEach(function (key) {
+            var nk = normGlobalScaleKey(key);
+            if (!nk) return;
+            var v = Number(src.globalModelPathScales[key]);
+            if (Number.isFinite(v) && v > 0) {
+                d.globalModelPathScales[nk] = clampGlobalPathModelScale(v);
+            }
+        });
+    }
     var defPt = defaultGameAssetConfig().playerExploreTransform;
     d.playerExploreTransform = {
         offsetMeters: Object.assign(
@@ -1085,6 +1142,32 @@ var DEFAULT_RUNTIME_ENEMY_ELEMENTS = {
     swarm: 'light'
 };
 
+var DEFAULT_GAMEPLAY_MODEL_PATHS = {
+    enemies: {
+        basic: '/GameModels/Enemy/%E8%8E%AB%E6%96%AF%E7%A7%91%C2%B7%E5%A5%97%E5%A8%83%E7%A7%98%E5%8C%A3-%E6%A0%87%E5%87%86%E6%95%8C%E4%BA%BA%20(basic).glb',
+        scout: '/GameModels/Enemy/monsterB.glb',
+        hacker: '/GameModels/Enemy/monsterA.glb',
+        tank: '/GameModels/Enemy/monsterA.glb',
+        swarm: '/GameModels/Enemy/monsterB.glb'
+    },
+    towers: {
+        machine: '/GameModels/Tower/machine.glb',
+        cannon: '/GameModels/Tower/TowerCannon.glb',
+        frost: '/GameModels/Tower/TowerIce.glb',
+        beacon: '/GameModels/Tower/%E6%B3%89%E5%9F%8E%E5%B9%BF%E5%9C%BA.glb',
+        stellar: '/GameModels/Tower/Sgirl.glb',
+        qinqiong: '/GameModels/Character/%E7%A7%A6%E7%90%BC.glb',
+        liqingzhao: '/GameModels/Character/%E6%9D%8E%E6%B8%85%E7%85%A7.glb',
+        bianque: '/GameModels/Character/%E6%89%81%E9%B9%8A.glb'
+    },
+    characters: {
+        stellar: '/GameModels/Tower/Sgirl.glb',
+        qinqiong: '/GameModels/Character/%E7%A7%A6%E7%90%BC.glb',
+        liqingzhao: '/GameModels/Character/%E6%9D%8E%E6%B8%85%E7%85%A7.glb',
+        bianque: '/GameModels/Character/%E6%89%81%E9%B9%8A.glb'
+    }
+};
+
 var DEFAULT_TOWER_DEFENSE_META = {
     machine: { element: 'force', functionTags: ['singleTarget'] },
     cannon: { element: 'thermal', functionTags: ['areaAttack'] },
@@ -1096,6 +1179,128 @@ var DEFAULT_TOWER_DEFENSE_META = {
     liqingzhao: { element: 'sound', functionTags: ['areaAttack', 'damageOverTime'], effects: ['slow'] },
     bianque: { element: 'thermal', functionTags: ['healing'] }
 };
+
+var DEFAULT_CHARACTER_GAMEPLAY_ENTRIES = [
+    {
+        id: 'stellar',
+        name: '星辉棱镜·天河',
+        summary: '高阶棱镜法师，范围折射并减速。主动技能：天河审判。',
+        tags: ['通用', 'mage', 'S'],
+        rarity: 'S',
+        placement: 'roadside',
+        element: 'light',
+        functionTags: ['areaAttack', 'damageOverTime'],
+        effects: ['slow'],
+        stats: { hp: 420, attack: 86, cost: 320, range: 6.2, fireRate: 1.25, healAmount: 0, healRange: 0, splash: 1.25, maxBlockCount: 0 },
+        imagePath: '/Arts/Cards/char_stellar.png',
+        modelPath: DEFAULT_GAMEPLAY_MODEL_PATHS.characters.stellar,
+        jinanOnly: false
+    },
+    {
+        id: 'qinqiong',
+        name: '秦琼·门神',
+        summary: '道路门神，阻挡2名敌人并近战反击。主动技能：不动如山。',
+        tags: ['济南', 'melee', 'S'],
+        rarity: 'S',
+        placement: 'road',
+        element: 'force',
+        functionTags: ['singleTarget', 'paralysis'],
+        effects: ['stun'],
+        stats: { hp: 780, attack: 74, cost: 260, range: 1.2, fireRate: 1.15, healAmount: 0, healRange: 0, splash: 0, maxBlockCount: 2 },
+        imagePath: '/Arts/Cards/char_qinqiong.png',
+        modelPath: DEFAULT_GAMEPLAY_MODEL_PATHS.characters.qinqiong,
+        jinanOnly: true
+    },
+    {
+        id: 'liqingzhao',
+        name: '李清照·易安',
+        summary: '超远水墨群攻，持续压低敌军速度。主动技能：漱玉天潮。',
+        tags: ['济南', 'mage', 'S'],
+        rarity: 'S',
+        placement: 'roadside',
+        element: 'sound',
+        functionTags: ['areaAttack', 'damageOverTime'],
+        effects: ['slow'],
+        stats: { hp: 180, attack: 140, cost: 300, range: 7.2, fireRate: 0.62, healAmount: 0, healRange: 0, splash: 2.35, maxBlockCount: 0 },
+        imagePath: '/Arts/Cards/char_liqingzhao.png',
+        modelPath: DEFAULT_GAMEPLAY_MODEL_PATHS.characters.liqingzhao,
+        jinanOnly: true
+    },
+    {
+        id: 'bianque',
+        name: '扁鹊·神医',
+        summary: '神医支援，持续治疗友军。主动技能：青囊济世。',
+        tags: ['济南', 'healer', 'S'],
+        rarity: 'S',
+        placement: 'roadside',
+        element: 'thermal',
+        functionTags: ['healing'],
+        effects: [],
+        stats: { hp: 260, attack: 0, cost: 240, range: 4.8, fireRate: 0.85, healAmount: 90, healRange: 4.8, splash: 0, maxBlockCount: 0 },
+        imagePath: '/Arts/Cards/char_bianque.png',
+        modelPath: DEFAULT_GAMEPLAY_MODEL_PATHS.characters.bianque,
+        jinanOnly: true
+    }
+];
+
+var DEFAULT_SKILL_GAMEPLAY_ENTRIES = [
+    {
+        id: 'stellar-skill',
+        name: '天河审判',
+        summary: '锁定全场敌人造成高额星辉伤害，并大幅减速。',
+        tags: ['通用', '星辉棱镜·天河'],
+        rarity: 'S',
+        placement: '',
+        element: 'light',
+        functionTags: ['areaAttack', 'damageOverTime'],
+        effects: [],
+        stats: { cooldown: 18, cost: 320, range: 6.2, damage: 86 },
+        imagePath: '/Arts/Cards/char_stellar.png',
+        jinanOnly: false
+    },
+    {
+        id: 'qinqiong-skill',
+        name: '不动如山',
+        summary: '恢复生命、短时间大幅减伤并震晕周围敌人。',
+        tags: ['济南', '秦琼·门神'],
+        rarity: 'S',
+        placement: '',
+        element: 'force',
+        functionTags: ['singleTarget', 'paralysis'],
+        effects: [],
+        stats: { cooldown: 18, cost: 260, range: 1.2, damage: 74 },
+        imagePath: '/Arts/Cards/char_qinqiong.png',
+        jinanOnly: true
+    },
+    {
+        id: 'liqingzhao-skill',
+        name: '漱玉天潮',
+        summary: '大范围水潮爆发，造成高额伤害并冻结行军速度。',
+        tags: ['济南', '李清照·易安'],
+        rarity: 'S',
+        placement: '',
+        element: 'sound',
+        functionTags: ['areaAttack', 'damageOverTime'],
+        effects: [],
+        stats: { cooldown: 22, cost: 300, range: 7.2, damage: 140 },
+        imagePath: '/Arts/Cards/char_liqingzhao.png',
+        jinanOnly: true
+    },
+    {
+        id: 'bianque-skill',
+        name: '青囊济世',
+        summary: '全图治疗友军并提供短时减伤，附近敌人受到药毒反噬。',
+        tags: ['济南', '扁鹊·神医'],
+        rarity: 'S',
+        placement: '',
+        element: 'thermal',
+        functionTags: ['healing'],
+        effects: [],
+        stats: { cooldown: 24, cost: 240, range: 4.8, damage: 90 },
+        imagePath: '/Arts/Cards/char_bianque.png',
+        jinanOnly: true
+    }
+];
 
 var DEFAULT_DEFENSE_ITEM_ENTRIES = [
     {
@@ -1177,7 +1382,7 @@ export function buildDefaultEnemyEntries(config) {
             cleanseEffects: [],
             effectDurationSec: 2,
             stats: { hp: st.hp, attack: st.attack, speed: st.speed, reward: st.reward },
-            assetRefs: {},
+            assetRefs: cloneGameplayAssetRefs('enemies', DEFAULT_GAMEPLAY_MODEL_PATHS.enemies[archId] ? { modelPath: DEFAULT_GAMEPLAY_MODEL_PATHS.enemies[archId] } : {}),
             cityCode: cityCode,
             cityName: cityName,
             updatedAt: ''
@@ -1208,7 +1413,7 @@ export function buildDefaultEnemyEntries(config) {
                 speed: Number(st.speed) > 0 ? Number(st.speed) : 1,
                 reward: Number(st.reward) || 20
             },
-            assetRefs: {},
+            assetRefs: cloneGameplayAssetRefs('enemies', tpl.modelPath ? { modelPath: String(tpl.modelPath) } : {}),
             cityCode: cityCode,
             cityName: cityName,
             updatedAt: ''
@@ -1242,7 +1447,10 @@ export function buildDefaultTowerEntries(config) {
             cleanseEffects: [],
             effectDurationSec: 2,
             stats: Object.assign({}, DEFAULT_TOWER_GAMEPLAY_STATS[spec.id] || {}),
-            assetRefs: {},
+            assetRefs: cloneGameplayAssetRefs('towers', {
+                imagePath: '/Arts/Cards/char_' + spec.id + '.png',
+                modelPath: DEFAULT_GAMEPLAY_MODEL_PATHS.towers[spec.id] || ''
+            }),
             cityCode: cityCode,
             cityName: cityName,
             updatedAt: ''
@@ -1250,8 +1458,145 @@ export function buildDefaultTowerEntries(config) {
     }).filter(Boolean);
 }
 
+var DEFAULT_BOSS_GAMEPLAY_ENTRIES = [
+    {
+        id: 'ai-atlas',
+        name: '重构者 Atlas',
+        summary: '道路、桥梁、管线和施工机械失控后的基础设施 Boss。',
+        tags: ['boss', 'force', 'infrastructure-ai'],
+        rarity: 'boss',
+        element: 'force',
+        stats: { hp: 900, attack: 18, speed: 1.35, reward: 240, aggroRange: 11, attackCooldown: 1.65 }
+    },
+    {
+        id: 'ai-vulcan',
+        name: '熔核调度员 Vulcan',
+        summary: '掌控电网与热力站的高热 Boss。',
+        tags: ['boss', 'thermal', 'energy-dispatch-ai'],
+        rarity: 'boss',
+        element: 'thermal',
+        stats: { hp: 780, attack: 22, speed: 1.65, reward: 260, aggroRange: 12, attackCooldown: 1.45 }
+    },
+    {
+        id: 'ai-prism',
+        name: '棱镜审计官 Prism',
+        summary: '光学识别与审计网络形成的高速 Boss。',
+        tags: ['boss', 'light', 'surveillance-audit-ai'],
+        rarity: 'boss',
+        element: 'light',
+        stats: { hp: 720, attack: 24, speed: 1.9, reward: 280, aggroRange: 13, attackCooldown: 1.3 }
+    },
+    {
+        id: 'ai-gridmind',
+        name: '雷网中枢 Gridmind',
+        summary: '基站与云端调度形成的电系 Boss。',
+        tags: ['boss', 'electric', 'network-swarm-ai'],
+        rarity: 'boss',
+        element: 'electric',
+        stats: { hp: 760, attack: 21, speed: 2.25, reward: 270, aggroRange: 12, attackCooldown: 1.2 }
+    },
+    {
+        id: 'ai-echo',
+        name: '回声协议 Echo',
+        summary: '舆情与广播系统异化出的认知污染 Boss。',
+        tags: ['boss', 'sound', 'cognition-noise-ai'],
+        rarity: 'boss',
+        element: 'sound',
+        stats: { hp: 740, attack: 20, speed: 1.8, reward: 275, aggroRange: 12, attackCooldown: 1.35 }
+    }
+];
+
+export function buildDefaultBossEntries(config) {
+    var cityName = config && config.cityName ? config.cityName : '';
+    var cityCode = config && config.cityCode ? config.cityCode : '';
+    return DEFAULT_BOSS_GAMEPLAY_ENTRIES.map(function (entry) {
+        return {
+            id: entry.id,
+            name: entry.name,
+            summary: entry.summary,
+            tags: mergeDistinctStrings(entry.tags || [], cityName || 'explore'),
+            rarity: entry.rarity,
+            placement: '',
+            element: entry.element,
+            functionTags: [],
+            effects: [],
+            cleanseEffects: [],
+            effectDurationSec: 2,
+            stats: Object.assign({}, entry.stats || {}),
+            assetRefs: cloneGameplayAssetRefs('bosses', {}),
+            cityCode: cityCode,
+            cityName: cityName,
+            updatedAt: ''
+        };
+    });
+}
+
+export function buildDefaultCharacterEntries(config) {
+    var cityName = config && config.cityName ? config.cityName : '';
+    var cityCode = config && config.cityCode ? config.cityCode : '';
+    var jinanCfg = isJinanCityGameplayConfig(config);
+    return DEFAULT_CHARACTER_GAMEPLAY_ENTRIES.filter(function (entry) {
+        return jinanCfg || !entry.jinanOnly;
+    }).map(function (entry) {
+        return {
+            id: entry.id,
+            name: entry.name,
+            summary: entry.summary,
+            tags: mergeDistinctStrings(entry.tags || [], !entry.jinanOnly ? '通用' : cityName || '济南'),
+            rarity: entry.rarity,
+            placement: entry.placement,
+            element: entry.element,
+            functionTags: (entry.functionTags || []).slice(),
+            effects: (entry.effects || []).slice(),
+            cleanseEffects: [],
+            effectDurationSec: 2,
+            stats: Object.assign({}, entry.stats || {}),
+            assetRefs: cloneGameplayAssetRefs('characters', {
+                imagePath: entry.imagePath,
+                modelPath: entry.modelPath
+            }),
+            cityCode: cityCode,
+            cityName: cityName,
+            updatedAt: ''
+        };
+    });
+}
+
+export function buildDefaultSkillEntries(config) {
+    var cityName = config && config.cityName ? config.cityName : '';
+    var cityCode = config && config.cityCode ? config.cityCode : '';
+    var jinanCfg = isJinanCityGameplayConfig(config);
+    return DEFAULT_SKILL_GAMEPLAY_ENTRIES.filter(function (entry) {
+        return jinanCfg || !entry.jinanOnly;
+    }).map(function (entry) {
+        return {
+            id: entry.id,
+            name: entry.name,
+            summary: entry.summary,
+            tags: mergeDistinctStrings(entry.tags || [], !entry.jinanOnly ? '通用' : cityName || '济南'),
+            rarity: entry.rarity,
+            placement: entry.placement,
+            element: entry.element,
+            functionTags: (entry.functionTags || []).slice(),
+            effects: (entry.effects || []).slice(),
+            cleanseEffects: [],
+            effectDurationSec: 2,
+            stats: Object.assign({}, entry.stats || {}),
+            assetRefs: cloneGameplayAssetRefs('skills', {
+                imagePath: entry.imagePath
+            }),
+            cityCode: cityCode,
+            cityName: cityName,
+            updatedAt: ''
+        };
+    });
+}
+
 export function buildDefaultCardEntries(config) {
-    var source = [].concat(config.characters || []).concat(config.skills || []);
+    var source = []
+        .concat(config.towers || [])
+        .concat((config.characters || []).filter(function (entry) { return String(entry && entry.id || '') !== 'explore-player'; }))
+        .concat(config.skills || []);
     return source.map(function (entry) {
         var stats = entry.stats || {};
         return {
@@ -1273,7 +1618,7 @@ export function buildDefaultCardEntries(config) {
                 unlockWave: 1,
                 maxCopies: 1
             },
-            assetRefs: Object.assign({}, entry.assetRefs || {}),
+            assetRefs: cloneGameplayAssetRefs('cards', entry.assetRefs || {}),
             cityCode: entry.cityCode || config.cityCode || '',
             cityName: entry.cityName || config.cityName || '',
             updatedAt: ''
@@ -1304,7 +1649,7 @@ export function buildDefaultDefenseItemEntries(config) {
             cleanseEffects: entry.cleanseEffects.slice(),
             effectDurationSec: 2,
             stats: Object.assign({}, entry.stats),
-            assetRefs: {},
+            assetRefs: cloneGameplayAssetRefs('items', {}),
             cityCode: cityCode,
             cityName: cityName,
             updatedAt: ''
@@ -1321,14 +1666,14 @@ export function normalizeGameplayEntries(raw, kind) {
             summary: String(next.summary || ''),
             tags: Array.isArray(next.tags) ? next.tags.map(String) : [],
             rarity: String(next.rarity || 'common'),
-            placement: kind === 'characters' || kind === 'towers' ? normalizeGameplayPlacement(next.placement || next.deployPlacement || next.placementType) : '',
+            placement: kind === 'towers' ? normalizeGameplayPlacement(next.placement || next.deployPlacement || next.placementType) : '',
             element: normalizeGameplayElement(next.element),
             functionTags: normalizeGameplayOptionList(next.functionTags, DEFENSE_FUNCTION_OPTIONS),
             effects: normalizeGameplayOptionList(next.effects, DEFENSE_STATUS_OPTIONS),
             cleanseEffects: normalizeGameplayOptionList(next.cleanseEffects, DEFENSE_STATUS_OPTIONS),
             effectDurationSec: normalizeEffectDurationSec(next.effectDurationSec),
             stats: next.stats && typeof next.stats === 'object' ? next.stats : {},
-            assetRefs: next.assetRefs && typeof next.assetRefs === 'object' ? next.assetRefs : {},
+            assetRefs: cloneGameplayAssetRefs(kind, next.assetRefs),
             cityCode: String(next.cityCode || ''),
             cityName: String(next.cityName || ''),
             updatedAt: String(next.updatedAt || '')
@@ -1347,6 +1692,7 @@ export function normalizeCityGameplayConfigs(raw) {
             aliases: Array.isArray(item.aliases) ? item.aliases.map(String) : [],
             enemies: normalizeGameplayEntries(item.enemies, 'enemies'),
             characters: normalizeGameplayEntries(item.characters, 'characters'),
+            bosses: normalizeGameplayEntries(item.bosses, 'bosses'),
             skills: normalizeGameplayEntries(item.skills, 'skills'),
             towers: normalizeGameplayEntries(item.towers, 'towers'),
             cards: normalizeGameplayEntries(item.cards, 'cards'),
@@ -1361,6 +1707,9 @@ export function normalizeCityGameplayConfigs(raw) {
         }
         if (!normalized[key].enemies.length) {
             normalized[key].enemies = buildDefaultEnemyEntries(normalized[key]);
+        }
+        if (!normalized[key].bosses.length) {
+            normalized[key].bosses = buildDefaultBossEntries(normalized[key]);
         }
         if (!normalized[key].items.length) {
             normalized[key].items = buildDefaultDefenseItemEntries(normalized[key]);

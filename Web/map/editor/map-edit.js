@@ -103,21 +103,13 @@ function addSpawnPoint(env, col, row) {
         return;
     }
     var id = uid('spawn');
-    var enemies = env.getAvailableEnemyTypes(level);
-    var enemy = enemies[level.map.spawnPoints.length % Math.max(1, enemies.length)] || { id: 'basic' };
     var pathId = 'path-' + (level.map.spawnPoints.length + 1);
-    var waveNumber = level.map.spawnPoints.length + 1;
     level.map.spawnPoints.push({
         id: id,
         name: '敌人出口 ' + (level.map.spawnPoints.length + 1),
         col: col,
         row: row,
-        pathId: pathId,
-        enemyTypeId: enemy.id,
-        waveNumber: waveNumber,
-        waveNumbers: [waveNumber],
-        count: 12,
-        interval: 1.2
+        pathId: pathId
     });
     rebuildAutoDefensePaths(level);
     env.setSelectedObject({ kind: 'spawn', id: id });
@@ -263,11 +255,10 @@ export function handleCellAction(env, col, row) {
     }
     if (env.getActiveEditorMode() === 'explore') {
         var exploreLayout = ensureExplorationLayout(level.map);
-        if (env.getActiveTool() === 'road' || env.getActiveTool() === 'path') toggleCell(exploreLayout.path, col, row);
+        if (env.getActiveTool() === 'road') toggleCell(exploreLayout.path, col, row);
         if (env.getActiveTool() === 'obstacle') toggleCell(exploreLayout.obstacles, col, row);
         if (env.getActiveTool() === 'spawn') setExploreStartPoint(env, col, row);
         if (env.getActiveTool() === 'objective') setExploreExitPoint(env, col, row);
-        if (env.getActiveTool() === 'buildSlot') addExplorePoint(env, col, row);
         if (env.getActiveTool() === 'exploreBoss') addExploreBoss(env, col, row);
         if (env.getActiveTool() === 'exploreSpawner') addExploreSpawner(env, col, row);
         if (env.getActiveTool() === 'exploreMoney') addExplorePickup(env, col, row, 'money');

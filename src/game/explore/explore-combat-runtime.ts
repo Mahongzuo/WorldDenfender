@@ -40,11 +40,14 @@ export interface ExploreCombatHost {
   /** 在敌人位置显示伤害飘字（与塔防共用 fx/effectsFacade） */
   showExploreEnemyDamageFloat?(worldPosition: THREE.Vector3, damage: number, options?: { critical?: boolean }): void;
   onExploreBasicAttackFired?(): void;
+  onExploreSkillEUsed?(): void;
+  onExploreSkillRUsed?(): void;
   onExploreEnemyKilled?(): void;
   /** 击倒带 placementId 的 Boss 后立即回调（奖励与吐司之后）；用于 Boss 击败过场 */
   onExploreBossDefeated?(info: { placementId: string; name?: string }): void;
   /** 异步加载关卡里配置的 GLB；失败返回 null（会保留程序化占位体）。 */
   loadExploreGltfScene?(url: string): Promise<THREE.Object3D | null>;
+  orientHudToCamera?(hudRoot: THREE.Object3D): void;
 }
 
 interface RuntimeSpawnerState {
@@ -102,6 +105,15 @@ export class ExploreCombatRuntime {
       return false;
     }
     return required.every((p) => this.defeatedBossIds.has(p.id));
+  }
+
+  getDefeatedBossIds(): string[] {
+    return [...this.defeatedBossIds];
+  }
+
+  restoreDefeatedBossIds(ids: Iterable<string>): void {
+    const validPlacementIds = new Set(this.bossPlacements.map((placement) => placement.id));
+    this.defeatedBossIds = new Set([...ids].filter((id) => validPlacementIds.has(id)));
   }
 
   syncMapContent(options: {
@@ -302,6 +314,7 @@ export class ExploreCombatRuntime {
       return;
     }
     this.skillECooldown = this.gameplay.skillECooldownSec;
+    this.host.onExploreSkillEUsed?.();
 
     const targetPos = nearestEnemy.mesh.position.clone();
     const damage = this.resolveDamageAgainstEnemy(nearestEnemy, (120 + this.progress.level * 15) * this.playerKit().orbDamageMult, this.playerElement);
@@ -376,6 +389,7 @@ export class ExploreCombatRuntime {
       return;
     }
     this.skillRCooldown = this.gameplay.skillRCooldownSec;
+    this.host.onExploreSkillRUsed?.();
 
     const playerPos = this.host.getPlayerPosition();
     const kit = this.playerKit();
@@ -455,6 +469,7 @@ export class ExploreCombatRuntime {
         id: `boss-${placement.id}`,
         name: placement.name || bossDef.name,
         mesh: visual.group,
+        hpBillboard: visual.hpBillboard,
         hpBar: visual.hpBar,
         hp: maxHp,
         maxHp,
@@ -484,7 +499,7 @@ export class ExploreCombatRuntime {
     element: ExploreElement,
     boss: boolean,
     scale: number,
-  ): { group: THREE.Group; hpBar: THREE.Mesh; proceduralRoot: THREE.Group } {
+  ): { group: THREE.Group; hpBillboard: THREE.Group; hpBar: THREE.Mesh; proceduralRoot: THREE.Group } {
     const color = EXPLORE_ELEMENT_COLORS[element];
     const group = new THREE.Group();
     const proceduralRoot = new THREE.Group();
@@ -506,25 +521,26 @@ export class ExploreCombatRuntime {
     group.add(proceduralRoot);
 
     const barWidth = boss ? 1.7 : 1;
+    const hpBillboard = new THREE.Group();
+    hpBillboard.position.y = boss ? 2.35 : 1.9;
+    hpBillboard.visible = !boss;
+    group.add(hpBillboard);
+
     const hpBarBg = new THREE.Mesh(
       new THREE.PlaneGeometry(barWidth, 0.1),
       new THREE.MeshBasicMaterial({ color: 0x333333, depthTest: false }),
     );
-    hpBarBg.position.y = boss ? 2.35 : 1.9;
-    hpBarBg.rotation.x = -Math.PI / 8;
-    group.add(hpBarBg);
+    hpBillboard.add(hpBarBg);
 
     const hpBar = new THREE.Mesh(
       new THREE.PlaneGeometry(barWidth, 0.1),
       new THREE.MeshBasicMaterial({ color: 0x44cc44, depthTest: false }),
     );
-    hpBar.position.y = hpBarBg.position.y;
     hpBar.position.z = 0.005;
-    hpBar.rotation.x = -Math.PI / 8;
-    group.add(hpBar);
+    hpBillboard.add(hpBar);
 
     group.scale.setScalar(scale);
-    return { group, hpBar, proceduralRoot };
+    return { group, hpBillboard, hpBar, proceduralRoot };
   }
 
   /** 将模型缩放到与程序化体相近的屏幕占比，足底对齐本地 y=0，并居中 XZ。 */
@@ -678,6 +694,7 @@ export class ExploreCombatRuntime {
       id: `ee-${this.host.allocateUid()}`,
       name: p.name,
       mesh: visual.group,
+      hpBillboard: visual.hpBillboard,
       hpBar: visual.hpBar,
       hp: maxHp,
       maxHp,
@@ -773,6 +790,11 @@ export class ExploreCombatRuntime {
       }
 
       const ratio = Math.max(0, enemy.hp / enemy.maxHp);
+      const showHpBillboard = !enemy.boss || dist <= enemy.aggroRange;
+      enemy.hpBillboard.visible = showHpBillboard;
+      if (showHpBillboard) {
+        this.host.orientHudToCamera?.(enemy.hpBillboard);
+      }
       enemy.hpBar.scale.x = ratio;
       enemy.hpBar.position.x = (ratio - 1) * 0.5;
       (enemy.hpBar.material as THREE.MeshBasicMaterial).color.setHex(

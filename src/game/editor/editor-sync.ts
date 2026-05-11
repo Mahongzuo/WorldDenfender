@@ -21,6 +21,7 @@ import type {
   MapDefinition,
   BuildId,
   DefenseMapFlavor,
+  DefenseEnemyRuntimeConfig,
   DefenseEnemyPath,
   DefenseSpawnPoint,
   DefenseWaveRule,
@@ -178,6 +179,11 @@ function positiveNumber(raw: unknown, fallback: number, max = 1e9): number {
   return Number.isFinite(v) && v > 0 ? Math.min(v, max) : fallback;
 }
 
+function positiveNumberInRange(raw: unknown, fallback: number, min: number, max = 1e9): number {
+  const v = Number(raw);
+  return Number.isFinite(v) && v >= min && v > 0 ? clamp(v, min, max) : fallback;
+}
+
 function nonNegativeNumber(raw: unknown, fallback: number, max = 1e9): number {
   const v = Number(raw);
   return Number.isFinite(v) && v >= 0 ? Math.min(v, max) : fallback;
@@ -301,6 +307,8 @@ interface SyncEditorLevelsOptions {
   cityAliases: Record<string, string[]>;
   /** 城市玩法库（用于把各城市的防御塔模型绑定同步到对应关卡的运行时地图） */
   cityGameplayConfigs?: Record<string, unknown>;
+  /** `level-editor-state` 内 Actor 常仅有 modelId；同步时用 catalog id → publicUrl 回填 modelPath */
+  gameModelPublicUrlByCatalogId?: ReadonlyMap<string, string>;
 }
 
 interface SyncEditorLevelsResult {
@@ -310,7 +318,7 @@ interface SyncEditorLevelsResult {
 }
 
 export function syncEditorLevelsToRuntime(options: SyncEditorLevelsOptions): SyncEditorLevelsResult {
-  const { levels, requestedLevelId, maps, exploreMaps, cityMap, cityAliases, cityGameplayConfigs } = options;
+  const { levels, requestedLevelId, maps, exploreMaps, cityMap, cityAliases, cityGameplayConfigs, gameModelPublicUrlByCatalogId } = options;
   let importedCount = 0;
   let requestedDefIdx = -1;
   let requestedExpIdx = -1;
@@ -337,8 +345,17 @@ export function syncEditorLevelsToRuntime(options: SyncEditorLevelsOptions): Syn
     const levelGeo = cityCode ? resolveEditorLevelGeo(syncedLevel, cityMap[cityCode]?.geo) : resolveEditorLevelGeo(syncedLevel);
     const runtimeLevel = levelGeo ? { ...syncedLevel, map: { ...syncedLevel.map, geo: levelGeo } } : syncedLevel;
     const defenseTowerModels = extractTowerModelUrlsFromCityConfigs(runtimeLevel, cityGameplayConfigs);
-    const defenseMap = editorLevelToRuntimeMap(runtimeLevel, "defense", defenseTowerModels);
-    const exploreMap = editorLevelToRuntimeMap(runtimeLevel, "explore");
+    const defenseTowerScales = extractTowerModelScalesFromCityConfigs(runtimeLevel, cityGameplayConfigs);
+    const defenseEnemyConfigs = extractDefenseEnemyConfigsFromCityConfigs(runtimeLevel, cityGameplayConfigs);
+    const defenseMap = editorLevelToRuntimeMap(
+      runtimeLevel,
+      "defense",
+      defenseTowerModels,
+      defenseEnemyConfigs,
+      defenseTowerScales,
+      gameModelPublicUrlByCatalogId,
+    );
+    const exploreMap = editorLevelToRuntimeMap(runtimeLevel, "explore", undefined, undefined, undefined, gameModelPublicUrlByCatalogId);
     const defenseIndex = maps.push(defenseMap) - 1;
     const exploreIndex = exploreMaps.push(exploreMap) - 1;
 
@@ -502,6 +519,121 @@ function extractTowerModelUrlsFromCityConfigs(
   return undefined;
 }
 
+function extractTowerModelScalesFromCityConfigs(
+  level: EditorLevel,
+  rawConfigs: Record<string, unknown> | undefined,
+): Partial<Record<BuildId, number>> | undefined {
+  if (!rawConfigs || typeof rawConfigs !== "object") {
+    return undefined;
+  }
+  const levelIds = levelCityIdentities(level);
+  for (const [configKey, rawCfg] of Object.entries(rawConfigs)) {
+    if (!rawCfg || typeof rawCfg !== "object") {
+      continue;
+    }
+    const cfg = rawCfg as {
+      cityCode?: string;
+      cityName?: string;
+      aliases?: string[];
+      towers?: Array<{ id?: string; assetRefs?: { modelScale?: unknown } }>;
+    };
+    const cfgIds = [
+      configKey,
+      cfg.cityCode,
+      cfg.cityName,
+      ...(Array.isArray(cfg.aliases) ? cfg.aliases : []),
+    ]
+      .map(normalizeCityConfigIdentity)
+      .filter(Boolean);
+    let match = false;
+    for (const cid of cfgIds) {
+      if (levelIds.has(cid)) {
+        match = true;
+        break;
+      }
+    }
+    if (!match) {
+      continue;
+    }
+    const out: Partial<Record<BuildId, number>> = {};
+    for (const t of cfg.towers ?? []) {
+      const tid = String(t.id ?? "").trim() as BuildId;
+      const rawScale = t.assetRefs?.modelScale;
+      const scale = typeof rawScale === "number" && Number.isFinite(rawScale) ? rawScale : Number(rawScale);
+      if (!Number.isFinite(scale) || scale <= 0 || !Object.prototype.hasOwnProperty.call(BUILD_SPECS, tid)) {
+        continue;
+      }
+      out[tid] = clamp(scale, 0.05, 8);
+    }
+    return Object.keys(out).length ? out : undefined;
+  }
+  return undefined;
+}
+
+function extractDefenseEnemyConfigsFromCityConfigs(
+  level: EditorLevel,
+  rawConfigs: Record<string, unknown> | undefined,
+): DefenseEnemyRuntimeConfig[] | undefined {
+  if (!rawConfigs || typeof rawConfigs !== "object") {
+    return undefined;
+  }
+  const levelIds = levelCityIdentities(level);
+  for (const [configKey, rawCfg] of Object.entries(rawConfigs)) {
+    if (!rawCfg || typeof rawCfg !== "object") {
+      continue;
+    }
+    const cfg = rawCfg as {
+      cityCode?: string;
+      cityName?: string;
+      aliases?: string[];
+      enemies?: Array<{ id?: unknown; name?: unknown; stats?: Record<string, unknown>; assetRefs?: Record<string, unknown> }>;
+    };
+    const cfgIds = [
+      configKey,
+      cfg.cityCode,
+      cfg.cityName,
+      ...(Array.isArray(cfg.aliases) ? cfg.aliases : []),
+    ]
+      .map(normalizeCityConfigIdentity)
+      .filter(Boolean);
+    let match = false;
+    for (const cid of cfgIds) {
+      if (levelIds.has(cid)) {
+        match = true;
+        break;
+      }
+    }
+    if (!match) {
+      continue;
+    }
+    const out: DefenseEnemyRuntimeConfig[] = [];
+    for (const enemy of cfg.enemies ?? []) {
+      const id = String(enemy.id ?? "").trim();
+      if (!id) continue;
+      const stats = enemy.stats && typeof enemy.stats === "object" ? enemy.stats : {};
+      const assetRefs = enemy.assetRefs && typeof enemy.assetRefs === "object" ? enemy.assetRefs : {};
+      const modelPath = String(assetRefs.modelPath ?? "").trim();
+      const modelScale = positiveNumberInRange(assetRefs.modelScale, 1, 0.01, 100);
+      const hp = positiveNumber(stats.hp, 0, 1e9);
+      const speed = positiveNumber(stats.speed, 0, 1e4);
+      const reward = nonNegativeNumber(stats.reward, 0, 1e9);
+      const towerSiegeDps = nonNegativeNumber(stats.attack, 0, 1e9);
+      out.push({
+        id,
+        ...(typeof enemy.name === "string" && enemy.name.trim() ? { name: enemy.name.trim() } : {}),
+        ...(modelPath ? { modelPath } : {}),
+        ...(modelScale > 0 && modelScale !== 1 ? { modelScale } : {}),
+        ...(hp > 0 ? { hp } : {}),
+        ...(speed > 0 ? { speed } : {}),
+        ...(reward > 0 ? { reward } : {}),
+        ...(towerSiegeDps > 0 ? { towerSiegeDps } : {}),
+      });
+    }
+    return out.length ? out : undefined;
+  }
+  return undefined;
+}
+
 function sanitizeDefenseSpawnPoints(
   raw: EditorLevelMap["spawnPoints"] | undefined,
   project: (cell: EditorCell) => GridCell,
@@ -556,6 +688,7 @@ function sanitizeEditorWaveRules(
     overrideModelPath: String(rule.overrideModelPath || ""),
     overrideModelScale: Math.max(0.1, Number(rule.overrideModelScale) || 1),
   }));
+  if (explicit.length) return explicit;
   const rawSpawns = level.map?.spawnPoints ?? [];
   const spawnRules = spawnPoints
     .map((spawn, index) => ({ spawn, raw: rawSpawns[index], index }))
@@ -575,8 +708,7 @@ function sanitizeEditorWaveRules(
         reward: 50,
       }));
     });
-  const merged = [...explicit, ...spawnRules];
-  return merged.length ? merged : undefined;
+  return spawnRules.length ? spawnRules : undefined;
 }
 
 function buildEditorDefensePaths(
@@ -624,6 +756,9 @@ export function editorLevelToRuntimeMap(
   level: EditorLevel,
   mode: GameMode,
   defenseTowerModelUrls?: Partial<Record<BuildId, string>>,
+  defenseEnemyConfigs?: DefenseEnemyRuntimeConfig[],
+  defenseTowerModelScales?: Partial<Record<BuildId, number>>,
+  gameModelPublicUrlByCatalogId?: ReadonlyMap<string, string>,
 ): MapDefinition {
   const editorMap = level.map ?? {};
   const exploreLayout = mode === "explore" ? editorMap.explorationLayout : undefined;
@@ -648,20 +783,32 @@ export function editorLevelToRuntimeMap(
       ? project(editorMap.explorationPoints[0])
       : spawn;
   const defenseEnemyPaths = buildEditorDefensePaths(editorMap, spawnPoints, objective, project, sourceCols, sourceRows);
-  const pathSource = mode === "explore" ? exploreLayout?.path ?? editorMap.explorationPoints ?? [] : defenseEnemyPaths[0]?.cells ?? editorMap.roads ?? [];
-  const projectedPath = mode === "explore"
-    ? orderEditorPathCells(
-        uniqueCells(pathSource.map(project), sourceCols, sourceRows),
-        exploreStart,
-        objective,
-        sourceCols,
-        sourceRows,
-      )
-    : defenseEnemyPaths[0]?.cells ?? [];
+  /** 探索模式：仅使用 explorationLayout.path；勿用探索点 POI 或塔防道路冒充路径 */
+  const explorePathAuthored = uniqueCells(
+    (exploreLayout?.path ?? []).map(project),
+    sourceCols,
+    sourceRows,
+  );
+  const projectedPath =
+    mode === "explore"
+      ? explorePathAuthored.length > 0
+        ? orderEditorPathCells(explorePathAuthored, exploreStart, objective, sourceCols, sourceRows)
+        : []
+      : defenseEnemyPaths[0]?.cells ?? editorMap.roads ?? [];
   const fallbackPath = mode === "explore"
     ? buildFallbackPath(exploreStart, objective, sourceCols, sourceRows)
     : buildFallbackPath(spawn, objective, sourceCols, sourceRows);
-  const path = projectedPath.length >= 2 ? projectedPath : fallbackPath;
+  /** 探索：未铺任何道路格子时路径为空，避免 orderEditorPathCells([], start, end) 与 fallback 生成「看不见却删不掉」的默认折线 */
+  const path =
+    mode === "explore"
+      ? explorePathAuthored.length === 0
+        ? []
+        : projectedPath.length >= 2
+          ? projectedPath
+          : fallbackPath
+      : projectedPath.length >= 2
+        ? projectedPath
+        : fallbackPath;
   const obstacleSource = mode === "explore" ? exploreLayout?.obstacles ?? editorMap.obstacles ?? [] : editorMap.obstacles ?? [];
   const obstacles = uniqueCells(obstacleSource.map(project), sourceCols, sourceRows).filter((cell) => !path.some((pathCell) => sameCell(pathCell, cell)));
   const theme = exploreLayout?.theme ?? editorMap.theme ?? {};
@@ -693,6 +840,7 @@ export function editorLevelToRuntimeMap(
     id: `${level.id || "editor-level"}-${mode}`,
     name: `${level.name || "编辑器关卡"}${mode === "explore" ? " · 探索" : ""}`,
     description: level.description || "由关卡编辑器同步生成的运行时地图。",
+    ...(level.status ? { editorStatus: level.status } : {}),
     cols: sourceCols,
     rows: sourceRows,
     geo: levelGeo,
@@ -718,10 +866,11 @@ export function editorLevelToRuntimeMap(
     path,
     ...(mode === "defense" ? { enemyPaths: defenseEnemyPaths, spawnPoints, waveRules: sanitizeEditorWaveRules(level, spawnPoints) } : {}),
     obstacles,
-    actors: extractEditorActors(editorMap),
+    actors: extractEditorActors(editorMap, gameModelPublicUrlByCatalogId),
     safeZones: mode === "explore"
       ? uniqueCells((exploreLayout?.safeZones ?? []).map(project), sourceCols, sourceRows)
       : [],
+    ...(mode === "explore" ? { exploreStart, exploreExit: objective } : {}),
     ...(mode === "explore"
       ? {
           exploreGameplay: { ...(exploreLayout?.gameplay ?? {}) } as ExploreGameplaySettings,
@@ -734,7 +883,9 @@ export function editorLevelToRuntimeMap(
       ? {
           ...(cutscenesDefense ? { cutscenes: cutscenesDefense } : {}),
           ...(defenseFlavorSan ? { defenseFlavor: defenseFlavorSan } : {}),
+          ...(defenseEnemyConfigs?.length ? { defenseEnemyConfigs } : {}),
           ...(defenseTowerModelUrls && Object.keys(defenseTowerModelUrls).length ? { towerModelUrls: defenseTowerModelUrls } : {}),
+          ...(defenseTowerModelScales && Object.keys(defenseTowerModelScales).length ? { towerModelScales: defenseTowerModelScales } : {}),
         }
       : {}),
     ...(mode === "explore" && cutscenesExplore ? { cutscenes: cutscenesExplore } : {}),
@@ -743,11 +894,20 @@ export function editorLevelToRuntimeMap(
   };
 }
 
-function extractEditorActors(editorMap: EditorLevelMap): MapActorDef[] {
+function extractEditorActors(
+  editorMap: EditorLevelMap,
+  catalogPublicUrlById?: ReadonlyMap<string, string>,
+): MapActorDef[] {
   const raw = editorMap.actors ?? [];
   const result: MapActorDef[] = [];
   for (const a of raw) {
-    const modelPath = String(a.modelPath ?? "");
+    let modelPath = String(a.modelPath ?? "").trim();
+    if (!modelPath) {
+      const assetId = String(a.modelId ?? "").trim();
+      if (assetId && catalogPublicUrlById?.size) {
+        modelPath = (catalogPublicUrlById.get(assetId) ?? "").trim();
+      }
+    }
     if (!modelPath) continue;
     const offset = a.worldOffsetMeters && typeof a.worldOffsetMeters === "object"
       ? (a.worldOffsetMeters as Record<string, unknown>) : {};

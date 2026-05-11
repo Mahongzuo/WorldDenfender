@@ -6,6 +6,7 @@ import {
   createDefaultModelScales,
   getClampedUserScale as getPersistedUserScale,
   loadCustomAnimationsFromEditorUrls,
+  loadModelAssetFromUrl,
   loadModelFromUrl,
 } from "./asset-loading";
 import { mergeEmbeddedExplorationLocomotion } from "../explore/explore-locomotion-clips";
@@ -16,6 +17,8 @@ import type { BuildId, BuildSpec, ModelTarget } from "../core/types";
  */
 export class GameModelCustomization {
   modelScales: Partial<Record<ModelTarget, number>>;
+  /** 关卡放置模型等：按路径的全局缩放（与实例 scale 相乘） */
+  globalModelPathScales: Record<string, number> = {};
   customModels: Partial<Record<BuildId, Group>> = {};
   customModelUrls: Partial<Record<BuildId, string>> = {};
   customDropModel: Group | null = null;
@@ -37,12 +40,15 @@ export class GameModelCustomization {
     this.customDropModelUrl = "";
     this.customPlayerModel = null;
     this.customPlayerModelUrl = "";
+    this.customAnimationUrls = {};
     this.modelScales = createDefaultModelScales(this.buildSpecs);
+    this.globalModelPathScales = {};
     this.customAnimations = {};
   }
 
   assignFromLoadedEditorBundle(loaded: LoadedAssetConfig): void {
     this.modelScales = loaded.modelScales;
+    this.globalModelPathScales = { ...(loaded.globalModelPathScales ?? {}) };
     this.customModelUrls = loaded.customModelUrls;
     this.customDropModelUrl = loaded.customDropModelUrl;
     this.customPlayerModelUrl = loaded.customPlayerModelUrl;
@@ -106,7 +112,9 @@ export class GameModelCustomization {
     }
     if (this.customPlayerModelUrl) {
       try {
-        this.customPlayerModel = await loadModelFromUrl(loaders, this.customPlayerModelUrl);
+        const loaded = await loadModelAssetFromUrl(loaders, this.customPlayerModelUrl);
+        this.customPlayerModel = loaded.model;
+        mergeEmbeddedExplorationLocomotion(this.customAnimations, loaded.animations);
       } catch (error) {
         console.warn("[Game] failed to load player model", this.customPlayerModelUrl, error);
       }

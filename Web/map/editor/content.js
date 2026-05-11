@@ -40,6 +40,34 @@ export var TOOL_LABELS = {
     boardImage: '棋盘配图'
 };
 
+export var SHARED_LAYOUT_TOOLS = ['select', 'road', 'obstacle', 'spawn', 'objective', 'actor', 'erase', 'boardImage'];
+
+export var DEFENSE_ONLY_LAYOUT_TOOLS = ['path', 'buildSlot'];
+
+export var EXPLORE_ONLY_LAYOUT_TOOLS = ['explorePoint', 'exploreBoss', 'exploreSpawner', 'exploreMoney', 'exploreItem', 'safeZone'];
+
+export var TOOL_LABELS_BY_MODE = {
+    defense: TOOL_LABELS,
+    explore: Object.assign({}, TOOL_LABELS, {
+        road: '探索路径',
+        spawn: '玩家出生点',
+        objective: '探索终点'
+    })
+};
+
+export function getToolLabel(tool, mode) {
+    var resolvedMode = mode === 'explore' ? 'explore' : 'defense';
+    var labels = TOOL_LABELS_BY_MODE[resolvedMode] || TOOL_LABELS;
+    return labels[tool] || TOOL_LABELS[tool] || tool;
+}
+
+export function isToolAllowedInMode(tool, mode) {
+    var resolvedMode = mode === 'explore' ? 'explore' : 'defense';
+    if (SHARED_LAYOUT_TOOLS.indexOf(tool) >= 0) return true;
+    if (resolvedMode === 'explore') return EXPLORE_ONLY_LAYOUT_TOOLS.indexOf(tool) >= 0;
+    return DEFENSE_ONLY_LAYOUT_TOOLS.indexOf(tool) >= 0;
+}
+
 export var LEVEL_CONTENT_BROWSER_FILTER_ORDER = [
     'all',
     'obstacle',
@@ -144,15 +172,15 @@ export var TOWER_MODEL_SPECS = [
 ];
 
 export var DEFAULT_TOWER_GAMEPLAY_STATS = {
-    machine: { cost: 80, hp: 100, attack: 18, range: 4.5, fireRate: 1.7, splash: 0 },
-    cannon: { cost: 150, hp: 120, attack: 58, range: 4.1, fireRate: 0.75, splash: 1.35 },
-    frost: { cost: 125, hp: 100, attack: 9, range: 4.8, fireRate: 1.05, splash: 0 },
-    mine: { cost: 55, hp: 1, attack: 105, range: 0.72, fireRate: 0, splash: 1.45 },
-    beacon: { cost: 115, hp: 80, attack: 0, range: 3.3, fireRate: 0, splash: 0 },
-    stellar: { cost: 320, hp: 420, attack: 86, range: 6.2, fireRate: 1.25, splash: 1.25 },
-    qinqiong: { cost: 260, hp: 780, attack: 74, range: 1.2, fireRate: 1.15, splash: 0 },
-    liqingzhao: { cost: 300, hp: 180, attack: 140, range: 7.2, fireRate: 0.62, splash: 2.35 },
-    bianque: { cost: 240, hp: 260, attack: 90, range: 4.8, fireRate: 0.85, splash: 0 }
+    machine: { cost: 80, refundRatio: 0.5, hp: 100, attack: 18, range: 4.5, fireRate: 1.7, splash: 0 },
+    cannon: { cost: 150, refundRatio: 0.5, hp: 120, attack: 58, range: 4.1, fireRate: 0.75, splash: 1.35 },
+    frost: { cost: 125, refundRatio: 0.5, hp: 100, attack: 9, range: 4.8, fireRate: 1.05, splash: 0 },
+    mine: { cost: 55, refundRatio: 0.5, hp: 1, attack: 105, range: 0.72, fireRate: 0, splash: 1.45 },
+    beacon: { cost: 115, refundRatio: 0.5, hp: 80, attack: 0, range: 3.3, fireRate: 0, splash: 0 },
+    stellar: { cost: 320, refundRatio: 0.5, hp: 420, attack: 86, range: 6.2, fireRate: 1.25, splash: 1.25 },
+    qinqiong: { cost: 260, refundRatio: 0.5, hp: 780, attack: 74, range: 1.2, fireRate: 1.15, splash: 0 },
+    liqingzhao: { cost: 300, refundRatio: 0.5, hp: 180, attack: 140, range: 7.2, fireRate: 0.62, splash: 2.35 },
+    bianque: { cost: 240, refundRatio: 0.5, hp: 260, attack: 90, range: 4.8, fireRate: 0.85, splash: 0 }
 };
 
 export var DEFENSE_ELEMENT_OPTIONS = [
@@ -194,25 +222,22 @@ export var GAMEPLAY_RESOURCE_CONFIG = {
         ]
     },
     characters: {
-        label: '角色',
+        label: '探索角色',
         assetType: 'Characters',
-        empty: '当前城市还没有角色条目。',
+        empty: '当前项目还没有探索角色条目。',
+        stats: []
+    },
+    bosses: {
+        label: 'Boss',
+        assetType: 'Bosses',
+        empty: '当前项目还没有 Boss 条目。',
         stats: [
             { key: 'hp', label: '生命值', step: '1' },
             { key: 'attack', label: '攻击', step: '1' },
-            { key: 'cost', label: '部署消耗', step: '1' },
-            { key: 'range', label: '范围', step: '0.1' }
-        ]
-    },
-    skills: {
-        label: '技能',
-        assetType: 'Skills',
-        empty: '当前城市还没有技能条目。',
-        stats: [
-            { key: 'damage', label: '伤害', step: '1' },
-            { key: 'cooldown', label: '冷却', step: '0.1' },
-            { key: 'cost', label: '消耗', step: '1' },
-            { key: 'range', label: '范围', step: '0.1' }
+            { key: 'speed', label: '速度', step: '0.1' },
+            { key: 'reward', label: '奖励金钱', step: '1' },
+            { key: 'aggroRange', label: '警戒范围', step: '0.1' },
+            { key: 'attackCooldown', label: '攻击间隔', step: '0.1' }
         ]
     },
     towers: {
@@ -221,6 +246,7 @@ export var GAMEPLAY_RESOURCE_CONFIG = {
         empty: '当前关卡还没有可用防御塔配置。',
         stats: [
             { key: 'cost', label: '费用', step: '1' },
+            { key: 'refundRatio', label: '回收返还比例', step: '0.05' },
             { key: 'hp', label: '生命值', step: '1' },
             { key: 'attack', label: '攻击/治疗', step: '1' },
             { key: 'range', label: '范围', step: '0.1' },
@@ -228,10 +254,16 @@ export var GAMEPLAY_RESOURCE_CONFIG = {
             { key: 'splash', label: '溅射/效果范围', step: '0.1' }
         ]
     },
+    waves: {
+        label: '波次',
+        assetType: 'Waves',
+        empty: '当前关卡还没有波次配置。',
+        stats: []
+    },
     cards: {
         label: '卡片',
         assetType: 'Cards',
-        empty: '当前关卡还没有卡片配置，可从角色/技能生成后再微调。',
+        empty: '当前关卡还没有卡片配置，可从防御塔 / 角色 / 技能默认卡生成后再微调。',
         stats: [
             { key: 'cost', label: '费用/票券', step: '1' },
             { key: 'weight', label: '抽取权重', step: '0.1' },

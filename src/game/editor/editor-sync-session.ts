@@ -172,6 +172,7 @@ export function mergeTowerGameplayConfigsFromCityPayload(
       }
       if (tower.stats && typeof tower.stats === "object") {
         applyNumericOverride(spec, "cost", tower.stats.cost);
+        applyNumericOverride(spec, "refundRatio", tower.stats.refundRatio);
         applyNumericOverride(spec, "maxHp", tower.stats.hp);
         applyNumericOverride(spec, "damage", tower.stats.attack);
         applyNumericOverride(spec, "range", tower.stats.range);
@@ -183,6 +184,14 @@ export function mergeTowerGameplayConfigsFromCityPayload(
       if (tags.length) spec.functionTags = tags as DefenseFunctionTag[];
       const effects = defenseEffectsFromStatusIds(tower.effects, tower.effectDurationSec);
       if (effects.length) spec.effects = effects;
+      const towerRaw = tower as Record<string, unknown>;
+      const towerName = typeof towerRaw.name === "string" ? towerRaw.name.trim() : "";
+      if (towerName) spec.name = towerName;
+      const towerDesc = typeof towerRaw.summary === "string" ? towerRaw.summary.trim() : "";
+      if (towerDesc) spec.description = towerDesc;
+      const assetRefs = towerRaw.assetRefs && typeof towerRaw.assetRefs === "object" ? (towerRaw.assetRefs as Record<string, unknown>) : {};
+      const rawModelScale = Number(assetRefs.modelScale);
+      if (Number.isFinite(rawModelScale) && rawModelScale > 0) spec.modelScale = rawModelScale;
     }
     for (const enemy of config.enemies ?? []) {
       const type = String(enemy.id || "") as keyof typeof enemyOverrides;
@@ -288,6 +297,24 @@ export function createRequestedRegionLocation(
   };
 }
 
+async function fetchGameModelPublicUrlByCatalogId(): Promise<Map<string, string>> {
+  try {
+    const res = await fetch("/api/game-models/catalog", { cache: "no-store" });
+    if (!res.ok) return new Map();
+    const data = (await res.json()) as { entries?: Array<{ id?: unknown; publicUrl?: unknown }> };
+    const list = Array.isArray(data.entries) ? data.entries : [];
+    const map = new Map<string, string>();
+    for (const e of list) {
+      const id = String(e?.id ?? "").trim();
+      const url = String(e?.publicUrl ?? "").trim();
+      if (id && url) map.set(id, url);
+    }
+    return map;
+  } catch {
+    return new Map();
+  }
+}
+
 export interface EditorLevelsPullContext {
   requestedLevelId: string;
 }
@@ -303,10 +330,13 @@ export async function pullEditorLevelsFromProjectFile(options: {
     throw new Error(`HTTP ${response.status}`);
   }
 
-  const payload = (await response.json()) as {
-    levels?: EditorLevel[];
-    cityGameplayConfigs?: Record<string, unknown>;
-  };
+  const [payload, gameModelPublicUrlByCatalogId] = await Promise.all([
+    response.json() as Promise<{
+      levels?: EditorLevel[];
+      cityGameplayConfigs?: Record<string, unknown>;
+    }>,
+    fetchGameModelPublicUrlByCatalogId(),
+  ]);
   const levels = Array.isArray(payload.levels) ? payload.levels : [];
   resetBundledMapsBeforeEditorSync(options.bundledCityMapJson);
   mergeTowerGameplayConfigsFromCityPayload(payload.cityGameplayConfigs, options.towerOverrideCtx);
@@ -325,6 +355,7 @@ export async function pullEditorLevelsFromProjectFile(options: {
     cityMap: CITY_MAP,
     cityAliases: CITY_EDITOR_ALIASES,
     cityGameplayConfigs: payload.cityGameplayConfigs,
+    gameModelPublicUrlByCatalogId,
   });
   return {
     importedCount: result.importedCount,

@@ -6,19 +6,31 @@ import {
     mergeDistinctStrings,
     buildDefaultEnemyEntries,
     buildDefaultTowerEntries,
+    buildDefaultBossEntries,
     buildDefaultCardEntries,
-    buildDefaultDefenseItemEntries
+    buildDefaultDefenseItemEntries,
+    normalizeGameAssetConfig
 } from './normalizers.js';
 import { gameplayPlacementLabel, isImageAssetPath, isModelAssetPath, modelBindShortLabel, pickPreferredGameplayTab, uniqueCatalogId } from './display-utils.js';
 import { uniqueGameplayEntryId } from './id-utils.js';
 import { projectPathFromVideoPublicUrl as publicUrlToProjectPath } from './cutscene-utils.js';
+import { addWaveRule as addSharedWaveRule, bindWaveEditorUi as bindSharedWaveEditorUi, createWaveRulesFromLegacySpawnPoints, renderWaveList as renderSharedWaveList } from './wave-editor.js';
 
 var GAMEPLAY_MODEL_SUBDIR_BY_TAB = {
     enemies: 'Enemy',
+    bosses: 'Enemy',
     towers: 'Tower',
     items: 'Props',
     characters: 'Charactor'
 };
+
+var VISIBLE_GAMEPLAY_TABS = ['enemies', 'bosses', 'towers', 'waves', 'cards', 'items', 'characters'];
+var DEFENSE_STANDARD_WAVE_COUNT = 20;
+
+function normalizeGameplayTabId(tabId) {
+    var resolved = String(tabId || 'enemies');
+    return VISIBLE_GAMEPLAY_TABS.indexOf(resolved) >= 0 ? resolved : 'enemies';
+}
 
 function gameplayTabSupportsDirectModelOverride(activeTab) {
     return !!GAMEPLAY_MODEL_SUBDIR_BY_TAB[String(activeTab || '')];
@@ -32,8 +44,314 @@ function gameplayModelActionLabel(activeTab) {
     return GAMEPLAY_RESOURCE_CONFIG[activeTab] ? GAMEPLAY_RESOURCE_CONFIG[activeTab].label : '资源';
 }
 
+var GAMEPLAY_ANIMATION_FIELDS_BY_TAB = {
+    enemies: [
+        { id: 'move', label: '移动动画' },
+        { id: 'attack', label: '攻击动画' }
+    ],
+    bosses: [
+        { id: 'move', label: '移动动画' },
+        { id: 'attack', label: '攻击动画' }
+    ],
+    towers: [
+        { id: 'idle', label: '静止动画' },
+        { id: 'attack', label: '攻击动画' }
+    ],
+    characters: [
+        { id: 'idle', label: '待机动画' },
+        { id: 'walk', label: '行走动画' },
+        { id: 'run', label: '奔跑动画' },
+        { id: 'attack', label: '普通攻击动画' },
+        { id: 'skillE', label: 'E 技能动画' },
+        { id: 'skillR', label: 'R 技能动画' }
+    ]
+};
+
+function gameplayAnimationHintText(activeTab) {
+    switch (String(activeTab || '')) {
+        case 'enemies':
+            return '敌人仅支持移动与攻击动画。';
+        case 'bosses':
+            return 'Boss 使用独立槽位管理移动与攻击动画，不再混在普通敌人里。';
+        case 'towers':
+            return '防御塔支持静止与攻击动画。';
+        case 'characters':
+            return '探索主角默认读取当前项目的玩家模型与 idle / walk / run / 普攻 / E / R 动画；你也可以在这里补充或替换。';
+        default:
+            return '';
+    }
+}
+
+function getNormalizedGameAssetConfig(env) {
+    var state = getState(env);
+    if (!state) return normalizeGameAssetConfig(null);
+    state.gameAssetConfig = normalizeGameAssetConfig(state.gameAssetConfig);
+    return state.gameAssetConfig;
+}
+
+function buildExploreCharacterEntries(env, cityContext) {
+    var gameAssetConfig = getNormalizedGameAssetConfig(env);
+    return [
+        {
+            id: 'explore-player',
+            name: '探索主角',
+            summary: '当前项目探索模式使用的玩家角色。模型与动作默认同步全局游戏资产配置。',
+            tags: mergeDistinctStrings('explore', 'player', cityContext && cityContext.cityName ? cityContext.cityName : ''),
+            rarity: 'global',
+            placement: '',
+            element: '',
+            functionTags: [],
+            effects: [],
+            cleanseEffects: [],
+            effectDurationSec: 2,
+            stats: {},
+            assetRefs: {
+                modelPath: String(gameAssetConfig.customPlayerModelUrl || '').trim(),
+                animationPaths: {
+                    idle: String(gameAssetConfig.customAnimationUrls.idle || '').trim(),
+                    walk: String(gameAssetConfig.customAnimationUrls.walk || '').trim(),
+                    run: String(gameAssetConfig.customAnimationUrls.run || '').trim(),
+                    attack: String(gameAssetConfig.customAnimationUrls.attack || '').trim(),
+                    skillE: String(gameAssetConfig.customAnimationUrls.skillE || '').trim(),
+                    skillR: String(gameAssetConfig.customAnimationUrls.skillR || '').trim()
+                }
+            },
+            cityCode: cityContext && cityContext.cityCode ? cityContext.cityCode : '',
+            cityName: cityContext && cityContext.cityName ? cityContext.cityName : '',
+            updatedAt: ''
+        }
+    ];
+}
+
+function isGlobalExplorePlayerEntry(activeTab, entry) {
+    return String(activeTab || '') === 'characters' && !!entry && String(entry.id || '') === 'explore-player';
+}
+
+function syncExploreCharacterEntriesFromGlobal(env, config) {
+    if (!config) return;
+    config.characters = buildExploreCharacterEntries(env, config);
+}
+
+function gameplayAnimationFieldsForTab(activeTab) {
+    return GAMEPLAY_ANIMATION_FIELDS_BY_TAB[String(activeTab || '')] || [];
+}
+
+function ensureGameplayAssetRefs(entry) {
+    if (!entry.assetRefs || typeof entry.assetRefs !== 'object') entry.assetRefs = {};
+    return entry.assetRefs;
+}
+
+function ensureGameplayAnimationPaths(entry, activeTab) {
+    var assetRefs = ensureGameplayAssetRefs(entry);
+    if (!assetRefs.animationPaths || typeof assetRefs.animationPaths !== 'object') assetRefs.animationPaths = {};
+    gameplayAnimationFieldsForTab(activeTab).forEach(function (field) {
+        if (typeof assetRefs.animationPaths[field.id] !== 'string') assetRefs.animationPaths[field.id] = '';
+    });
+    return assetRefs.animationPaths;
+}
+
+function getGameplayAnimationPath(entry, activeTab, animId) {
+    if (!entry || !entry.assetRefs || !entry.assetRefs.animationPaths) return '';
+    var paths = ensureGameplayAnimationPaths(entry, activeTab);
+    return String(paths[animId] || '').trim();
+}
+
+function createGameplayAssetRefsForTab(activeTab) {
+    var entry = { assetRefs: {} };
+    ensureGameplayAnimationPaths(entry, activeTab);
+    return entry.assetRefs;
+}
+
 var gameplayModelAiGenerationState = null;
 var gameplayModelAiPollTimer = 0;
+var gameplayCardImageAiState = {
+    contextKey: '',
+    open: false,
+    prompt: '',
+    lastPresetId: '',
+    generating: false,
+    statusText: '',
+    statusTone: 'idle',
+    lastResult: null
+};
+
+var GAMEPLAY_CARD_ELEMENT_HINTS = {
+    force: '强烈近未来战斗感、硬朗结构、力量型视觉焦点',
+    electric: '电流纹理、科技能量轨迹、冷色高亮特效',
+    thermal: '热能辉光、火焰或赤金能量、强烈明暗反差',
+    light: '棱镜折射、发光碎片、圣洁或高维能量质感',
+    sound: '声波纹理、震荡环、频谱与律动感视觉元素'
+};
+
+function gameplayCardImageContextKey(cityContext, entry) {
+    return [cityContext && cityContext.cityCode || '', entry && entry.id || ''].join('|');
+}
+
+function gameplayCardImageSubjectLabel(entry) {
+    return String(entry && entry.name || '卡片角色').trim() || '卡片角色';
+}
+
+function gameplayCardImageElementHint(entry) {
+    return GAMEPLAY_CARD_ELEMENT_HINTS[String(entry && entry.element || '')] || '高辨识度主体、清晰轮廓、适合卡牌封面展示';
+}
+
+function buildGameplayCardImagePromptPresets(entry, cityContext) {
+    var cityName = String(cityContext && cityContext.cityName || '未来都市').trim() || '未来都市';
+    var subject = gameplayCardImageSubjectLabel(entry);
+    var summary = String(entry && entry.summary || '').trim();
+    var rarity = String(entry && entry.rarity || 'S').trim() || 'S';
+    var elementHint = gameplayCardImageElementHint(entry);
+    var functionHint = Array.isArray(entry && entry.functionTags) && entry.functionTags.length
+        ? '体现' + entry.functionTags.join('、') + '的战斗气质'
+        : '强调技能感与角色辨识度';
+    var summaryText = summary ? '，参考设定：' + summary : '';
+    return [
+        {
+            id: 'hero-portrait',
+            title: '主角立绘版',
+            summary: '突出单主体、竖版封面感和高稀有度视觉张力。',
+            prompt: cityName + '主题，' + subject + '，竖版游戏卡图插画，单主体全身立绘，居中构图，' + elementHint + '，' + functionHint + '，' + rarity + '级高稀有度卡牌气质，适合作为游戏卡片封面，细节清晰，背景克制，无水印，无 logo，无额外文字' + summaryText
+        },
+        {
+            id: 'action-scene',
+            title: '技能爆发版',
+            summary: '强化攻击动作、技能特效和冲击力。',
+            prompt: cityName + '科幻卡牌角色插画，' + subject + '释放招式的瞬间，动态姿态，技能能量爆发，' + elementHint + '，高对比光影，纵向构图，保留主体完整，适合卡片页面封面，高清细节，无水印，无 logo，无 UI' + summaryText
+        },
+        {
+            id: 'card-cover',
+            title: '封面设计版',
+            summary: '保留更多上方标题区和下方信息区的视觉留白。',
+            prompt: cityName + '风格游戏卡牌封面，' + subject + '，主体居中偏上，四周有可用于卡牌信息排版的留白区域，' + elementHint + '，画面干净，视觉聚焦明确，适合作为卡牌资源图，纵向海报比例，无水印，无 logo，无文字' + summaryText
+        }
+    ];
+}
+
+function ensureGameplayCardImageAiState(entry, cityContext, presets) {
+    var nextKey = gameplayCardImageContextKey(cityContext, entry);
+    if (gameplayCardImageAiState.contextKey !== nextKey) {
+        gameplayCardImageAiState.contextKey = nextKey;
+        gameplayCardImageAiState.open = false;
+        gameplayCardImageAiState.prompt = presets[0] ? presets[0].prompt : '';
+        gameplayCardImageAiState.lastPresetId = presets[0] ? presets[0].id : '';
+        gameplayCardImageAiState.generating = false;
+        gameplayCardImageAiState.statusText = '可先选择一条默认提示词，再生成并替换当前卡图。';
+        gameplayCardImageAiState.statusTone = 'idle';
+        gameplayCardImageAiState.lastResult = null;
+    }
+    return gameplayCardImageAiState;
+}
+
+function setGameplayCardImageAiStatusEl(element, text, tone) {
+    if (!element) return;
+    element.textContent = text || '';
+    element.classList.remove('is-success', 'is-error', 'is-pending');
+    if (tone === 'success') element.classList.add('is-success');
+    else if (tone === 'error') element.classList.add('is-error');
+    else if (tone === 'pending') element.classList.add('is-pending');
+}
+
+function gameplayCardImageAiOpenPath(env, cityContext) {
+    if (gameplayCardImageAiState.lastResult && gameplayCardImageAiState.lastResult.projectPath) {
+        return String(gameplayCardImageAiState.lastResult.projectPath || '').trim();
+    }
+    return typeof env.getGameplayCardImageDirectoryHint === 'function'
+        ? String(env.getGameplayCardImageDirectoryHint(cityContext) || '').trim()
+        : '';
+}
+
+function renderGameplayCardImageAiUi(refs, env, cityContext, entry, activeTab) {
+    if (!refs.gameplayCardPreviewActions) return;
+    var visible = !!(cityContext && activeTab === 'cards' && entry);
+    if (!visible) {
+        if (refs.gameplayCardAiFields) refs.gameplayCardAiFields.classList.add('view-hidden');
+        return;
+    }
+    var presets = buildGameplayCardImagePromptPresets(entry, cityContext);
+    var state = ensureGameplayCardImageAiState(entry, cityContext, presets);
+    var openPath = gameplayCardImageAiOpenPath(env, cityContext);
+    if (refs.btnToggleGameplayCardAi) {
+        refs.btnToggleGameplayCardAi.textContent = state.open ? '收起 AI 生图' : 'AI生成卡图';
+    }
+    if (refs.gameplayCardAiFields) {
+        refs.gameplayCardAiFields.classList.toggle('view-hidden', !state.open);
+    }
+    if (refs.gameplayCardAiPromptPresets) {
+        refs.gameplayCardAiPromptPresets.innerHTML = presets.map(function (preset) {
+            var active = state.lastPresetId === preset.id ? ' is-active' : '';
+            return [
+                '<button type="button" class="theme-board-ai-preset' + active + '" data-gameplay-card-ai-preset="' + escapeAttr(preset.id) + '">',
+                '  <strong>' + escapeHtml(preset.title) + '</strong>',
+                '  <span>' + escapeHtml(preset.summary) + '</span>',
+                '</button>'
+            ].join('');
+        }).join('');
+    }
+    if (refs.gameplayCardAiPrompt) {
+        refs.gameplayCardAiPrompt.value = state.prompt || '';
+        refs.gameplayCardAiPrompt.disabled = state.generating;
+    }
+    if (refs.btnGenerateGameplayCardAi) {
+        refs.btnGenerateGameplayCardAi.disabled = !state.open || state.generating || !String(state.prompt || '').trim();
+        refs.btnGenerateGameplayCardAi.textContent = state.generating ? '正在生成卡图…' : '生成并替换当前卡图';
+    }
+    if (refs.btnOpenGameplayCardAiLocation) {
+        refs.btnOpenGameplayCardAiLocation.disabled = !state.open || !openPath;
+        refs.btnOpenGameplayCardAiLocation.title = openPath
+            ? '在文件管理器中打开：' + openPath
+            : '当前卡图还没有可打开的保存位置';
+    }
+    setGameplayCardImageAiStatusEl(refs.gameplayCardAiStatus, state.statusText || '', state.statusTone || 'idle');
+}
+
+async function generateGameplayCardImage(refs, env) {
+    var activeTab = getActiveGameplayTab(env);
+    var cityContext = getGameplayCityContext(env);
+    var entry = getSelectedGameplayEntry(env);
+    if (activeTab !== 'cards' || !cityContext || !entry) {
+        env.setStatus('请先选择一张卡片', 'error');
+        return;
+    }
+    var state = gameplayCardImageAiState;
+    var prompt = String(state.prompt || '').trim();
+    if (!prompt) {
+        state.statusText = '请先输入或选择一段卡图提示词。';
+        state.statusTone = 'error';
+        renderGameplayEditor(refs, env);
+        return;
+    }
+    state.generating = true;
+    state.open = true;
+    state.statusText = '正在调用火山引擎生成卡图并写入当前城市 Cards 资源目录…';
+    state.statusTone = 'pending';
+    renderGameplayEditor(refs, env);
+    try {
+        var payload = await env.generateGameplayCardImageForEntry(prompt, cityContext, entry);
+        var assetRefs = ensureGameplayAssetRefs(entry);
+        assetRefs.imagePath = String(payload.publicUrl || '');
+        if (payload.id) assetRefs.imageId = String(payload.id || '');
+        entry.updatedAt = new Date().toISOString();
+        state.generating = false;
+        state.lastResult = {
+            projectPath: String(payload.projectPath || ''),
+            publicUrl: String(payload.publicUrl || ''),
+            fileName: String(payload.fileName || ''),
+            prompt: prompt
+        };
+        state.statusText = '已生成并替换当前卡图。';
+        state.statusTone = 'success';
+        setSelectedGameplayAssetId(env, String(payload.id || ''));
+        env.markDirty('已 AI 生成卡片图片');
+        env.setStatus('卡图已生成并写入 ' + String(payload.projectPath || 'public/Arts/Cards'), 'success');
+        renderGameplayEditor(refs, env);
+    } catch (error) {
+        state.generating = false;
+        state.statusText = '卡图生成失败：' + ((error && error.message) || '未知错误');
+        state.statusTone = 'error';
+        env.setStatus(state.statusText, 'error');
+        renderGameplayEditor(refs, env);
+    }
+}
 
 function clearGameplayModelAiPollTimer() {
     if (gameplayModelAiPollTimer) {
@@ -171,9 +489,15 @@ async function importGameplayModelAiTask(refs, env, taskState) {
         if (!targetEntry) {
             throw new Error('原始玩法条目已不存在，模型已导入但未自动绑定');
         }
-        if (!targetEntry.assetRefs || typeof targetEntry.assetRefs !== 'object') targetEntry.assetRefs = {};
-        targetEntry.assetRefs.modelPath = String(payload.publicUrl || '');
-        delete targetEntry.assetRefs.modelId;
+        if (isGlobalExplorePlayerEntry(taskState.activeTab, targetEntry)) {
+            var playerCfg = getNormalizedGameAssetConfig(env);
+            playerCfg.customPlayerModelUrl = String(payload.publicUrl || '');
+            syncExploreCharacterEntriesFromGlobal(env, ensureCityGameplayConfig(env, getGameplayCityContext(env)));
+        } else {
+            if (!targetEntry.assetRefs || typeof targetEntry.assetRefs !== 'object') targetEntry.assetRefs = {};
+            targetEntry.assetRefs.modelPath = String(payload.publicUrl || '');
+            delete targetEntry.assetRefs.modelId;
+        }
         targetEntry.updatedAt = new Date().toISOString();
         gameplayModelAiGenerationState = Object.assign({}, taskState, {
             status: 'IMPORTED',
@@ -310,6 +634,14 @@ function publicSitePathForReveal(raw) {
 /** 防御塔模型：优先定位已绑定文件，否则打开 Tower 目录 */
 function gameplayTowerModelRevealProjectPath(env, cityContext, entry, activeTab) {
     if (!gameplayTabSupportsDirectModelOverride(activeTab) || !cityContext || !entry) return '';
+    if (isGlobalExplorePlayerEntry(activeTab, entry)) {
+        var playerCfg = getNormalizedGameAssetConfig(env);
+        var playerRaw = String(playerCfg.customPlayerModelUrl || '').trim();
+        var playerSitePath = publicSitePathForReveal(playerRaw);
+        if (playerSitePath && /^public\//i.test(playerSitePath)) return playerSitePath;
+        var playerProjectPath = playerSitePath ? publicUrlToProjectPath(playerSitePath) : '';
+        return playerProjectPath || 'public/GameModels/Charactor';
+    }
     var eff = resolveEffectiveGameplayEntryBindPaths(env, cityContext, entry, activeTab);
     var raw = eff && eff.modelPath ? String(eff.modelPath).trim() : '';
     var sitePath = publicSitePathForReveal(raw);
@@ -403,6 +735,17 @@ function applyPickedGameplayTowerModel(refs, env, url, modelId) {
     var entry = getSelectedGameplayEntry(env);
     var activeTab = getActiveGameplayTab(env);
     if (!entry || !gameplayTabSupportsDirectModelOverride(activeTab)) return;
+    if (isGlobalExplorePlayerEntry(activeTab, entry)) {
+        var playerCfg = getNormalizedGameAssetConfig(env);
+        playerCfg.customPlayerModelUrl = u;
+        syncExploreCharacterEntriesFromGlobal(env, ensureCityGameplayConfig(env, getGameplayCityContext(env)));
+        setSelectedGameplayAssetId(env, '');
+        env.markDirty('已为探索主角绑定项目模型');
+        env.setStatus('已选择探索角色模型：' + modelBindShortLabel(u), 'success');
+        closeGameplayTowerModelPickModal(refs);
+        renderGameplayEditor(refs, env);
+        return;
+    }
     if (!entry.assetRefs || typeof entry.assetRefs !== 'object') entry.assetRefs = {};
     entry.assetRefs.modelPath = u;
     var mid = String(modelId || '').trim();
@@ -425,11 +768,11 @@ function getGameplayCityContext(env) {
 }
 
 function getActiveGameplayTab(env) {
-    return env.getActiveGameplayTab() || 'enemies';
+    return normalizeGameplayTabId(env.getActiveGameplayTab());
 }
 
 function setActiveGameplayTab(env, tabId) {
-    env.setActiveGameplayTab(tabId || 'enemies');
+    env.setActiveGameplayTab(normalizeGameplayTabId(tabId));
 }
 
 function getSelectedGameplayEntryId(env) {
@@ -451,11 +794,17 @@ function setSelectedGameplayAssetId(env, assetId) {
 function updateGameplayTabUi(refs, env) {
     if (!refs.gameplayResourceTabs) return;
     refs.gameplayResourceTabs.querySelectorAll('[data-gameplay-tab]').forEach(function (item) {
-        item.classList.toggle('active', item.getAttribute('data-gameplay-tab') === getActiveGameplayTab(env));
+        var tabId = item.getAttribute('data-gameplay-tab') || '';
+        var visible = VISIBLE_GAMEPLAY_TABS.indexOf(tabId) >= 0;
+        item.classList.toggle('view-hidden', !visible);
+        item.disabled = !visible;
+        item.setAttribute('aria-hidden', visible ? 'false' : 'true');
+        item.classList.toggle('active', visible && tabId === getActiveGameplayTab(env));
     });
 }
 
 function getGameplayCollection(env) {
+    if (getActiveGameplayTab(env) === 'waves') return [];
     var cityContext = getGameplayCityContext(env);
     if (!cityContext) return null;
     return ensureCityGameplayConfig(env, cityContext)[getActiveGameplayTab(env)];
@@ -475,6 +824,7 @@ function getSelectedGameplayEntry(env, entries) {
 }
 
 function getFilteredGameplayEntries(refs, env) {
+    if (getActiveGameplayTab(env) === 'waves') return [];
     var cityContext = getGameplayCityContext(env);
     var collection = cityContext ? ensureCityGameplayConfig(env, cityContext)[getActiveGameplayTab(env)] : [];
     var keyword = refs.gameplaySearch ? String(refs.gameplaySearch.value || '').trim().toLowerCase() : '';
@@ -483,6 +833,259 @@ function getFilteredGameplayEntries(refs, env) {
         var haystack = [entry.name, entry.id, entry.summary].concat(entry.tags || []).join(' ').toLowerCase();
         return haystack.indexOf(keyword) !== -1;
     });
+}
+
+function getAllProjectLevels(env) {
+    var state = getState(env);
+    return Array.isArray(state && state.levels) ? state.levels : [];
+}
+
+function getLevelDisplayName(level) {
+    if (!level) return '未命名关卡';
+    return String(level.cityName || level.name || level.id || '未命名关卡');
+}
+
+function getEffectiveWaveRules(level) {
+    var explicitRules = Array.isArray(level && level.waveRules) ? level.waveRules : [];
+    return explicitRules.length ? explicitRules : createWaveRulesFromLegacySpawnPoints(level);
+}
+
+function getWaveTabCurrentLevel(env) {
+    var selected = typeof env.getLevel === 'function' ? env.getLevel() : null;
+    if (selected) return selected;
+    return getAllProjectLevels(env)[0] || null;
+}
+
+function setGameplayWaveWorkbenchMode(refs, active) {
+    if (refs.gameplayWorkbench) refs.gameplayWorkbench.classList.toggle('gameplay-workbench--waves', !!active);
+}
+
+function buildWaveLevelSelectOptions(env, currentLevel) {
+    return getAllProjectLevels(env).map(function (level) {
+        var levelId = String(level && level.id || '');
+        return '<option value="' + escapeAttr(levelId) + '"' + (currentLevel && currentLevel.id === levelId ? ' selected' : '') + '>' + escapeHtml(getLevelDisplayName(level)) + '</option>';
+    }).join('');
+}
+
+function getNextMissingStandardWave(level) {
+    var used = {};
+    getEffectiveWaveRules(level).forEach(function (rule) {
+        var waveNumber = Math.max(1, Math.round(Number(rule.waveNumber) || 1));
+        if (waveNumber <= DEFENSE_STANDARD_WAVE_COUNT) used[waveNumber] = true;
+    });
+    for (var wave = 1; wave <= DEFENSE_STANDARD_WAVE_COUNT; wave += 1) {
+        if (!used[wave]) return wave;
+    }
+    return DEFENSE_STANDARD_WAVE_COUNT;
+}
+
+function getNextEndlessWave(level) {
+    return Math.max(DEFENSE_STANDARD_WAVE_COUNT + 1, getEffectiveWaveRules(level).reduce(function (maxWave, rule) {
+        return Math.max(maxWave, Math.round(Number(rule.waveNumber) || 0) + 1);
+    }, DEFENSE_STANDARD_WAVE_COUNT + 1));
+}
+
+function setGameplayStandardFormVisible(refs, visible) {
+    if (!refs.gameplayEditorForm) return;
+    Array.from(refs.gameplayEditorForm.children || []).forEach(function (child) {
+        if (refs.gameplayWaveManagerPanel && child === refs.gameplayWaveManagerPanel) {
+            child.classList.toggle('view-hidden', visible);
+            return;
+        }
+        child.classList.toggle('view-hidden', !visible);
+    });
+}
+
+function renderGameplayWaveOverviewStats(refs, env) {
+    if (!refs.gameplayOverviewStats) return;
+    var levels = getAllProjectLevels(env);
+    var legacyLevels = 0;
+    var totalWaveCount = 0;
+    var totalRuleCount = 0;
+    var totalSpawnCount = 0;
+    levels.forEach(function (level) {
+        var effectiveRules = getEffectiveWaveRules(level);
+        var waveNumbers = {};
+        effectiveRules.forEach(function (rule) {
+            waveNumbers[Math.max(1, Math.round(Number(rule.waveNumber) || 1))] = true;
+        });
+        totalWaveCount += Object.keys(waveNumbers).length;
+        totalRuleCount += effectiveRules.length;
+        totalSpawnCount += level && level.map && Array.isArray(level.map.spawnPoints) ? level.map.spawnPoints.length : 0;
+        if ((!Array.isArray(level && level.waveRules) || !level.waveRules.length) && createWaveRulesFromLegacySpawnPoints(level).length) {
+            legacyLevels += 1;
+        }
+    });
+    refs.gameplayOverviewStats.innerHTML = [
+        { label: '关卡', value: levels.length },
+        { label: '总波次', value: totalWaveCount },
+        { label: '刷怪规则', value: totalRuleCount },
+        { label: '出生点', value: totalSpawnCount },
+        { label: '待迁移旧配置', value: legacyLevels }
+    ].map(function (card) {
+        return '<div class="stat-card"><strong>' + escapeHtml(String(card.value)) + '</strong><span>' + escapeHtml(card.label) + '</span></div>';
+    }).join('');
+}
+
+function renderGameplayWaveLevelList(refs, env) {
+    if (!refs.gameplayEntryList) return;
+    var keyword = refs.gameplaySearch ? String(refs.gameplaySearch.value || '').trim().toLowerCase() : '';
+    var currentLevel = getWaveTabCurrentLevel(env);
+    var levels = getAllProjectLevels(env).filter(function (level) {
+        if (!keyword) return true;
+        var haystack = [level && level.name, level && level.id, level && level.cityName, level && level.cityCode].join(' ').toLowerCase();
+        return haystack.indexOf(keyword) >= 0;
+    });
+    if (!levels.length) {
+        refs.gameplayEntryList.innerHTML = '<div class="empty-state">当前没有可编辑的关卡波次。</div>';
+        return;
+    }
+    refs.gameplayEntryList.innerHTML = levels.map(function (level) {
+        var effectiveRules = getEffectiveWaveRules(level);
+        var waveNumbers = {};
+        var spawnPoints = level && level.map && Array.isArray(level.map.spawnPoints) ? level.map.spawnPoints : [];
+        effectiveRules.forEach(function (rule) {
+            waveNumbers[Math.max(1, Math.round(Number(rule.waveNumber) || 1))] = true;
+        });
+        var hasLegacyOnly = (!Array.isArray(level.waveRules) || !level.waveRules.length) && effectiveRules.length > 0;
+        return [
+            '<div class="list-item gameplay-entry-card gameplay-wave-level-card' + (currentLevel && level.id === currentLevel.id ? ' active' : '') + '">',
+            '  <div class="gameplay-entry-main">',
+            '    <div class="gameplay-entry-title-row">',
+            '      <button type="button" class="gameplay-entry-select" data-gameplay-wave-level-id="' + escapeAttr(String(level.id || '')) + '">' + escapeHtml(getLevelDisplayName(level)) + '</button>',
+            '    </div>',
+            '    <span class="gameplay-entry-summary">' + escapeHtml(level && level.cityCode ? ('城市代码：' + level.cityCode) : '普通关卡') + '</span>',
+            '    <div class="gameplay-entry-meta">',
+            '      <span class="gameplay-chip">' + escapeHtml(String(Object.keys(waveNumbers).length)) + ' 波</span>',
+            '      <span class="gameplay-chip">' + escapeHtml(String(effectiveRules.length)) + ' 条刷怪</span>',
+            '      <span class="gameplay-chip">' + escapeHtml(String(spawnPoints.length)) + ' 个出生点</span>',
+            hasLegacyOnly ? '      <span class="gameplay-chip">待迁移旧配置</span>' : '',
+            '    </div>',
+            '  </div>',
+            '</div>'
+        ].join('');
+    }).join('');
+}
+
+function renderGameplayWaveInspector(refs, env, level) {
+    if (refs.gameplayInspectorMeta) {
+        refs.gameplayInspectorMeta.textContent = level
+            ? '项目级波次管理。左侧展示全部关卡，右侧编辑当前关卡的每一波与出生点刷怪组合。'
+            : '请选择一个关卡后再编辑波次。';
+    }
+    if (refs.gameplaySelectionMeta) {
+        var effectiveRules = level ? getEffectiveWaveRules(level) : [];
+        var waveNumbers = {};
+        effectiveRules.forEach(function (rule) {
+            waveNumbers[Math.max(1, Math.round(Number(rule.waveNumber) || 1))] = true;
+        });
+        refs.gameplaySelectionMeta.innerHTML = level
+            ? [
+                '<div class="list-item"><strong>当前关卡</strong><span>' + escapeHtml(getLevelDisplayName(level)) + '</span></div>',
+                '<div class="list-item"><strong>关卡 ID</strong><span>' + escapeHtml(String(level.id || '')) + '</span></div>',
+                '<div class="list-item"><strong>出生点</strong><span>' + escapeHtml(String(level.map && Array.isArray(level.map.spawnPoints) ? level.map.spawnPoints.length : 0)) + '</span></div>',
+                '<div class="list-item"><strong>波次数</strong><span>' + escapeHtml(String(Object.keys(waveNumbers).length)) + '</span></div>',
+                '<div class="list-item"><strong>刷怪规则</strong><span>' + escapeHtml(String(effectiveRules.length)) + '</span></div>'
+            ].join('')
+            : '<div class="empty-state">没有可编辑的关卡。</div>';
+    }
+    if (refs.gameplayTowerPreviewActions) refs.gameplayTowerPreviewActions.classList.add('view-hidden');
+    if (refs.gameplayCardPreviewActions) refs.gameplayCardPreviewActions.classList.add('view-hidden');
+    if (refs.gameplayAssetPreviewImage) {
+        refs.gameplayAssetPreviewImage.classList.add('view-hidden');
+        refs.gameplayAssetPreviewImage.src = '';
+    }
+    if (refs.gameplayAssetPreviewHost) refs.gameplayAssetPreviewHost.classList.add('view-hidden');
+    if (refs.gameplayAssetPreviewEmpty) {
+        refs.gameplayAssetPreviewEmpty.classList.remove('view-hidden');
+        refs.gameplayAssetPreviewEmpty.textContent = level
+            ? '波次不直接绑定单个预览资源。请在右侧为刷怪规则选择敌人、出生点，并按需覆盖模型。'
+            : '请选择一个关卡后开始配置波次。';
+    }
+    if (typeof env.disposeGameplayAssetPreview === 'function') env.disposeGameplayAssetPreview();
+    if (refs.gameplayAssetList) refs.gameplayAssetList.innerHTML = '';
+}
+
+function renderGameplayWaveManager(refs, env, level) {
+    if (!refs.gameplayWaveManagerPanel) return;
+    setGameplayStandardFormVisible(refs, false);
+    if (refs.gameplayEditorTitle) refs.gameplayEditorTitle.textContent = level ? (getLevelDisplayName(level) + ' · 波次配置') : '波次配置';
+    if (refs.gameplayEditorHint) refs.gameplayEditorHint.textContent = level
+        ? '每条规则代表“第几波 + 哪个出生点 + 刷什么敌人 + 数量/间隔”。出生点只负责入口与路径。'
+        : '请选择一个关卡后再编辑波次。';
+    if (refs.btnCreateGameplayEntry) refs.btnCreateGameplayEntry.disabled = true;
+    if (refs.btnDuplicateGameplayEntry) refs.btnDuplicateGameplayEntry.disabled = true;
+    if (refs.btnDeleteGameplayEntry) refs.btnDeleteGameplayEntry.disabled = true;
+    if (refs.btnMoveGameplayUp) refs.btnMoveGameplayUp.disabled = true;
+    if (refs.btnMoveGameplayDown) refs.btnMoveGameplayDown.disabled = true;
+    if (!level) {
+        refs.gameplayWaveManagerPanel.innerHTML = '<div class="empty-state">当前没有可编辑的关卡波次。</div>';
+        return;
+    }
+    var nextStandardWave = getNextMissingStandardWave(level);
+    var nextEndlessWave = getNextEndlessWave(level);
+    refs.gameplayWaveManagerPanel.innerHTML = [
+        '<div class="gameplay-wave-toolbar">',
+        '  <label class="field-block gameplay-wave-level-select">',
+        '    <span>当前关卡</span>',
+        '    <select data-wave-level-select>' + buildWaveLevelSelectOptions(env, level) + '</select>',
+        '  </label>',
+        '  <div class="inline-controls">',
+        '    <button type="button" class="mini-button" data-wave-add-standard>补第 ' + escapeHtml(String(nextStandardWave)) + ' 波</button>',
+        '    <button type="button" class="mini-button" data-wave-add-endless>新增无尽第 ' + escapeHtml(String(nextEndlessWave)) + ' 波</button>',
+        '  </div>',
+        '</div>',
+        '<div class="gameplay-wave-project-summary">',
+        '  <div>',
+        '    <strong>' + escapeHtml(getLevelDisplayName(level)) + ' · 波次配置</strong>',
+        '    <p>这里只保留每一波、每个敌人出口、出什么怪、出几只怪。标准模式固定 1-20 波；第 20 波后可选择进入无尽模式，无尽波从第 21 波开始。</p>',
+        '    <p>未手写规则的波次会回退到运行时默认刷怪逻辑；如果你要精确控制，就直接给对应波次加规则。</p>',
+        '  </div>',
+        '</div>',
+        '<div class="gameplay-wave-list" data-wave-manager-list></div>'
+    ].join('');
+    var waveRefs = {
+        btnAddWave: null,
+        waveList: refs.gameplayWaveManagerPanel.querySelector('[data-wave-manager-list]')
+    };
+    var waveEnv = {
+        getLevel: function () { return level; },
+        getAvailableEnemyTypes: function () { return getAvailableEnemyTypes(env, level); },
+        markDirty: function (message) { env.markDirty(message); },
+        setStatus: function (message, tone) { env.setStatus(message, tone); },
+        uploadFileToProjectUrl: function (file, options) { return env.uploadFileToProjectUrl(file, options); },
+        renderOverview: function () { renderGameplayEditor(refs, env); },
+        renderWaveManager: function () { renderGameplayEditor(refs, env); }
+    };
+    renderSharedWaveList(waveRefs, waveEnv);
+    bindSharedWaveEditorUi(waveRefs, waveEnv);
+    var levelSelect = refs.gameplayWaveManagerPanel.querySelector('[data-wave-level-select]');
+    if (levelSelect) {
+        levelSelect.addEventListener('change', function () {
+            if (typeof env.selectLevel === 'function') env.selectLevel(levelSelect.value || '');
+            renderGameplayEditor(refs, env);
+        });
+    }
+    var addStandardButton = refs.gameplayWaveManagerPanel.querySelector('[data-wave-add-standard]');
+    if (addStandardButton) {
+        addStandardButton.addEventListener('click', function () {
+            addSharedWaveRule(waveRefs, waveEnv, { waveNumber: getNextMissingStandardWave(level) });
+        });
+    }
+    var addEndlessButton = refs.gameplayWaveManagerPanel.querySelector('[data-wave-add-endless]');
+    if (addEndlessButton) {
+        addEndlessButton.addEventListener('click', function () {
+            addSharedWaveRule(waveRefs, waveEnv, { waveNumber: getNextEndlessWave(level) });
+        });
+    }
+}
+
+function renderGameplayWavesTab(refs, env) {
+    var level = getWaveTabCurrentLevel(env);
+    setGameplayWaveWorkbenchMode(refs, true);
+    renderGameplayWaveOverviewStats(refs, env);
+    renderGameplayWaveManager(refs, env, level);
+    renderGameplayWaveInspector(refs, env, level);
 }
 
 function ensureUniqueGameplayEntryId(env, list, value, currentId) {
@@ -528,7 +1131,7 @@ function resolveEffectiveGameplayEntryBindPaths(env, cityContext, entry, activeT
     var modelPath = ar.modelPath ? String(ar.modelPath) : '';
     var modelSourceLabel = '';
     if (modelPath) {
-        modelSourceLabel = '本城玩法条目';
+        modelSourceLabel = activeTab === 'characters' ? '全局探索角色' : '本城玩法条目';
     } else if (activeTab === 'towers' && entry.id) {
         var state = getState(env);
         var gMap = state && state.gameAssetConfig && state.gameAssetConfig.customModelUrls;
@@ -571,7 +1174,7 @@ function getTaxonomyQueryRoot(refs) {
 }
 
 function renderGameplayElementField(activeTab, entry, disabled) {
-    var supportsElement = activeTab === 'enemies' || activeTab === 'towers' || activeTab === 'characters' || activeTab === 'skills';
+    var supportsElement = activeTab === 'enemies' || activeTab === 'bosses' || activeTab === 'towers';
     if (!supportsElement) return '';
     return [
         '<label class="field-block">',
@@ -587,8 +1190,8 @@ function renderGameplayElementField(activeTab, entry, disabled) {
 }
 
 function renderGameplayTaxonomyPanel(activeTab, entry, disabled) {
-    var supportsFunctions = activeTab === 'towers' || activeTab === 'characters' || activeTab === 'skills';
-    var supportsEffects = activeTab === 'enemies' || activeTab === 'towers' || activeTab === 'characters' || activeTab === 'skills';
+    var supportsFunctions = activeTab === 'towers';
+    var supportsEffects = activeTab === 'enemies' || activeTab === 'bosses' || activeTab === 'towers';
     var supportsCleanse = activeTab === 'items';
     if (!supportsFunctions && !supportsEffects && !supportsCleanse) return '';
     var parts = [];
@@ -627,6 +1230,34 @@ function renderGameplayTaxonomyPanel(activeTab, entry, disabled) {
         );
     }
     return parts.join('');
+}
+
+function renderGameplayAnimationPanel(activeTab, entry, disabled) {
+    var fields = gameplayAnimationFieldsForTab(activeTab);
+    if (!fields.length) return '';
+    return [
+        '<section class="gameplay-taxonomy-row">',
+        '  <div class="gameplay-taxonomy-label">动画配置</div>',
+        '  <p class="gameplay-taxonomy-hint">' + escapeHtml(gameplayAnimationHintText(activeTab)) + '</p>',
+        '  <div class="form-grid two">',
+        fields.map(function (field) {
+            var path = getGameplayAnimationPath(entry, activeTab, field.id);
+            return [
+                '    <div class="field-block">',
+                '      <span>' + escapeHtml(field.label) + '</span>',
+                '      <div class="inline-controls">',
+                '        <label class="mini-button upload-button">上传 / 替换',
+                '          <input type="file" data-gameplay-animation-upload="' + escapeAttr(field.id) + '" accept=".glb,.gltf,model/gltf-binary,model/gltf+json"' + (disabled ? ' disabled' : '') + '>',
+                '        </label>',
+                '        <button type="button" class="mini-button" data-gameplay-animation-clear="' + escapeAttr(field.id) + '"' + (disabled || !path ? ' disabled' : '') + '>清除</button>',
+                '      </div>',
+                '      <div class="asset-url-hint" title="' + escapeAttr(path || '未绑定动画文件') + '">' + escapeHtml(path ? modelBindShortLabel(path) : '未配置') + '</div>',
+                '    </div>'
+            ].join('');
+        }).join(''),
+        '  </div>',
+        '</section>'
+    ].join('');
 }
 
 function optionLabels(options, ids) {
@@ -736,6 +1367,7 @@ function renderGameplayEntryList(refs, env, entries, cityContext) {
     if (!getSelectedGameplayEntryId(env) || !entries.some(function (entry) { return entry.id === getSelectedGameplayEntryId(env); })) {
         setSelectedGameplayEntryId(env, entries[0].id);
     }
+    var allowEntryMutation = getActiveGameplayTab(env) !== 'characters';
     refs.gameplayEntryList.innerHTML = entries.map(function (entry) {
         var thumb = resolveGameplayEntryThumbnail(entry);
         var element = DEFENSE_ELEMENT_OPTIONS.find(function (option) { return option.id === entry.element; });
@@ -753,15 +1385,15 @@ function renderGameplayEntryList(refs, env, entries, cityContext) {
             '  <div class="gameplay-entry-main">',
             '    <div class="gameplay-entry-title-row">',
             '      <button type="button" class="gameplay-entry-select" data-gameplay-select-id="' + escapeAttr(entry.id) + '">' + escapeHtml(entry.name) + '</button>',
-            '      <div class="gameplay-entry-menu-anchor">',
-            '        <button type="button" class="mini-button gameplay-entry-ops-btn" data-gameplay-menu-toggle aria-expanded="false">操作</button>',
-            '        <div class="gameplay-entry-menu view-hidden" role="menu">',
-            '          <button type="button" role="menuitem" class="gameplay-entry-menu-item" data-gameplay-action="move-up" data-gameplay-entry-id="' + escapeAttr(entry.id) + '">上移</button>',
-            '          <button type="button" role="menuitem" class="gameplay-entry-menu-item" data-gameplay-action="move-down" data-gameplay-entry-id="' + escapeAttr(entry.id) + '">下移</button>',
-            '          <button type="button" role="menuitem" class="gameplay-entry-menu-item" data-gameplay-action="duplicate" data-gameplay-entry-id="' + escapeAttr(entry.id) + '">复制</button>',
-            '          <button type="button" role="menuitem" class="gameplay-entry-menu-item danger" data-gameplay-action="delete" data-gameplay-entry-id="' + escapeAttr(entry.id) + '">删除</button>',
-            '        </div>',
-            '      </div>',
+            allowEntryMutation ? '      <div class="gameplay-entry-menu-anchor">' : '',
+            allowEntryMutation ? '        <button type="button" class="mini-button gameplay-entry-ops-btn" data-gameplay-menu-toggle aria-expanded="false">操作</button>' : '',
+            allowEntryMutation ? '        <div class="gameplay-entry-menu view-hidden" role="menu">' : '',
+            allowEntryMutation ? '          <button type="button" role="menuitem" class="gameplay-entry-menu-item" data-gameplay-action="move-up" data-gameplay-entry-id="' + escapeAttr(entry.id) + '">上移</button>' : '',
+            allowEntryMutation ? '          <button type="button" role="menuitem" class="gameplay-entry-menu-item" data-gameplay-action="move-down" data-gameplay-entry-id="' + escapeAttr(entry.id) + '">下移</button>' : '',
+            allowEntryMutation ? '          <button type="button" role="menuitem" class="gameplay-entry-menu-item" data-gameplay-action="duplicate" data-gameplay-entry-id="' + escapeAttr(entry.id) + '">复制</button>' : '',
+            allowEntryMutation ? '          <button type="button" role="menuitem" class="gameplay-entry-menu-item danger" data-gameplay-action="delete" data-gameplay-entry-id="' + escapeAttr(entry.id) + '">删除</button>' : '',
+            allowEntryMutation ? '        </div>' : '',
+            allowEntryMutation ? '      </div>' : '',
             '    </div>',
             '    <span class="gameplay-entry-summary">' + escapeHtml(entry.summary || '未填写简介') + '</span>',
             '    <div class="gameplay-entry-meta">',
@@ -779,6 +1411,8 @@ function renderGameplayEntryList(refs, env, entries, cityContext) {
 function renderGameplayForm(refs, env, entries, cityContext) {
     var entry = getSelectedGameplayEntry(env, entries);
     var disabled = !entry;
+    var activeTab = getActiveGameplayTab(env);
+    var isLockedCharacterTab = activeTab === 'characters';
     if (refs.gameplayEditorTitle) refs.gameplayEditorTitle.textContent = entry ? entry.name : (GAMEPLAY_RESOURCE_CONFIG[getActiveGameplayTab(env)].label + '详情');
     if (refs.gameplayEditorHint) refs.gameplayEditorHint.textContent = cityContext ? cityContext.cityName + ' · ' + GAMEPLAY_RESOURCE_CONFIG[getActiveGameplayTab(env)].label : '城市玩法配置';
     if (refs.gameplayName) refs.gameplayName.value = entry ? entry.name : '';
@@ -787,21 +1421,28 @@ function renderGameplayForm(refs, env, entries, cityContext) {
     if (refs.gameplayRarity) refs.gameplayRarity.value = entry ? entry.rarity : '';
     if (refs.gameplaySummary) refs.gameplaySummary.value = entry ? entry.summary : '';
     [refs.gameplayName, refs.gameplayId, refs.gameplayTags, refs.gameplayRarity, refs.gameplaySummary].forEach(function (field) {
-        if (field) field.disabled = disabled;
+        if (field) field.disabled = disabled || isLockedCharacterTab;
     });
     setGameplayEntryActionButtons(refs, disabled, entries, entry);
+    if (refs.btnCreateGameplayEntry) refs.btnCreateGameplayEntry.disabled = !cityContext || isLockedCharacterTab;
+    if (isLockedCharacterTab) {
+        if (refs.btnDuplicateGameplayEntry) refs.btnDuplicateGameplayEntry.disabled = true;
+        if (refs.btnDeleteGameplayEntry) refs.btnDeleteGameplayEntry.disabled = true;
+        if (refs.btnMoveGameplayUp) refs.btnMoveGameplayUp.disabled = true;
+        if (refs.btnMoveGameplayDown) refs.btnMoveGameplayDown.disabled = true;
+    }
     if (refs.gameplayStatGrid) {
-        var activeTab = getActiveGameplayTab(env);
         var statsHtml = GAMEPLAY_RESOURCE_CONFIG[activeTab].stats.map(function (field) {
             var value = entry && entry.stats ? entry.stats[field.key] : '';
+            var extraAttrs = field.key === 'refundRatio' ? ' min="0" max="1"' : '';
             return [
                 '<label class="field-block">',
                 '  <span>' + escapeHtml(field.label) + '</span>',
-                '  <input type="number" data-gameplay-stat="' + escapeAttr(field.key) + '" step="' + escapeAttr(field.step) + '" value="' + escapeAttr(value === '' || value == null ? '' : String(value)) + '"' + (disabled ? ' disabled' : '') + '>',
+                '  <input type="number" data-gameplay-stat="' + escapeAttr(field.key) + '" step="' + escapeAttr(field.step) + '" value="' + escapeAttr(value === '' || value == null ? '' : String(value)) + '"' + extraAttrs + (disabled ? ' disabled' : '') + '>',
                 '</label>'
             ].join('');
         }).join('');
-        var placementHtml = activeTab === 'characters' || activeTab === 'towers'
+        var placementHtml = activeTab === 'towers'
             ? [
                 '<label class="field-block">',
                 '  <span>部署位置</span>',
@@ -819,6 +1460,16 @@ function renderGameplayForm(refs, env, entries, cityContext) {
         refs.gameplayTaxonomyPanel.innerHTML = taxHtml;
         refs.gameplayTaxonomyPanel.classList.toggle('view-hidden', !taxHtml);
     }
+    if (refs.gameplayAnimationPanel) {
+        var animHtml = renderGameplayAnimationPanel(activeTab, entry, disabled);
+        refs.gameplayAnimationPanel.innerHTML = animHtml;
+        refs.gameplayAnimationPanel.classList.toggle('view-hidden', !animHtml);
+    }
+    if (refs.gameplayModelScale) {
+        var currentScale = entry && entry.assetRefs && entry.assetRefs.modelScale ? Number(entry.assetRefs.modelScale) : 1;
+        refs.gameplayModelScale.value = currentScale;
+        refs.gameplayModelScale.disabled = disabled || isLockedCharacterTab;
+    }
 }
 
 function renderGameplayInspector(refs, env, cityContext, config, entries) {
@@ -834,7 +1485,7 @@ function renderGameplayInspector(refs, env, cityContext, config, entries) {
     if (refs.gameplayInspectorMeta) {
         refs.gameplayInspectorMeta.textContent = cityContext
             ? '当前城市：' + cityContext.cityName + '（' + cityContext.cityCode + '）'
-            : '先从左侧关卡树选择一个城市关卡，再在这里维护该关卡的敌人、防御塔、卡片、角色和技能。';
+            : '先从左侧关卡树选择一个城市关卡，再在这里维护该关卡的敌人、防御塔、卡片、Boss、道具与探索角色。';
     }
     if (refs.gameplaySelectionMeta) {
         var effMeta = entry ? resolveEffectiveGameplayEntryBindPaths(env, cityContext, entry, activeTab) : null;
@@ -846,7 +1497,7 @@ function renderGameplayInspector(refs, env, cityContext, config, entries) {
             ? [
                 '<div class="list-item"><strong>城市代码</strong><span>' + escapeHtml(cityContext.cityCode) + '</span></div>',
                 '<div class="gameplay-inspector-counts" role="group" aria-label="敌人、防御塔、卡片、角色、技能、道具数量">',
-                [['敌人', config.enemies.length], ['防御塔', config.towers.length], ['卡片', config.cards.length], ['角色', config.characters.length], ['技能', config.skills.length], ['道具', config.items.length]].map(function (pair) {
+                [['敌人', config.enemies.length], ['Boss', config.bosses.length], ['防御塔', config.towers.length], ['卡片', config.cards.length], ['角色', config.characters.length], ['道具', config.items.length]].map(function (pair) {
                     return '<span class="gic-chip"><strong>' + String(pair[1]) + '</strong><span>' + escapeHtml(pair[0]) + '</span></span>';
                 }).join(''),
                 '</div>',
@@ -875,6 +1526,10 @@ function renderGameplayInspector(refs, env, cityContext, config, entries) {
             !(cityContext && gameplayTabSupportsDirectModelOverride(activeTab) && entry)
         );
     }
+    if (refs.gameplayCardPreviewActions) {
+        refs.gameplayCardPreviewActions.classList.toggle('view-hidden', !(cityContext && activeTab === 'cards' && entry));
+    }
+    renderGameplayCardImageAiUi(refs, env, cityContext, entry, activeTab);
     if (refs.btnOpenGameplayTowerModelLocation) {
         var revealPath =
             cityContext && gameplayTabSupportsDirectModelOverride(activeTab) && entry
@@ -933,6 +1588,15 @@ function bindGameplayAsset(refs, env, assetId, bindKey) {
     var state = getState(env);
     var asset = ((state && state.editorAssetsCatalog) || []).find(function (item) { return item.id === assetId; });
     if (!asset) return;
+    if (isGlobalExplorePlayerEntry(getActiveGameplayTab(env), entry) && bindKey === 'modelPath') {
+        var playerCfg = getNormalizedGameAssetConfig(env);
+        playerCfg.customPlayerModelUrl = asset.publicUrl || asset.path;
+        syncExploreCharacterEntriesFromGlobal(env, ensureCityGameplayConfig(env, getGameplayCityContext(env)));
+        setSelectedGameplayAssetId(env, asset.id);
+        env.markDirty('已绑定探索角色模型');
+        renderGameplayEditor(refs, env);
+        return;
+    }
     if (!entry.assetRefs || typeof entry.assetRefs !== 'object') entry.assetRefs = {};
     entry.assetRefs[bindKey] = asset.publicUrl || asset.path;
     if (bindKey === 'modelPath') entry.assetRefs.modelId = asset.id;
@@ -943,7 +1607,8 @@ function bindGameplayAsset(refs, env, assetId, bindKey) {
     renderGameplayEditor(refs, env);
 }
 
-function handleGameplayFormInput(refs, env, target) {
+function handleGameplayFormInput(refs, env, target, options) {
+    var commit = !(options && options.commit === false);
     var entry = getSelectedGameplayEntry(env);
     var list = getGameplayCollection(env);
     if (!entry || !list || !target) return;
@@ -1027,6 +1692,19 @@ function handleGameplayFormInput(refs, env, target) {
         entry.stats[statKey] = Number.isFinite(numeric) ? numeric : 0;
         env.markDirty('已更新玩法数值');
     }
+    if (target.id === 'gameplayModelScale') {
+        if (!commit) return;
+        var scaleVal = Number(target.value);
+        if (!entry.assetRefs || typeof entry.assetRefs !== 'object') entry.assetRefs = {};
+        if (Number.isFinite(scaleVal) && scaleVal >= 0.01 && scaleVal <= 1000) {
+            entry.assetRefs.modelScale = scaleVal;
+            env.markDirty('已更新模型缩放');
+        } else {
+            delete entry.assetRefs.modelScale;
+            target.value = '1';
+            env.markDirty('已重置模型缩放为默认值');
+        }
+    }
 }
 
 async function uploadGameplayAsset(refs, env, file) {
@@ -1094,6 +1772,29 @@ async function uploadGameplayAsset(refs, env, file) {
     }
 }
 
+function triggerGameplayCardImageUpload(refs, env) {
+    var entry = getSelectedGameplayEntry(env);
+    if (!entry || getActiveGameplayTab(env) !== 'cards') {
+        env.setStatus('请先选择一张卡片', 'error');
+        return false;
+    }
+    if (refs.gameplayAssetType && refs.gameplayAssetType.querySelector('option[value="Cards"]')) {
+        refs.gameplayAssetType.value = 'Cards';
+    }
+    if (refs.gameplayAssetName) refs.gameplayAssetName.value = entry.name || '卡片';
+    return true;
+}
+
+function clearGameplayCardImage(refs, env) {
+    var entry = getSelectedGameplayEntry(env);
+    if (!entry || getActiveGameplayTab(env) !== 'cards' || !entry.assetRefs || !entry.assetRefs.imagePath) return;
+    delete entry.assetRefs.imagePath;
+    delete entry.assetRefs.imageId;
+    entry.updatedAt = new Date().toISOString();
+    env.markDirty('已清除卡片图片');
+    renderGameplayEditor(refs, env);
+}
+
 async function uploadGameplayTowerLocalModel(refs, env, file) {
     var entry = getSelectedGameplayEntry(env);
     var activeTab = getActiveGameplayTab(env);
@@ -1115,6 +1816,17 @@ async function uploadGameplayTowerLocalModel(refs, env, file) {
             if (refs.gameplayTowerModelUpload) refs.gameplayTowerModelUpload.value = '';
             return;
         }
+        if (isGlobalExplorePlayerEntry(activeTab, entry)) {
+            var playerCfg = getNormalizedGameAssetConfig(env);
+            playerCfg.customPlayerModelUrl = url;
+            syncExploreCharacterEntriesFromGlobal(env, ensureCityGameplayConfig(env, getGameplayCityContext(env)));
+            setSelectedGameplayAssetId(env, '');
+            env.markDirty('已更新探索角色模型');
+            env.setStatus('已写入探索角色模型；运行时会直接使用该文件', 'success');
+            if (refs.gameplayTowerModelUpload) refs.gameplayTowerModelUpload.value = '';
+            renderGameplayEditor(refs, env);
+            return;
+        }
         if (!entry.assetRefs || typeof entry.assetRefs !== 'object') entry.assetRefs = {};
         entry.assetRefs.modelPath = url;
         delete entry.assetRefs.modelId;
@@ -1130,10 +1842,82 @@ async function uploadGameplayTowerLocalModel(refs, env, file) {
     }
 }
 
+async function uploadGameplayAnimationAsset(refs, env, animationId, file) {
+    var entry = getSelectedGameplayEntry(env);
+    var activeTab = getActiveGameplayTab(env);
+    if (!entry) {
+        env.setStatus('请先选择一个玩法条目', 'error');
+        return;
+    }
+    if (!gameplayAnimationFieldsForTab(activeTab).some(function (field) { return field.id === animationId; })) {
+        env.setStatus('当前条目不支持该动画槽位', 'error');
+        return;
+    }
+    try {
+        env.setStatus('正在上传' + gameplayModelActionLabel(activeTab) + '动画…', 'idle');
+        var url = await env.uploadFileToProjectUrl(file, {
+            assetType: 'Animations',
+            resourceKind: 'gameplay-' + activeTab + '-' + animationId,
+            assetName: String(entry.id || activeTab) + '-' + animationId + '-animation'
+        });
+        if (!url) {
+            env.setStatus('上传未返回可用 URL', 'error');
+            return;
+        }
+        if (isGlobalExplorePlayerEntry(activeTab, entry)) {
+            var playerCfg = getNormalizedGameAssetConfig(env);
+            playerCfg.customAnimationUrls[animationId] = url;
+            syncExploreCharacterEntriesFromGlobal(env, ensureCityGameplayConfig(env, getGameplayCityContext(env)));
+            env.markDirty('已更新探索角色动画');
+            env.setStatus('已绑定探索角色动画：' + modelBindShortLabel(url), 'success');
+            renderGameplayEditor(refs, env);
+            return;
+        }
+        ensureGameplayAnimationPaths(entry, activeTab)[animationId] = url;
+        entry.updatedAt = new Date().toISOString();
+        env.markDirty('已更新' + gameplayModelActionLabel(activeTab) + '动画');
+        env.setStatus('已绑定动画：' + modelBindShortLabel(url), 'success');
+        renderGameplayEditor(refs, env);
+    } catch (error) {
+        env.setStatus('动画上传失败: ' + ((error && error.message) || '未知错误'), 'error');
+    }
+}
+
+function clearGameplayAnimationAsset(refs, env, animationId) {
+    var entry = getSelectedGameplayEntry(env);
+    var activeTab = getActiveGameplayTab(env);
+    if (!entry) return;
+    if (isGlobalExplorePlayerEntry(activeTab, entry)) {
+        var cfg = getNormalizedGameAssetConfig(env);
+        if (!cfg.customAnimationUrls[animationId]) return;
+        delete cfg.customAnimationUrls[animationId];
+        syncExploreCharacterEntriesFromGlobal(env, ensureCityGameplayConfig(env, getGameplayCityContext(env)));
+        env.markDirty('已清除探索角色动画配置');
+        renderGameplayEditor(refs, env);
+        return;
+    }
+    var paths = ensureGameplayAnimationPaths(entry, activeTab);
+    if (!paths[animationId]) return;
+    delete paths[animationId];
+    entry.updatedAt = new Date().toISOString();
+    env.markDirty('已清除动画配置');
+    renderGameplayEditor(refs, env);
+}
+
 function clearGameplayTowerLocalModel(refs, env) {
     var entry = getSelectedGameplayEntry(env);
     var activeTab = getActiveGameplayTab(env);
     if (!entry || !gameplayTabSupportsDirectModelOverride(activeTab)) return;
+    if (isGlobalExplorePlayerEntry(activeTab, entry)) {
+        var cfg = getNormalizedGameAssetConfig(env);
+        if (!cfg.customPlayerModelUrl) return;
+        cfg.customPlayerModelUrl = '';
+        syncExploreCharacterEntriesFromGlobal(env, ensureCityGameplayConfig(env, getGameplayCityContext(env)));
+        setSelectedGameplayAssetId(env, '');
+        env.markDirty('已清除探索角色模型覆盖');
+        renderGameplayEditor(refs, env);
+        return;
+    }
     if (!entry.assetRefs) return;
     if (!entry.assetRefs.modelPath && !entry.assetRefs.modelId) return;
     delete entry.assetRefs.modelPath;
@@ -1150,18 +1934,21 @@ export function ensureCityGameplayConfig(env, cityContext) {
     var resolvedKey = env.resolveCityGameplayConfigKey(cityContext);
     var created = !state.cityGameplayConfigs[resolvedKey];
     if (created) {
-        state.cityGameplayConfigs[resolvedKey] = {
+        var createdConfig = {
             cityCode: cityContext.cityCode,
             cityName: cityContext.cityName,
             aliases: mergeDistinctStrings(cityContext.cityName, cityContext.cityCode),
             enemies: buildDefaultEnemyEntries(cityContext),
+            bosses: buildDefaultBossEntries(cityContext),
             towers: buildDefaultTowerEntries(cityContext),
-            cards: buildDefaultCardEntries(cityContext),
+            cards: [],
             items: buildDefaultDefenseItemEntries(cityContext),
-            characters: [],
+            characters: buildExploreCharacterEntries(env, cityContext),
             skills: [],
             updatedAt: ''
         };
+        createdConfig.cards = buildDefaultCardEntries(createdConfig);
+        state.cityGameplayConfigs[resolvedKey] = createdConfig;
     }
     if (!Array.isArray(state.cityGameplayConfigs[resolvedKey].aliases)) {
         state.cityGameplayConfigs[resolvedKey].aliases = mergeDistinctStrings(
@@ -1184,8 +1971,14 @@ export function ensureCityGameplayConfig(env, cityContext) {
     if (!state.cityGameplayConfigs[resolvedKey].enemies.length) {
         state.cityGameplayConfigs[resolvedKey].enemies = buildDefaultEnemyEntries(state.cityGameplayConfigs[resolvedKey]);
     }
-    if (!Array.isArray(state.cityGameplayConfigs[resolvedKey].characters)) state.cityGameplayConfigs[resolvedKey].characters = [];
+    if (!Array.isArray(state.cityGameplayConfigs[resolvedKey].bosses) || !state.cityGameplayConfigs[resolvedKey].bosses.length) {
+        state.cityGameplayConfigs[resolvedKey].bosses = buildDefaultBossEntries(state.cityGameplayConfigs[resolvedKey]);
+    }
+    syncExploreCharacterEntriesFromGlobal(env, state.cityGameplayConfigs[resolvedKey]);
     if (!Array.isArray(state.cityGameplayConfigs[resolvedKey].skills)) state.cityGameplayConfigs[resolvedKey].skills = [];
+    if (!Array.isArray(state.cityGameplayConfigs[resolvedKey].cards) || !state.cityGameplayConfigs[resolvedKey].cards.length) {
+        state.cityGameplayConfigs[resolvedKey].cards = buildDefaultCardEntries(state.cityGameplayConfigs[resolvedKey]);
+    }
     return state.cityGameplayConfigs[resolvedKey];
 }
 
@@ -1199,11 +1992,13 @@ function buildGameplayEnemyTypes(env) {
     var config = cityContext ? ensureCityGameplayConfig(env, cityContext) : null;
     if (!config) return [];
     return config.enemies.map(function (entry) {
+        var scale = entry.assetRefs ? Number(entry.assetRefs.modelScale) : NaN;
         return {
             id: entry.id,
             name: entry.name,
             modelId: entry.assetRefs && entry.assetRefs.modelId ? entry.assetRefs.modelId : '',
             modelPath: entry.assetRefs && entry.assetRefs.modelPath ? entry.assetRefs.modelPath : '',
+            modelScale: Number.isFinite(scale) && scale > 0 ? scale : 1,
             hp: Number(entry.stats && entry.stats.hp) || 100,
             speed: Number(entry.stats && entry.stats.speed) || 1,
             reward: Number(entry.stats && entry.stats.reward) || 20,
@@ -1227,9 +2022,9 @@ export function buildGameplayActorTemplates(env) {
     var cityContext = getGameplayCityContext(env);
     var config = cityContext ? ensureCityGameplayConfig(env, cityContext) : null;
     if (!config) return [];
-    return ['enemies', 'characters', 'skills'].flatMap(function (kind) {
+    return ['enemies', 'bosses', 'skills'].flatMap(function (kind) {
         return config[kind].map(function (entry) {
-            var category = kind === 'enemies' ? 'enemy' : kind === 'characters' ? 'npc' : 'model';
+            var category = kind === 'skills' ? 'model' : 'enemy';
             return {
                 id: 'city-template-' + kind + '-' + entry.id,
                 name: entry.name,
@@ -1237,7 +2032,7 @@ export function buildGameplayActorTemplates(env) {
                 modelId: entry.assetRefs && entry.assetRefs.modelId ? entry.assetRefs.modelId : '',
                 modelPath: entry.assetRefs && entry.assetRefs.modelPath ? entry.assetRefs.modelPath : '',
                 templateModelScale: 1,
-                icon: kind === 'enemies' ? 'E' : kind === 'characters' ? 'C' : 'S',
+                icon: kind === 'bosses' ? 'B' : kind === 'enemies' ? 'E' : 'S',
                 source: 'cityGameplay',
                 sourceEntryId: entry.id,
                 sourceKind: kind,
@@ -1263,13 +2058,21 @@ export function findActorTemplate(env, templateId) {
 }
 
 export function createGameplayEntry(refs, env) {
+    var activeTab = getActiveGameplayTab(env);
+    if (activeTab === 'waves') {
+        env.setStatus('请在右侧波次管理器里新增波次。', 'error');
+        return;
+    }
     var cityContext = getGameplayCityContext(env);
     if (!cityContext) {
         env.setStatus('请先选择一个城市关卡。', 'error');
         return;
     }
     var config = ensureCityGameplayConfig(env, cityContext);
-    var activeTab = getActiveGameplayTab(env);
+    if (activeTab === 'characters') {
+        env.setStatus('探索角色页直接映射当前项目主角，不支持新增条目', 'error');
+        return;
+    }
     var kindLabel = GAMEPLAY_RESOURCE_CONFIG[activeTab].label;
     var id = uniqueGameplayEntryId(config[activeTab], slugify(cityContext.cityName + '-' + kindLabel) || activeTab);
     config[activeTab].push({
@@ -1278,14 +2081,14 @@ export function createGameplayEntry(refs, env) {
         summary: '',
         tags: [cityContext.cityName],
         rarity: 'common',
-        placement: activeTab === 'characters' || activeTab === 'towers' ? 'roadside' : '',
+        placement: activeTab === 'towers' ? 'roadside' : '',
         element: '',
         functionTags: [],
         effects: [],
         cleanseEffects: activeTab === 'items' ? ['electromagneticInterference'] : [],
         effectDurationSec: 2,
         stats: {},
-        assetRefs: {},
+        assetRefs: createGameplayAssetRefsForTab(activeTab),
         cityCode: cityContext.cityCode,
         cityName: cityContext.cityName,
         updatedAt: new Date().toISOString()
@@ -1298,6 +2101,7 @@ export function createGameplayEntry(refs, env) {
 export function duplicateGameplayEntry(refs, env) {
     var collection = getGameplayCollection(env);
     var entry = getSelectedGameplayEntry(env);
+    if (getActiveGameplayTab(env) === 'characters') return;
     if (!collection || !entry) return;
     var copy = JSON.parse(JSON.stringify(entry));
     copy.id = uniqueGameplayEntryId(collection, entry.id + '-copy');
@@ -1314,6 +2118,7 @@ export function duplicateGameplayEntry(refs, env) {
 export function deleteGameplayEntry(refs, env) {
     var collection = getGameplayCollection(env);
     var entry = getSelectedGameplayEntry(env);
+    if (getActiveGameplayTab(env) === 'characters') return;
     if (!collection || !entry) return;
     if (!window.confirm('确定删除「' + entry.name + '」吗？')) return;
     var index = collection.findIndex(function (item) { return item.id === entry.id; });
@@ -1328,6 +2133,7 @@ export function deleteGameplayEntry(refs, env) {
 export function moveGameplayEntry(refs, env, direction) {
     var collection = getGameplayCollection(env);
     var entry = getSelectedGameplayEntry(env);
+    if (getActiveGameplayTab(env) === 'characters') return;
     if (!collection || !entry || !direction) return;
     var index = collection.findIndex(function (item) { return item.id === entry.id; });
     var targetIndex = index + direction;
@@ -1341,9 +2147,17 @@ export function moveGameplayEntry(refs, env, direction) {
 
 export function renderGameplayEditor(refs, env) {
     var cityContext = getGameplayCityContext(env);
+    if (getActiveGameplayTab(env) === 'waves') {
+        if (refs.gameplayCityTitle) refs.gameplayCityTitle.textContent = '项目关卡 · 波次管理器';
+        if (refs.gameplayCityMeta) refs.gameplayCityMeta.textContent = '统一管理全部关卡的波次配置。出生点负责入口和路径，刷怪内容统一收敛到波次规则。';
+        renderGameplayWavesTab(refs, env);
+        return;
+    }
+    setGameplayWaveWorkbenchMode(refs, false);
+    setGameplayStandardFormVisible(refs, true);
     var config = cityContext ? ensureCityGameplayConfig(env, cityContext) : null;
     if (config) {
-        var preferredTab = pickPreferredGameplayTab(config, getActiveGameplayTab(env));
+        var preferredTab = normalizeGameplayTabId(pickPreferredGameplayTab(config, getActiveGameplayTab(env)));
         if (preferredTab !== getActiveGameplayTab(env)) {
             setActiveGameplayTab(env, preferredTab);
             updateGameplayTabUi(refs, env);
@@ -1361,17 +2175,17 @@ export function renderGameplayEditor(refs, env) {
     }
     if (refs.gameplayCityMeta) {
         refs.gameplayCityMeta.textContent = cityContext
-            ? '当前城市代码：' + cityContext.cityCode + '，保存后会写入该关卡可用卡片、防御塔与城市资源。'
-            : '先在左侧选择一个城市关卡，然后维护该关卡的敌人、防御塔、卡片、角色和技能。';
+            ? '当前城市代码：' + cityContext.cityCode + '，保存后会写入该关卡可用敌人、Boss、防御塔、卡片、道具与城市资源；探索主角 tab 会直接映射当前项目的探索角色。'
+            : '先在左侧选择一个城市关卡，然后维护该关卡的敌人、Boss、防御塔、卡片与道具；探索主角 tab 会直接映射当前项目的探索角色。';
     }
     if (refs.gameplayOverviewStats) {
         refs.gameplayOverviewStats.innerHTML = cityContext
             ? [
                 { label: '敌人', value: config.enemies.length },
+                { label: 'Boss', value: config.bosses.length },
                 { label: '防御塔', value: config.towers.length },
                 { label: '卡片', value: config.cards.length },
-                { label: '角色', value: config.characters.length },
-                { label: '技能', value: config.skills.length },
+                { label: '探索角色', value: config.characters.length },
                 { label: '道具', value: config.items.length }
             ].map(function (card) {
                 return '<div class="stat-card"><strong>' + escapeHtml(String(card.value)) + '</strong><span>' + escapeHtml(card.label) + '</span></div>';
@@ -1408,6 +2222,13 @@ export function bindGameplayUi(refs, env) {
 
     if (refs.gameplayEntryList) {
         refs.gameplayEntryList.addEventListener('click', function (event) {
+            var waveLevelButton = event.target.closest('[data-gameplay-wave-level-id]');
+            if (waveLevelButton) {
+                event.stopPropagation();
+                if (typeof env.selectLevel === 'function') env.selectLevel(waveLevelButton.getAttribute('data-gameplay-wave-level-id') || '');
+                renderGameplayEditor(refs, env);
+                return;
+            }
             var menuToggle = event.target.closest('[data-gameplay-menu-toggle]');
             if (menuToggle) {
                 event.stopPropagation();
@@ -1452,10 +2273,23 @@ export function bindGameplayUi(refs, env) {
     });
 
     if (refs.gameplayEditorForm) {
+        refs.gameplayEditorForm.addEventListener('click', function (event) {
+            var clearButton = event.target.closest('[data-gameplay-animation-clear]');
+            if (!clearButton) return;
+            clearGameplayAnimationAsset(refs, env, clearButton.getAttribute('data-gameplay-animation-clear') || '');
+        });
         refs.gameplayEditorForm.addEventListener('input', function (event) {
             handleGameplayFormInput(refs, env, event.target);
         });
         refs.gameplayEditorForm.addEventListener('change', function (event) {
+            var target = event.target;
+            var uploadId = target && target.getAttribute ? target.getAttribute('data-gameplay-animation-upload') : '';
+            if (uploadId) {
+                var file = target.files && target.files[0];
+                if (file) void uploadGameplayAnimationAsset(refs, env, uploadId, file);
+                if (target) target.value = '';
+                return;
+            }
             handleGameplayFormInput(refs, env, event.target);
         });
     }
@@ -1467,6 +2301,85 @@ export function bindGameplayUi(refs, env) {
             }
         });
     }
+    root.addEventListener('click', function (event) {
+        var actionButton = event.target.closest('[data-gameplay-card-action]');
+        if (!actionButton) return;
+        var action = actionButton.getAttribute('data-gameplay-card-action') || '';
+        if (action === 'clear') clearGameplayCardImage(refs, env);
+        if (action === 'toggle-ai') {
+            gameplayCardImageAiState.open = !gameplayCardImageAiState.open;
+            renderGameplayEditor(refs, env);
+        }
+        if (action === 'generate-ai') {
+            void generateGameplayCardImage(refs, env);
+        }
+        if (action === 'open-ai-location') {
+            var cityContext = getGameplayCityContext(env);
+            var openPath = gameplayCardImageAiOpenPath(env, cityContext);
+            if (!openPath || typeof env.revealProjectPathInExplorer !== 'function') return;
+            void env.revealProjectPathInExplorer(openPath).catch(function (error) {
+                env.setStatus((error && error.message) || '打开卡图保存位置失败', 'error');
+            });
+        }
+        return;
+    });
+    root.addEventListener('click', function (event) {
+        var presetButton = event.target.closest('[data-gameplay-card-ai-preset]');
+        if (!presetButton) return;
+        var cityContext = getGameplayCityContext(env);
+        var entry = getSelectedGameplayEntry(env);
+        if (!cityContext || !entry || getActiveGameplayTab(env) !== 'cards') return;
+        var presetId = presetButton.getAttribute('data-gameplay-card-ai-preset') || '';
+        var presets = buildGameplayCardImagePromptPresets(entry, cityContext);
+        var preset = presets.find(function (item) { return item.id === presetId; });
+        if (!preset) return;
+        gameplayCardImageAiState.open = true;
+        gameplayCardImageAiState.prompt = preset.prompt;
+        gameplayCardImageAiState.lastPresetId = preset.id;
+        gameplayCardImageAiState.statusText = '已填入「' + preset.title + '」提示词。';
+        gameplayCardImageAiState.statusTone = 'idle';
+        renderGameplayEditor(refs, env);
+    });
+    root.addEventListener('input', function (event) {
+        var scaleInput = event.target && event.target.closest ? event.target.closest('#gameplayModelScale') : null;
+        if (scaleInput) {
+            handleGameplayFormInput(refs, env, scaleInput, { commit: false });
+            return;
+        }
+        var promptInput = event.target.closest('[data-gameplay-card-ai-prompt]');
+        if (!promptInput) return;
+        gameplayCardImageAiState.prompt = String(promptInput.value || '');
+        if (!gameplayCardImageAiState.generating) {
+            gameplayCardImageAiState.statusText = '可继续修改提示词，然后生成替换当前卡图。';
+            gameplayCardImageAiState.statusTone = 'idle';
+        }
+        if (refs.btnGenerateGameplayCardAi) {
+            refs.btnGenerateGameplayCardAi.disabled = !String(gameplayCardImageAiState.prompt || '').trim() || gameplayCardImageAiState.generating;
+        }
+    });
+    root.addEventListener('keydown', function (event) {
+        var promptInput = event.target.closest('[data-gameplay-card-ai-prompt]');
+        if (!promptInput) return;
+        if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+            event.preventDefault();
+            void generateGameplayCardImage(refs, env);
+        }
+    });
+    root.addEventListener('change', function (event) {
+        var scaleInput = event.target && event.target.closest ? event.target.closest('#gameplayModelScale') : null;
+        if (scaleInput) {
+            handleGameplayFormInput(refs, env, scaleInput);
+            return;
+        }
+        var uploadInput = event.target.closest('[data-gameplay-card-upload]');
+        if (!uploadInput) return;
+        var file = uploadInput.files && uploadInput.files[0];
+        if (!file) return;
+        if (triggerGameplayCardImageUpload(refs, env)) {
+            void uploadGameplayAsset(refs, env, file);
+        }
+        uploadInput.value = '';
+    });
     if (refs.gameplayAssetList) {
         refs.gameplayAssetList.addEventListener('click', function (event) {
             var previewCard = event.target.closest('[data-asset-preview-id]');

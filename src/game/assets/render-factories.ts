@@ -1,7 +1,9 @@
 import * as THREE from "three";
+import { clone as skeletonClone } from "three/examples/jsm/utils/SkeletonUtils.js";
 
 import { TILE_SIZE } from "../core/runtime-grid";
 import type { BuildSpec, ModelTarget } from "../core/types";
+import { attachEmbeddedAnimationClips, getEmbeddedAnimationClips } from "./asset-loading";
 
 export function createBuildingMesh(options: {
   spec: BuildSpec;
@@ -104,10 +106,13 @@ export function createCustomBuildingMesh(spec: BuildSpec, source: THREE.Group, s
   base.castShadow = true;
   base.receiveShadow = true;
 
-  const model = source.clone(true);
+  const model = skeletonClone(source) as THREE.Group;
   model.position.y = 0.22;
-  model.scale.multiplyScalar(scale);
+  const userScale = spec.modelScale ?? 1;
+  model.scale.multiplyScalar(scale * userScale);
+  attachEmbeddedAnimationClips(model, getEmbeddedAnimationClips(source));
   group.add(base, model);
+  attachEmbeddedAnimationClips(group, getEmbeddedAnimationClips(model));
 
   if (spec.range) {
     const ring = new THREE.Mesh(

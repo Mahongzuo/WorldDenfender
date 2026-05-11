@@ -109,9 +109,13 @@ export function createGameplayAssetPreview(options) {
     controls.update();
   }
 
-  async function setAsset(path) {
+  async function setAsset(path, pathScaleMultiplier) {
     clearStage();
     if (!path) return;
+    var mult =
+      pathScaleMultiplier != null && Number.isFinite(Number(pathScaleMultiplier)) && Number(pathScaleMultiplier) > 0
+        ? Number(pathScaleMultiplier)
+        : 1;
     var url = resolveAssetPath(path);
     try {
       if (/\.(glb|gltf)(\?|$)/i.test(url)) {
@@ -124,6 +128,7 @@ export function createGameplayAssetPreview(options) {
         });
         stage.add(gltfRoot);
         frameObject(gltfRoot);
+        gltfRoot.scale.multiplyScalar(mult);
         return;
       }
       if (/\.obj(\?|$)/i.test(url)) {
@@ -136,6 +141,7 @@ export function createGameplayAssetPreview(options) {
         });
         stage.add(objRoot);
         frameObject(objRoot);
+        objRoot.scale.multiplyScalar(mult);
         return;
       }
       var fallback = new THREE.Mesh(

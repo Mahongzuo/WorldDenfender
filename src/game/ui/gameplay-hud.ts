@@ -162,6 +162,15 @@ export function refreshGameplayHud(dom: GameplayHudDom, m: GameplayHudModels): v
       ? "\u6bcf\u5f20 S \u5361\u5728\u5355\u5f20\u5730\u56fe\u4e2d\u53ea\u80fd\u90e8\u7f72 1 \u6b21"
       : "";
 
+    const nameSpan = button.querySelector<HTMLSpanElement>(".build-name > span:first-child");
+    if (nameSpan) {
+      nameSpan.textContent = `${buildSpec.key} \u00b7 ${towerHudName(buildId)}`;
+    }
+    const descDiv = button.querySelector<HTMLDivElement>(".build-desc");
+    if (descDiv) {
+      descDiv.textContent = buildSpec.description;
+    }
+
     if (buildSpec.city) {
       const isCurrentCity = m.currentCityCode === buildSpec.city || m.currentMapId.startsWith(buildSpec.city);
       if (button.parentElement) {

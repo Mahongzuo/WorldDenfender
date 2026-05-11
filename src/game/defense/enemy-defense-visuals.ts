@@ -14,7 +14,7 @@ export interface EnemyDefenseVisualsDeps {
   applyGeoPlayfieldSquashCompensation: (mesh: THREE.Object3D) => void;
   gltfLoader: GLTFLoader;
   /** 宿主持有的按 URL 的 GLB 模板缓存（原地共享） */
-  templateByUrl: Map<string, THREE.Object3D>;
+  templateByUrl: Map<string, { scene: THREE.Object3D; animations: readonly THREE.AnimationClip[] }>;
   /** 仍在战场上的敌人列表引用，用于异步加载完成时校验 */
   enemies: () => readonly Enemy[];
   orientHudToCamera: (obj: THREE.Object3D) => void;
@@ -22,6 +22,35 @@ export interface EnemyDefenseVisualsDeps {
 
 export class EnemyDefenseVisuals {
   constructor(private readonly deps: EnemyDefenseVisualsDeps) {}
+
+  private pickAutoplayClip(clips: readonly THREE.AnimationClip[]): THREE.AnimationClip | null {
+    if (!clips.length) {
+      return null;
+    }
+    const preferred = ["move", "walk", "run", "idle", "attack"];
+    for (const token of preferred) {
+      const matched = clips.find((clip) => clip.name.toLowerCase().includes(token));
+      if (matched) {
+        return matched;
+      }
+    }
+    return clips[0] ?? null;
+  }
+
+  private bindAutoplayAnimation(enemy: Enemy, root: THREE.Object3D, clips: readonly THREE.AnimationClip[]): void {
+    enemy.animationMixer?.stopAllAction();
+    enemy.animationMixer = undefined;
+    const clip = this.pickAutoplayClip(clips);
+    if (!clip) {
+      return;
+    }
+    const mixer = new THREE.AnimationMixer(root);
+    const action = mixer.clipAction(clip);
+    action.reset();
+    action.setLoop(THREE.LoopRepeat, Infinity);
+    action.play();
+    enemy.animationMixer = mixer;
+  }
 
   private healthBarHalfWidth(enemy: Enemy): number {
     enemy.healthBar.geometry.computeBoundingBox();
@@ -98,7 +127,7 @@ export class EnemyDefenseVisuals {
   }
 
   async replaceBodyWithDefaultGltf(enemy: Enemy): Promise<void> {
-    const url = getDefaultEnemyGlbUrl(enemy.type);
+    const url = enemy.modelPath?.trim() || getDefaultEnemyGlbUrl(enemy.type);
     if (!url) {
       return;
     }
@@ -106,10 +135,13 @@ export class EnemyDefenseVisuals {
     try {
       let template = this.deps.templateByUrl.get(url);
       if (!template) {
-        const gltf = await new Promise<{ scene: THREE.Object3D }>((resolve, reject) => {
-          this.deps.gltfLoader.load(url!, resolve, undefined, reject);
+        const gltf = await new Promise<{ scene: THREE.Object3D; animations?: THREE.AnimationClip[] }>((resolve, reject) => {
+          this.deps.gltfLoader.load(url, resolve, undefined, reject);
         });
-        template = gltf.scene;
+        template = {
+          scene: gltf.scene,
+          animations: gltf.animations ?? [],
+        };
         this.deps.templateByUrl.set(url, template);
       }
 
@@ -117,7 +149,7 @@ export class EnemyDefenseVisuals {
         return;
       }
 
-      const root = skeletonClone(template);
+      const root = skeletonClone(template.scene);
       root.traverse((obj) => {
         if (obj instanceof THREE.Mesh) {
           obj.castShadow = true;
@@ -136,12 +168,14 @@ export class EnemyDefenseVisuals {
       const sizeBefore = boxBefore.getSize(new THREE.Vector3());
       const horizontal = Math.max(sizeBefore.x, sizeBefore.z, 0.001);
       const uniform = targetDiameter / horizontal;
-      root.scale.setScalar(uniform);
+      const userScale = enemy.modelScale ?? 1;
+      root.scale.setScalar(uniform * userScale);
 
       const boxAfter = new THREE.Box3().setFromObject(root);
       root.position.y = -boxAfter.min.y;
 
       enemy.mesh.add(root);
+      this.bindAutoplayAnimation(enemy, root, template.animations);
       this.deps.applyGeoPlayfieldSquashCompensation(enemy.mesh);
       this.syncHealthBarVertical(enemy);
     } catch (error) {

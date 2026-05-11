@@ -7,9 +7,17 @@ import { CesiumIonAuthPlugin, GLTFExtensionsPlugin, ReorientationPlugin, TilesFa
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+import { defensePathSourceCells, getDefenseEditorPathKeys } from './editor/path-utils.js';
+import { lookupGlobalModelPathScale } from './editor/model-path-scale.js';
 
 const gltfLoader = new GLTFLoader();
 const gltfCache = new Map();
+const objLoader = new OBJLoader();
+const fbxLoader = new FBXLoader();
+const objCache = new Map();
+const fbxCache = new Map();
 import { CITY_GEO_CONFIGS as BUILT_IN_GEO_CONFIGS, DEFAULT_CESIUM_ION_3D_TILES_ASSET_ID, JINAN_MAP_TEXTURE_URL } from './editor/city-geo-configs.js';
 
 function degToRad(d) {
@@ -70,6 +78,12 @@ export function createPreview(options) {
   var onSelectActor = options.onSelectActor;
   var onActorModified = options.onActorModified;
   var onTransformModeChange = options.onTransformModeChange;
+  var getGlobalModelPathScales =
+    typeof options.getGlobalModelPathScales === 'function'
+      ? options.getGlobalModelPathScales
+      : function () {
+          return {};
+        };
 
   var scene = new THREE.Scene();
   /* fog / background 在每关 buildTerrain 中与主游戏 renderVisibleMap 一致 */
@@ -246,8 +260,10 @@ export function createPreview(options) {
     var explore = getActiveEditorMode() === 'explore';
     if (explore && map.explorationLayout && Array.isArray(map.explorationLayout.path) && map.explorationLayout.path.length > 0) {
       start = map.explorationLayout.path[0];
-    } else if (!explore && map.enemyPaths && map.enemyPaths[0] && map.enemyPaths[0].cells && map.enemyPaths[0].cells.length > 0) {
-      start = map.enemyPaths[0].cells[0];
+    } else if (!explore) {
+      var defenseStartPath = defensePathSourceCells(map);
+      if (defenseStartPath.length > 0) start = defenseStartPath[0];
+      else if (Array.isArray(map.spawnPoints) && map.spawnPoints.length) start = map.spawnPoints[0];
     } else if (Array.isArray(map.spawnPoints) && map.spawnPoints.length) start = map.spawnPoints[0];
 
     var pw = cellCenterXZ(start.col, start.row, cols, rows, ts);
@@ -364,119 +380,24 @@ export function createPreview(options) {
     return bucket;
   }
 
-  function uniqueDefenseCellsPv(cells, cols, rows) {
-    var seen = {};
-    var result = [];
-    for (var i = 0; i < cells.length; i += 1) {
-      var cell = cells[i];
-      var normalized = {
-        col: clampDefense(Math.round(Number(cell.col) || 0), 0, cols - 1),
-        row: clampDefense(Math.round(Number(cell.row) || 0), 0, rows - 1),
-      };
-      var key = normalized.col + ',' + normalized.row;
-      if (seen[key]) continue;
-      seen[key] = true;
-      result.push(normalized);
-    }
-    return result;
-  }
-
-  function manhattanDefensePv(a, b) {
-    return Math.abs(a.col - b.col) + Math.abs(a.row - b.row);
-  }
-
-  function sameDefenseCellPv(a, b) {
-    return !!b && a.col === b.col && a.row === b.row;
-  }
-
-  function orderEditorPathCellsDefensePv(cells, start, end, cols, rows) {
-    var remaining = uniqueDefenseCellsPv(cells, cols, rows).slice();
-    var ordered = [];
-    var current = start;
-    if (!remaining.some(function (cell) { return sameDefenseCellPv(cell, start); }))
-      ordered.push({ col: start.col, row: start.row });
-    while (remaining.length > 0) {
-      var nextIndex = remaining.findIndex(function (cell) {
-        return manhattanDefensePv(cell, current) === 1;
-      });
-      if (nextIndex < 0) {
-        nextIndex = remaining.reduce(function (bestIndex, cell, index) {
-          return manhattanDefensePv(cell, current) < manhattanDefensePv(remaining[bestIndex], current)
-            ? index
-            : bestIndex;
-        }, 0);
-      }
-      var next = remaining.splice(nextIndex, 1)[0];
-      ordered.push(next);
-      current = next;
-    }
-    if (!ordered.some(function (cell) { return sameDefenseCellPv(cell, end); })) ordered.push({ col: end.col, row: end.row });
-    return uniqueDefenseCellsPv(ordered, cols, rows);
-  }
-
-  function projectGridCellDefensePv(cell, cols, rows) {
-    return {
-      col: clampDefense(Math.round(Number(cell.col) || 0), 0, cols - 1),
-      row: clampDefense(Math.round(Number(cell.row) || 0), 0, rows - 1),
-    };
-  }
-
-  function defensePathSourceCellsPv(map) {
-    if (map.enemyPaths) {
-      for (var pi = 0; pi < map.enemyPaths.length; pi += 1) {
-        var p = map.enemyPaths[pi];
-        if (p && p.cells && p.cells.length) return p.cells.slice();
-      }
-    }
-    return map.roads && map.roads.length ? map.roads.slice() : [];
-  }
-
-  function buildDefenseFallbackVertexListPv(spawn, objective, cols, rows) {
-    var midA = {
-      col: clampDefense(Math.floor((spawn.col + objective.col) / 2), 0, cols - 1),
-      row: spawn.row,
-    };
-    var midB = { col: midA.col, row: objective.row };
-    return uniqueDefenseCellsPv([spawn, midA, midB, objective], cols, rows);
-  }
-
-  /** 与 level-editor.js `getDefenseEditorPathKeys` / main editorLevelToRuntimeMap 一致 */
-  function defensePathKeysFromMap(map) {
-    if (!map || !map.grid) return new Set();
-    var cols = clampDefense(Math.floor(Number(map.grid.cols) || ED_DEF_COLS), 4, 80);
-    var rows = clampDefense(Math.floor(Number(map.grid.rows) || ED_DEF_ROWS), 4, 80);
-    var objectiveDefault = { col: cols - 1, row: Math.floor(rows / 2) };
-    var objective = map.objectivePoint ? projectGridCellDefensePv(map.objectivePoint, cols, rows) : objectiveDefault;
-    var spawn = Array.isArray(map.spawnPoints) && map.spawnPoints[0]
-      ? projectGridCellDefensePv(map.spawnPoints[0], cols, rows)
-      : { col: 0, row: objective.row };
-    var raw = defensePathSourceCellsPv(map);
-    var projected = uniqueDefenseCellsPv(
-      raw.map(function (c) {
-        return projectGridCellDefensePv(c, cols, rows);
-      }),
-      cols,
-      rows
-    );
-    var orderedPath = orderEditorPathCellsDefensePv(projected, spawn, objective, cols, rows);
-    var fallbackPath = buildDefenseFallbackVertexListPv(spawn, objective, cols, rows);
-    var pathVerts = orderedPath.length >= 2 ? orderedPath : fallbackPath;
-    return expandPathWaypointPolyline(pathVerts);
-  }
-
   function pathCellSet(level) {
     /** @type {Set<string>} */
     var bucket = new Set();
     var map = level.map || {};
     var explore = getActiveEditorMode() === 'explore';
-    if (explore && map.explorationLayout && Array.isArray(map.explorationLayout.path))
-      expandPathWaypointPolyline(map.explorationLayout.path).forEach(function (k) {
-        bucket.add(k);
-      });
-    else
-      defensePathKeysFromMap(map).forEach(function (k) {
-        bucket.add(k);
-      });
+    /** 探索模式严禁回退到塔防道路，否则棋盘未铺路时仍显示敌方路径格 */
+    if (explore) {
+      var p = map.explorationLayout && map.explorationLayout.path;
+      if (Array.isArray(p) && p.length > 0) {
+        expandPathWaypointPolyline(p).forEach(function (k) {
+          bucket.add(k);
+        });
+      }
+      return bucket;
+    }
+    getDefenseEditorPathKeys(level).forEach(function (k) {
+      bucket.add(k);
+    });
     return bucket;
   }
 
@@ -1086,10 +1007,17 @@ export function createPreview(options) {
 
     if (isJinan && !usesGeoBackdrop) {
       addJinanTexturePlane(cols, rows, ts);
-      var guidePath = getActiveEditorMode() === 'explore' && map.explorationLayout && Array.isArray(map.explorationLayout.path)
-        ? map.explorationLayout.path
-        : defensePathSourceCellsPv(map);
-      addJinanPathGuides(guidePath, cols, rows, ts, pal.path, pal.accent);
+      var guidePath = null;
+      if (getActiveEditorMode() === 'explore') {
+        var expPath = map.explorationLayout && map.explorationLayout.path;
+        if (Array.isArray(expPath) && expPath.length >= 2) guidePath = expPath;
+      } else {
+        var dPath = defensePathSourceCells(map);
+        if (dPath && dPath.length >= 2) guidePath = dPath;
+      }
+      if (guidePath && guidePath.length >= 2) {
+        addJinanPathGuides(guidePath, cols, rows, ts, pal.path, pal.accent);
+      }
     }
 
     var trimmedBoard = String((map.theme && map.theme.boardTextureUrl) || '').trim();
@@ -1132,13 +1060,6 @@ export function createPreview(options) {
     var c = cellCenterXZ(actor.col, actor.row, cols, rows, ts);
     group.position.set(c.x + ox, oy, c.z + oz);
     group.rotation.set(0, degToRad(Number(actor.rotation) || 0), 0);
-    var sc = Number(actor.scale) > 0 ? Number(actor.scale) : 1;
-    /* actorsHolder 使用 (sx,1,sz) 时需按 Y 补偿，否则会像主游戏棋盘单位一样显得被拍扁 */
-    if (previewPlayfieldScale !== 1) {
-      group.scale.set(sc, sc * previewPlayfieldScale, sc);
-    } else {
-      group.scale.setScalar(sc);
-    }
 
     var catalog = getCatalog && getCatalog();
     var assets = (catalog && catalog.modelAssets) || [];
@@ -1157,6 +1078,16 @@ export function createPreview(options) {
       : null;
     var url = asset ? resolveAssetPath(asset.path || asset.publicUrl) : resolveAssetPath(actor.modelPath || '');
 
+    var scInst = Number(actor.scale) > 0 ? Number(actor.scale) : 1;
+    var pathSc = lookupGlobalModelPathScale(getGlobalModelPathScales(), url);
+    var sc = scInst * pathSc;
+    /* actorsHolder 使用 (sx,1,sz) 时需按 Y 补偿，否则会像主游戏棋盘单位一样显得被拍扁 */
+    if (previewPlayfieldScale !== 1) {
+      group.scale.set(sc, sc * previewPlayfieldScale, sc);
+    } else {
+      group.scale.setScalar(sc);
+    }
+
     if (url && /\.(glb|gltf)(\?|$)/i.test(url)) {
       try {
         var tmpl = await loadGlTFRoot(url);
@@ -1169,9 +1100,31 @@ export function createPreview(options) {
         console.warn('[PreviewGLTF]', e);
         addPlaceholderCube(group, actor);
       }
+    } else if (url && /\.obj(\?|$)/i.test(url)) {
+      try {
+        var objTmpl = await loadObjRoot(url);
+        var omesh = objTmpl.clone(true);
+        omesh.traverse(function (ch) {
+          if (ch.isMesh && ch.material) ch.castShadow = true;
+        });
+        group.add(omesh);
+      } catch (eObj) {
+        console.warn('[PreviewOBJ]', eObj);
+        addPlaceholderCube(group, actor);
+      }
+    } else if (url && /\.fbx(\?|$)/i.test(url)) {
+      try {
+        var fbxTmpl = await loadFbxRoot(url);
+        var fmesh = fbxTmpl.clone(true);
+        fmesh.traverse(function (ch) {
+          if (ch.isMesh && ch.material) ch.castShadow = true;
+        });
+        group.add(fmesh);
+      } catch (eFbx) {
+        console.warn('[PreviewFBX]', eFbx);
+        addPlaceholderCube(group, actor);
+      }
     } else if (url) {
-      console.warn('[Preview] unsupported model format:', url);
-      addPlaceholderCube(group, actor);
     } else {
       addPlaceholderCube(group, actor);
     }
@@ -1210,6 +1163,24 @@ export function createPreview(options) {
         undefined,
         reject,
       );
+    });
+  }
+
+  function loadObjRoot(url) {
+    var cached = objCache.get(url);
+    if (cached) return Promise.resolve(cached.clone(true));
+    return objLoader.loadAsync(url).then(function (root) {
+      objCache.set(url, root);
+      return root.clone(true);
+    });
+  }
+
+  function loadFbxRoot(url) {
+    var cached = fbxCache.get(url);
+    if (cached) return Promise.resolve(cached.clone(true));
+    return fbxLoader.loadAsync(url).then(function (root) {
+      fbxCache.set(url, root);
+      return root.clone(true);
     });
   }
 

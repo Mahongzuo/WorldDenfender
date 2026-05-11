@@ -9,7 +9,7 @@ import { createEnemyForWave } from "./defense-runtime";
 import { getDefaultEnemyGlbUrl } from "../assets/enemy-default-models";
 import { MAPS } from "../data/maps";
 import { cellToWorld, expandPathToOrderedCells, mapCols, mapRows, sameCell, traceDefensePathAlongPaintedCells } from "../core/runtime-grid";
-import type { DefenseEnemyPath, DefenseWaveRule, Enemy, EnemyType, GridCell, MapDefinition } from "../core/types";
+import type { DefenseEnemyPath, DefenseEnemyRuntimeConfig, DefenseWaveRule, Enemy, EnemyType, GridCell, MapDefinition } from "../core/types";
 
 /** 塔防刷怪节拍：波次结算、起手延迟、单次刷怪时点 */
 
@@ -20,6 +20,14 @@ export interface DefenseSpawnWaveTimers {
   spawnRemaining: number;
   spawnCooldown: number;
   currentWaveSpawned?: number;
+  authoredSpawnStates?: DefenseAuthoredSpawnState[];
+}
+
+export interface DefenseAuthoredSpawnState {
+  waveRuleId?: string;
+  remaining: number;
+  cooldown: number;
+  interval: number;
 }
 
 export type DefenseSpawnSideEffect =
@@ -99,12 +107,40 @@ export function advanceDefenseSpawnState(input: DefenseSpawnStepInput): DefenseS
       t.spawnRemaining = Math.min(160, Math.max(1, Math.round(count)));
       t.spawnCooldown = cdBase;
       t.currentWaveSpawned = 0;
+      t.authoredSpawnStates = authoredRules.length
+        ? authoredRules.map((rule) => ({
+            waveRuleId: rule.id,
+            remaining: Math.max(1, Math.round(Number(rule.count) || 1)),
+            cooldown: Math.max(0.1, Number(rule.interval) || 1),
+            interval: Math.max(0.1, Number(rule.interval) || 1),
+          }))
+        : [];
       effects.push({ kind: "toastWaveBegins", wave: t.wave });
     }
     return { timers: t, effects };
   }
 
   if (t.spawnRemaining <= 0) {
+    return { timers: t, effects };
+  }
+
+  if (t.authoredSpawnStates?.length) {
+    for (const lane of t.authoredSpawnStates) {
+      if (lane.remaining <= 0) {
+        continue;
+      }
+      lane.cooldown -= dt;
+      while (lane.remaining > 0 && lane.cooldown <= 0) {
+        effects.push({ kind: "spawnEnemy", waveRuleId: lane.waveRuleId });
+        lane.remaining -= 1;
+        t.spawnRemaining = Math.max(0, t.spawnRemaining - 1);
+        lane.cooldown += lane.interval;
+      }
+    }
+    t.authoredSpawnStates = t.authoredSpawnStates.filter((lane) => lane.remaining > 0);
+    if (!t.authoredSpawnStates.length) {
+      t.spawnCooldown = 0;
+    }
     return { timers: t, effects };
   }
 
@@ -149,6 +185,7 @@ export interface SpawnDefenseEnemyDeps {
 }
 
 function sanitizeEnemyTypeId(value: string | undefined): EnemyType | undefined {
+  if (!value) return undefined;
   switch (value) {
     case "basic":
     case "scout":
@@ -160,9 +197,15 @@ function sanitizeEnemyTypeId(value: string | undefined): EnemyType | undefined {
       return "tank";
     case "enemy-drone":
       return "basic";
-    default:
-      return undefined;
   }
+  // Fallback: map custom editor enemy type ids to runtime archetypes
+  const lower = value.toLowerCase();
+  if (lower.includes("scout") || lower.includes("fast") || lower.includes("fly") || lower.includes("drone-fast")) return "scout";
+  if (lower.includes("jammer") || lower.includes("hack") || lower.includes("signal") || lower.includes("caster")) return "hacker";
+  if (lower.includes("heavy") || lower.includes("tank") || lower.includes("shield") || lower.includes("wall")) return "tank";
+  if (lower.includes("swarm") || lower.includes("horde") || lower.includes("group") || lower.includes("cluster")) return "swarm";
+  if (lower.includes("drone") || lower.includes("basic") || lower.includes("grunt") || lower.includes("soldier")) return "basic";
+  return undefined;
 }
 
 function clampWaveRule(raw: DefenseWaveRule): DefenseWaveRule {
@@ -243,6 +286,7 @@ function orderedPathWorldPoints(
 
 function resolveEnemyPath(map: MapDefinition, rule: DefenseWaveRule | undefined): {
   enemyType?: EnemyType;
+  enemyTypeId?: string;
   worldPoints: THREE.Vector3[];
 } {
   const spawnById = rule?.spawnPointId
@@ -257,10 +301,48 @@ function resolveEnemyPath(map: MapDefinition, rule: DefenseWaveRule | undefined)
     : undefined;
   const fallbackPath = map.enemyPaths?.find((candidate) => candidate.cells.length);
   const cells = path?.cells?.length ? path.cells : fallbackPath?.cells?.length ? fallbackPath.cells : map.path;
+  const authoredEnemyTypeId = String(rule?.enemyTypeId || spawn?.enemyTypeId || "").trim();
   return {
-    enemyType: sanitizeEnemyTypeId(rule?.enemyTypeId || spawn?.enemyTypeId),
+    enemyTypeId: authoredEnemyTypeId || undefined,
+    enemyType: sanitizeEnemyTypeId(authoredEnemyTypeId),
     worldPoints: orderedPathWorldPoints(cells.length ? cells : map.path, spawn, map),
   };
+}
+
+function findDefenseEnemyConfig(map: MapDefinition, enemyTypeId: string | undefined): DefenseEnemyRuntimeConfig | undefined {
+  const resolvedId = String(enemyTypeId || "").trim();
+  if (!resolvedId || !map.defenseEnemyConfigs?.length) {
+    return undefined;
+  }
+  return map.defenseEnemyConfigs.find((entry) => String(entry.id || "").trim() === resolvedId);
+}
+
+function applyRuntimeEnemyConfig(enemy: Enemy, config: DefenseEnemyRuntimeConfig | undefined): void {
+  if (!config) {
+    return;
+  }
+  if (config.name) {
+    enemy.displayName = config.name;
+  }
+  if (config.modelPath) {
+    enemy.modelPath = config.modelPath;
+  }
+  if (config.modelScale && config.modelScale > 0) {
+    enemy.modelScale = config.modelScale;
+  }
+  if (config.hp && config.hp > 0) {
+    enemy.hp = config.hp;
+    enemy.maxHp = config.hp;
+  }
+  if (config.speed && config.speed > 0) {
+    enemy.speed = config.speed;
+  }
+  if (config.reward != null && config.reward >= 0) {
+    enemy.reward = config.reward;
+  }
+  if (config.towerSiegeDps != null && config.towerSiegeDps >= 0) {
+    enemy.towerSiegeDps = config.towerSiegeDps;
+  }
 }
 
 export function spawnDefenseWaveEnemy(deps: SpawnDefenseEnemyDeps): void {
@@ -270,16 +352,26 @@ export function spawnDefenseWaveEnemy(deps: SpawnDefenseEnemyDeps): void {
     ? rules.find((rule) => rule.id === deps.waveRuleId)
     : selectDefenseWaveRuleForOrdinal(rules, deps.spawnOrdinal ?? 0);
   const resolvedPath = resolveEnemyPath(map, activeRule);
+  const authoredEnemyConfig = findDefenseEnemyConfig(map, resolvedPath.enemyTypeId);
+  const resolvedEnemyType =
+    resolvedPath.enemyType || sanitizeEnemyTypeId(authoredEnemyConfig?.id) || sanitizeEnemyTypeId(authoredEnemyConfig?.name) || "basic";
   const start = resolvedPath.worldPoints[0] ?? cellToWorld(map.path[0]);
   const enemy = createEnemyForWave({
     uid: deps.allocateUid(),
     wave: deps.wave,
     start,
-    enemyType: resolvedPath.enemyType,
+    enemyType: resolvedEnemyType,
     flavor: map.defenseFlavor,
     defenseEndless: deps.defenseEndless,
     defenseDifficulty: deps.defenseDifficulty,
   });
+  applyRuntimeEnemyConfig(enemy, authoredEnemyConfig);
+  if (activeRule?.overrideModelPath) {
+    enemy.modelPath = activeRule.overrideModelPath;
+  }
+  if (activeRule?.overrideModelScale && activeRule.overrideModelScale > 0) {
+    enemy.modelScale = activeRule.overrideModelScale;
+  }
   enemy.pathWorldPoints = resolvedPath.worldPoints;
   const usesDefaultGltf = getDefaultEnemyGlbUrl(enemy.type) !== undefined;
   if (!usesDefaultGltf) {

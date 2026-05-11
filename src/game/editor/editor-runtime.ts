@@ -47,7 +47,19 @@ export function hasEditorDefenseLayout(map: EditorLevelMap): boolean {
 
 export function hasEditorExploreLayout(map: EditorLevelMap): boolean {
   const layout = map.explorationLayout;
-  return !!layout && ((layout.path?.length ?? 0) > 0 || (layout.obstacles?.length ?? 0) > 0);
+  const gameplayKeys = layout?.gameplay ? Object.keys(layout.gameplay).filter((key) => layout.gameplay?.[key as keyof typeof layout.gameplay] != null) : [];
+  return !!layout && (
+    (layout.path?.length ?? 0) > 0 ||
+    (layout.obstacles?.length ?? 0) > 0 ||
+    (layout.safeZones?.length ?? 0) > 0 ||
+    !!layout.startPoint ||
+    !!layout.exitPoint ||
+    gameplayKeys.length > 0 ||
+    (map.explorationPoints?.length ?? 0) > 0 ||
+    (map.exploreBosses?.length ?? 0) > 0 ||
+    (map.exploreSpawners?.length ?? 0) > 0 ||
+    (map.explorePickups?.length ?? 0) > 0
+  );
 }
 
 export function runtimeMapToEditorMap(map: MapDefinition, current: EditorLevelMap): EditorLevelMap {

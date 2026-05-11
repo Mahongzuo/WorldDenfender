@@ -203,7 +203,9 @@
                 <section class="mode-ribbon mode-ribbon--split gameplay-ribbon" aria-label="玩法资源筛选">
                     <div class="mode-ribbon-inner" id="gameplayResourceTabs" aria-label="玩法资源类型">
                         <button class="mode-button active" data-gameplay-tab="enemies">敌人</button>
+                        <button class="mode-button" data-gameplay-tab="bosses">Boss</button>
                         <button class="mode-button" data-gameplay-tab="towers">防御塔</button>
+                        <button class="mode-button" data-gameplay-tab="waves">波次</button>
                         <button class="mode-button" data-gameplay-tab="cards">卡片</button>
                         <button class="mode-button" data-gameplay-tab="items">道具</button>
                         <button class="mode-button" data-gameplay-tab="characters">角色</button>
@@ -254,6 +256,14 @@
                             <div id="gameplayAssetPreviewEmpty" class="empty-state">当前条目还没有绑定可预览的图片或模型。</div>
                             <img id="gameplayAssetPreviewImage" class="gameplay-asset-preview-image view-hidden" alt="资源缩略图预览">
                             <div id="gameplayAssetPreviewHost" class="gameplay-asset-preview-host view-hidden" aria-label="模型预览"></div>
+                            <div
+                                id="gameplayPreviewResizeHandle"
+                                class="preview-resize-handle"
+                                role="separator"
+                                aria-orientation="horizontal"
+                                aria-label="拖拽调整资源预览高度"
+                                title="拖拽这里缩小或放大预览区"
+                            ></div>
                             <div id="gameplayTowerPreviewActions" class="gameplay-tower-preview-actions view-hidden">
                                 <div class="gameplay-tower-preview-actions__row">
                                     <label class="mini-button upload-button">
@@ -278,8 +288,35 @@
                                         打开模型保存位置
                                     </button>
                                 </div>
+                                <label class="field-block">
+                                    <span>模型缩放倍数 (0.01 - 1000)</span>
+                                    <input id="gameplayModelScale" type="number" min="0.01" max="1000" step="0.01" value="1" placeholder="1.0">
+                                </label>
                                 <p id="gameplayAiModelStatus" class="section-hint gameplay-tower-preview-actions__hint gameplay-ai-model-status">上传照片后，使用 Meshy 生成并替换当前条目模型。</p>
                                 <p class="section-hint gameplay-tower-preview-actions__hint">本组按钮仅写入<strong>当前城市玩法库</strong>。要改<strong>所有关卡</strong>的默认塔模，请打开顶部「全局设置 → 游戏资产」。</p>
+                            </div>
+                            <div id="gameplayCardPreviewActions" class="gameplay-tower-preview-actions view-hidden">
+                                <div class="gameplay-tower-preview-actions__row">
+                                    <label class="mini-button upload-button">
+                                        上传 / 替换卡图
+                                        <input data-gameplay-card-upload type="file" accept="image/png,image/jpeg,image/jpg,image/webp,image/*">
+                                    </label>
+                                    <button type="button" class="mini-button" data-gameplay-card-action="clear">清除卡图</button>
+                                    <button type="button" class="mini-button" data-gameplay-card-action="toggle-ai" id="btnToggleGameplayCardAi">AI生成卡图</button>
+                                </div>
+                                <div id="gameplayCardAiFields" class="gameplay-card-ai-fields view-hidden">
+                                    <div id="gameplayCardAiPromptPresets" class="theme-board-ai-preset-list"></div>
+                                    <label class="field-block">
+                                        <span>卡图提示词</span>
+                                        <textarea id="gameplayCardAiPrompt" data-gameplay-card-ai-prompt rows="5" class="gameplay-card-ai-prompt" placeholder="例如：深圳科技都市主题，竖版角色卡图，主体居中，蓝紫能量光效，适合作为游戏卡片封面"></textarea>
+                                    </label>
+                                    <div class="gameplay-tower-preview-actions__row gameplay-card-ai-actions">
+                                        <button type="button" class="mini-button" data-gameplay-card-action="generate-ai" id="btnGenerateGameplayCardAi">生成并替换当前卡图</button>
+                                        <button type="button" class="mini-button" data-gameplay-card-action="open-ai-location" id="btnOpenGameplayCardAiLocation" disabled>打开卡图保存位置</button>
+                                    </div>
+                                    <div id="gameplayCardAiStatus" class="section-hint theme-board-ai-status"></div>
+                                </div>
+                                <p class="section-hint gameplay-tower-preview-actions__hint">这里会直接替换当前卡片条目的图片资源。</p>
                             </div>
                         </section>
                         <form id="gameplayEditorForm" class="gameplay-form">
@@ -307,6 +344,8 @@
                             </label>
                             <div id="gameplayStatGrid" class="form-grid three"></div>
                             <div id="gameplayTaxonomyPanel" class="gameplay-taxonomy-panel" aria-label="功能定位与施加效果"></div>
+                            <div id="gameplayAnimationPanel" class="gameplay-taxonomy-panel view-hidden" aria-label="动画配置"></div>
+                            <div id="gameplayWaveManagerPanel" class="gameplay-wave-manager view-hidden" aria-label="波次管理器"></div>
                         </form>
                     </div>
                 </section>
@@ -368,6 +407,14 @@
                             </div>
                             <div id="modelPreviewEmpty" class="empty-state">请在左侧列表选择一个模型以预览。</div>
                             <div id="modelPreviewHost" class="gameplay-asset-preview-host view-hidden" aria-label="模型预览"></div>
+                            <div
+                                id="modelPreviewResizeHandle"
+                                class="preview-resize-handle"
+                                role="separator"
+                                aria-orientation="horizontal"
+                                aria-label="拖拽调整模型预览高度"
+                                title="拖拽这里缩小或放大预览区"
+                            ></div>
                         </section>
                         <form id="modelEditorForm" class="gameplay-form">
                             <div class="form-grid two">
@@ -384,6 +431,11 @@
                                 <span>文件路径</span>
                                 <input id="modelDetailPath" type="text" readonly>
                             </label>
+                            <label class="field-block">
+                                <span>全局缩放</span>
+                                <input id="modelDetailGlobalScale" type="number" min="0.01" max="1000" step="0.01" value="1" title="与该模型文件路径绑定；关卡预览与游戏中与实例缩放相乘">
+                            </label>
+                            <p class="section-hint">全局缩放写入 <code>gameAssetConfig.globalModelPathScales</code>，对所有引用此模型路径的关卡 Actor 生效。</p>
                             <div class="section-title-row" style="margin-top:12px;">
                                 <h3>替换模型</h3>
                                 <label class="mini-button upload-button">
@@ -989,6 +1041,9 @@
                         <label class="anim-btn">闲置 (Idle)<input type="file" data-ga-anim="idle" accept=".glb,.gltf" /></label>
                         <label class="anim-btn">行走 (Walk)<input type="file" data-ga-anim="walk" accept=".glb,.gltf" /></label>
                         <label class="anim-btn">跑步 (Run)<input type="file" data-ga-anim="run" accept=".glb,.gltf" /></label>
+                        <label class="anim-btn">普通攻击<input type="file" data-ga-anim="attack" accept=".glb,.gltf" /></label>
+                        <label class="anim-btn">E 技能<input type="file" data-ga-anim="skillE" accept=".glb,.gltf" /></label>
+                        <label class="anim-btn">R 技能<input type="file" data-ga-anim="skillR" accept=".glb,.gltf" /></label>
                     </div>
                 </div>
                 <div id="exploreGameplayMountLevel"></div>

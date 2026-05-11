@@ -1,6 +1,9 @@
 import * as THREE from "three";
+import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 
+import { lookupGlobalModelPathScale } from "../assets/model-path-scale";
 import {
   TILE_SIZE,
   cellKey,
@@ -416,7 +419,10 @@ export function renderRuntimeMapScene(options: {
     }
     addEndpointMarker(mapGroup, map.path[map.path.length - 1], 0xd87880, "基地", geoVerticalStretch);
   } else {
-    addEndpointMarker(mapGroup, map.path[0], map.theme.accent, "探索起点", geoVerticalStretch);
+    const exploreStart = map.exploreStart ?? map.path[0];
+    if (exploreStart) {
+      addEndpointMarker(mapGroup, exploreStart, map.theme.accent, "探索起点", geoVerticalStretch);
+    }
   }
 
   // Safe zone floor overlays
@@ -901,43 +907,91 @@ function addEndpointMarker(
   mapGroup.add(group);
 }
 
+async function loadActorModelRoot(
+  modelPath: string | undefined,
+  gltfLoader: GLTFLoader,
+  objLoader: OBJLoader | undefined,
+  fbxLoader: FBXLoader | undefined,
+): Promise<THREE.Object3D | null> {
+  const u = String(modelPath ?? "").trim();
+  if (!u) {
+    return null;
+  }
+  if (/\.(glb|gltf)(\?|$)/i.test(u)) {
+    const gltf = await new Promise<{ scene: THREE.Group }>((resolve, reject) => {
+      gltfLoader.load(u, resolve, undefined, reject);
+    });
+    return gltf.scene.clone(true);
+  }
+  if (/\.obj(\?|$)/i.test(u)) {
+    if (!objLoader) {
+      console.warn(`[MapActors] 缺少 OBJLoader，跳过 ${u}`);
+      return null;
+    }
+    const obj = await objLoader.loadAsync(u);
+    return obj.clone(true);
+  }
+  if (/\.fbx(\?|$)/i.test(u)) {
+    if (!fbxLoader) {
+      console.warn(`[MapActors] 缺少 FBXLoader，跳过 ${u}`);
+      return null;
+    }
+    const root = await fbxLoader.loadAsync(u);
+    return root.clone(true);
+  }
+  console.warn(`[MapActors] 不支持的格式: ${u}`);
+  return null;
+}
+
 export async function loadMapActors(options: {
   group: THREE.Group;
   map: MapDefinition;
   gltfLoader: GLTFLoader;
+  objLoader?: OBJLoader;
+  fbxLoader?: FBXLoader;
+  globalModelPathScales?: Record<string, number>;
   isStale?: () => boolean;
   playfieldScale?: number;
   yOffset?: number;
 }): Promise<void> {
-  const { group, map, gltfLoader, isStale, playfieldScale = 1, yOffset = 0 } = options;
+  const {
+    group,
+    map,
+    gltfLoader,
+    objLoader,
+    fbxLoader,
+    globalModelPathScales,
+    isStale,
+    playfieldScale = 1,
+    yOffset = 0,
+  } = options;
   const actors = map.actors ?? [];
   if (!actors.length) return;
 
   await Promise.allSettled(
     actors.map(async (actor) => {
       try {
-        const gltf = await new Promise<{ scene: THREE.Group }>((resolve, reject) => {
-          gltfLoader.load(actor.modelPath, resolve, undefined, reject);
-        });
-        if (isStale?.()) return;
-        const mesh = gltf.scene.clone(true);
+        const root = await loadActorModelRoot(actor.modelPath, gltfLoader, objLoader, fbxLoader);
+        if (!root || isStale?.()) return;
         const worldPos = cellToWorld({ col: actor.col, row: actor.row });
         const ox = actor.worldOffsetMeters?.x ?? 0;
         const oy = actor.worldOffsetMeters?.y ?? 0;
         const oz = actor.worldOffsetMeters?.z ?? 0;
-        const sc = (actor.scale ?? 1) > 0 ? (actor.scale ?? 1) : 1;
-        mesh.position.set(worldPos.x + ox, oy + yOffset, worldPos.z + oz);
-        mesh.rotation.y = ((actor.rotation ?? 0) * Math.PI) / 180;
+        const instanceSc = (actor.scale ?? 1) > 0 ? (actor.scale ?? 1) : 1;
+        const pathSc = lookupGlobalModelPathScale(globalModelPathScales, actor.modelPath);
+        const sc = instanceSc * pathSc;
+        root.position.set(worldPos.x + ox, oy + yOffset, worldPos.z + oz);
+        root.rotation.y = ((actor.rotation ?? 0) * Math.PI) / 180;
         if (playfieldScale !== 1) {
-          mesh.scale.set(sc, sc * playfieldScale, sc);
+          root.scale.set(sc, sc * playfieldScale, sc);
         } else {
-          mesh.scale.setScalar(sc);
+          root.scale.setScalar(sc);
         }
-        mesh.traverse((child) => {
+        root.traverse((child) => {
           if ((child as THREE.Mesh).isMesh) (child as THREE.Mesh).castShadow = true;
         });
         if (!isStale?.()) {
-          group.add(mesh);
+          group.add(root);
         }
       } catch (e) {
         console.warn(`[MapActors] 加载失败 ${actor.modelPath}:`, e);

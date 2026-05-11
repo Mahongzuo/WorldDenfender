@@ -1715,6 +1715,48 @@ button { color: inherit; font: inherit; }
   border: 1px solid rgba(255, 255, 255, 0.2);
 }
 
+.game-victory-overlay .game-over-vignette {
+  background:
+    radial-gradient(circle at 50% 30%, rgba(255, 242, 184, 0.22) 0%, rgba(255, 242, 184, 0) 30%),
+    radial-gradient(circle at center, rgba(24, 94, 78, 0.12) 20%, rgba(9, 62, 56, 0.72) 100%);
+  animation: game-victory-bloom 3.2s ease-in-out infinite;
+}
+
+.game-victory-overlay .game-over-card {
+  background: linear-gradient(180deg, rgba(11, 32, 26, 0.96), rgba(5, 18, 24, 0.94));
+  border: 2px solid rgba(255, 214, 102, 0.72);
+  box-shadow:
+    0 0 90px rgba(56, 195, 166, 0.28),
+    0 0 40px rgba(255, 210, 90, 0.24);
+}
+
+.game-victory-overlay .game-over-title {
+  color: #ffe082;
+  text-shadow:
+    0 0 24px rgba(255, 224, 130, 0.75),
+    0 0 48px rgba(53, 211, 180, 0.3);
+}
+
+.game-victory-overlay .game-over-reason {
+  color: rgba(230, 247, 240, 0.9);
+}
+
+.game-victory-overlay .game-over-actions .premium {
+  background: linear-gradient(135deg, #ffd56a, #3ccfb1);
+  color: #11342f;
+}
+
+@keyframes game-victory-bloom {
+  0%, 100% {
+    opacity: 0.78;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.03);
+  }
+}
+
 /* ===== 安全区商店 ===== */
 .safe-zone-shop {
   position: fixed;

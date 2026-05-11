@@ -1,4 +1,4 @@
-import { LEVEL_CONTENT_BROWSER_FILTER_ORDER, TOOL_LABELS } from './content.js';
+import { LEVEL_CONTENT_BROWSER_FILTER_ORDER, TOOL_LABELS, getToolLabel } from './content.js';
 import { escapeAttr, escapeHtml } from './utils.js';
 import { lcbSection, sortCells } from './html-builders.js';
 import { ensureExplorationLayout } from './layout-presets.js';
@@ -176,7 +176,7 @@ export function renderLevelContentBrowser(refs, env) {
                 })
                 .join('');
         }
-        if (spHtml) sections.push(lcbSection('敌人出口', spHtml));
+            if (spHtml) sections.push(lcbSection(getToolLabel('spawn', activeEditorMode), spHtml));
     }
 
     if (want('path')) {
@@ -203,11 +203,11 @@ export function renderLevelContentBrowser(refs, env) {
                     probe: { col: c.col, row: c.row },
                     icon: '径',
                     title: '路径格 — (' + c.col + ',' + c.row + ')',
-                    sub: '敌人路径'
+                    sub: getToolLabel(activeEditorMode === 'explore' ? 'road' : 'path', activeEditorMode)
                 });
             })
             .join('');
-        if (pathHtml) sections.push(lcbSection('敌人路径', pathHtml));
+        if (pathHtml) sections.push(lcbSection(getToolLabel(activeEditorMode === 'explore' ? 'road' : 'path', activeEditorMode), pathHtml));
     }
 
     if (want('buildSlot') && activeEditorMode === 'defense') {
@@ -250,10 +250,10 @@ export function renderLevelContentBrowser(refs, env) {
                 sub: '(' + opz.col + ',' + opz.row + ')'
             });
         }
-        if (obHtml) sections.push(lcbSection('防守目标', obHtml));
+        if (obHtml) sections.push(lcbSection(getToolLabel('objective', activeEditorMode), obHtml));
     }
 
-    if (want('explorePoint') && Array.isArray(map.explorationPoints) && map.explorationPoints.length) {
+    if (activeEditorMode === 'explore' && want('explorePoint') && Array.isArray(map.explorationPoints) && map.explorationPoints.length) {
         var epHtml = map.explorationPoints
             .map(function (p) {
                 return lcbItemButton(env, {

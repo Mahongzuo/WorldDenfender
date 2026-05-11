@@ -81,11 +81,11 @@ export function updateStageHintText(refs, env) {
     }
     if (env.getActiveTool() === 'boardImage') {
         refs.stageHintExtra.textContent =
-            '拖入配图到棋盘；图层叠在格子上方、路径与标记手柄之下。棋盘配图工具下拖拽移动，四角/四边手柄或滚轮调宽度；右侧「棋盘配图」可排序与删除；Esc 取消选中。亦可切到「选择/拖拽」后点选配图编辑。';
+            '拖入配图到棋盘；图层叠在格子上方、路径与标记手柄之下。棋盘配图工具下拖拽移动，四角/四边手柄或滚轮调宽度；右侧「棋盘配图」可排序、勾选「隐藏」（仅棋盘编辑视图不叠图，预览与游戏中仍显示）与删除；Esc 取消选中。亦可切到「选择/拖拽」后点选配图编辑。';
         return;
     }
-    refs.stageHintExtra.textContent =
-        '点击格子放置道路/障碍等；拖拽移动 Actor。「选择/拖拽」下仍可点选棋盘配图并用边角手柄调整大小；配图列表在画布右侧；Esc 取消配图选中后再点格子以避免误拖图层。';
+        refs.stageHintExtra.textContent =
+        '点击格子放置道路/障碍等；拖拽移动 Actor。「选择/拖拽」下仍可点选棋盘配图并用边角手柄调整大小；配图列表在画布右侧，可勾选「隐藏」以临时不叠配图、便于编辑格点；Esc 取消配图选中后再点格子以避免误拖图层。';
 }
 
 export function initPreviewLayer(refs, env) {
@@ -100,6 +100,7 @@ export function initPreviewLayer(refs, env) {
                 getGeoMappingEnabled: env.getGeoMappingEnabled,
                 getActiveEditorMode: env.getActiveEditorMode,
                 getCatalog: env.getPreviewCatalog,
+                getGlobalModelPathScales: env.getGlobalModelPathScales,
                 onSelectActor: function (actorId) {
                     onPreviewSelectActor(env, actorId);
                 },

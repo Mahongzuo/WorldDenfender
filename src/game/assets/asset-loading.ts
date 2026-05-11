@@ -5,6 +5,8 @@ import { clone as skeletonClone } from "three/examples/jsm/utils/SkeletonUtils.j
 
 import { arrayBufferToBase64 } from "../core/browser-utils";
 import { clamp } from "../core/runtime-grid";
+import { DEFAULT_CUSTOM_ANIMATION_URLS, DEFAULT_PLAYER_MODEL_URLS } from "../core/game-config";
+import { mergeEmbeddedExplorationLocomotion } from "../explore/explore-locomotion-clips";
 import type {
   BuildId,
   BuildSpec,
@@ -16,6 +18,7 @@ import type {
 } from "../core/types";
 
 import { sanitizeGlobalGameAudioFromEditor } from "../audio/game-audio";
+import { canonicalModelPathScaleKey, clampGlobalPathModelScale } from "./model-path-scale";
 
 export interface AssetLoaderDependencies {
   gltfLoader: GLTFLoader;
@@ -24,6 +27,7 @@ export interface AssetLoaderDependencies {
 
 export interface LoadedAssetConfig {
   modelScales: Partial<Record<ModelTarget, number>>;
+  globalModelPathScales: Record<string, number>;
   customModelUrls: Partial<Record<BuildId, string>>;
   customDropModelUrl: string;
   customPlayerModelUrl: string;
@@ -37,10 +41,45 @@ export interface LoadedAssetConfig {
   globalScreenUi: GlobalScreenUiConfig;
 }
 
+function normalizePersistedPathScaleTable(raw: unknown): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return out;
+  }
+  const src = raw as Record<string, unknown>;
+  for (const key of Object.keys(src)) {
+    const nk = canonicalModelPathScaleKey(key);
+    if (!nk) continue;
+    const parsed = typeof src[key] === "number" && Number.isFinite(src[key] as number) ? (src[key] as number) : Number(src[key]);
+    if (!Number.isFinite(parsed) || parsed <= 0) continue;
+    out[nk] = clampGlobalPathModelScale(parsed);
+  }
+  return out;
+}
+
 export interface LoadedCustomModel {
   model: THREE.Group;
   animations: THREE.AnimationClip[];
   data: ArrayBuffer;
+}
+
+const EMBEDDED_ANIMATION_CLIPS_KEY = "embeddedAnimationClips";
+
+export function attachEmbeddedAnimationClips(target: THREE.Object3D, clips: readonly THREE.AnimationClip[] | null | undefined): void {
+  const next = Array.isArray(clips) ? clips.filter((clip): clip is THREE.AnimationClip => clip instanceof THREE.AnimationClip) : [];
+  if (next.length > 0) {
+    target.userData[EMBEDDED_ANIMATION_CLIPS_KEY] = next;
+  } else {
+    delete target.userData[EMBEDDED_ANIMATION_CLIPS_KEY];
+  }
+}
+
+export function getEmbeddedAnimationClips(target: THREE.Object3D | null | undefined): readonly THREE.AnimationClip[] {
+  if (!target) {
+    return [];
+  }
+  const raw = target.userData[EMBEDDED_ANIMATION_CLIPS_KEY];
+  return Array.isArray(raw) ? raw.filter((clip): clip is THREE.AnimationClip => clip instanceof THREE.AnimationClip) : [];
 }
 
 export async function loadPersistedGameAssetConfig(
@@ -63,19 +102,25 @@ export async function loadPersistedGameAssetConfig(
 
   const customModelUrls = { ...(cfg.customModelUrls ?? {}) };
   const customDropModelUrl = cfg.customDropModelUrl ?? "";
-  const customPlayerModelUrl = cfg.customPlayerModelUrl ?? "";
-  const customAnimationUrls = { idle: "", walk: "", run: "", ...(cfg.customAnimationUrls ?? {}) };
+  const customPlayerModelUrl = String(cfg.customPlayerModelUrl ?? "").trim() || DEFAULT_PLAYER_MODEL_URLS[0] || "";
+  const customAnimationUrls = { ...DEFAULT_CUSTOM_ANIMATION_URLS, ...(cfg.customAnimationUrls ?? {}) };
+  const customPlayerAsset = customPlayerModelUrl ? await loadModelAssetFromUrl(dependencies, customPlayerModelUrl) : null;
+  const customAnimations = await loadCustomAnimationsFromEditorUrls(dependencies, customAnimationUrls);
+  if (customPlayerAsset) {
+    mergeEmbeddedExplorationLocomotion(customAnimations, customPlayerAsset.animations);
+  }
 
   return {
     modelScales,
+    globalModelPathScales: normalizePersistedPathScaleTable(cfg.globalModelPathScales ?? null),
     customModelUrls,
     customDropModelUrl,
     customPlayerModelUrl,
     customAnimationUrls,
     customModels: await restoreCustomModels(dependencies, customModelUrls),
     customDropModel: customDropModelUrl ? await loadModelFromUrl(dependencies, customDropModelUrl) : null,
-    customPlayerModel: customPlayerModelUrl ? await loadModelFromUrl(dependencies, customPlayerModelUrl) : null,
-    customAnimations: await loadCustomAnimationsFromEditorUrls(dependencies, customAnimationUrls),
+    customPlayerModel: customPlayerAsset ? customPlayerAsset.model : null,
+    customAnimations,
     playerExploreTransform: mergePlayerExploreTransform(cfg.playerExploreTransform),
     globalAudio: sanitizeGlobalGameAudioFromEditor(cfg.globalAudio) ?? {},
     globalScreenUi: sanitizeGlobalScreenUiFromEditor(cfg.globalScreenUi) ?? {},
@@ -179,7 +224,7 @@ function looksLikeGlbMagic(data: ArrayBuffer): boolean {
   return u8[0] === 0x67 && u8[1] === 0x6c && u8[2] === 0x54 && u8[3] === 0x46;
 }
 
-export async function loadModelFromUrl(dependencies: AssetLoaderDependencies, url: string): Promise<THREE.Group> {
+async function fetchModelArrayBuffer(url: string): Promise<ArrayBuffer> {
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error("模型资源加载失败");
@@ -201,7 +246,36 @@ export async function loadModelFromUrl(dependencies: AssetLoaderDependencies, ur
   if (pathHint.endsWith(".glb") && !looksLikeGlbMagic(data)) {
     throw new Error(`内容与 GLB 二进制不符（可能下载到了错误文件）：${url}`);
   }
-  return parseModelData(dependencies, url, data);
+  return data;
+}
+
+export async function loadModelAssetFromUrl(
+  dependencies: AssetLoaderDependencies,
+  url: string,
+): Promise<LoadedCustomModel> {
+  const data = await fetchModelArrayBuffer(url);
+  const lowerUrl = url.split("?")[0].toLowerCase();
+  if (lowerUrl.endsWith(".obj")) {
+    return {
+      model: prepareUploadedModel(dependencies.objLoader.parse(new TextDecoder().decode(data))),
+      animations: [],
+      data,
+    };
+  }
+  const gltf = await new Promise<any>((resolve, reject) => {
+    dependencies.gltfLoader.parse(data, "", resolve, reject);
+  });
+  const model = prepareUploadedModel(gltf.scene);
+  attachEmbeddedAnimationClips(model, gltf.animations ?? []);
+  return {
+    model,
+    animations: gltf.animations ?? [],
+    data,
+  };
+}
+
+export async function loadModelFromUrl(dependencies: AssetLoaderDependencies, url: string): Promise<THREE.Group> {
+  return (await loadModelAssetFromUrl(dependencies, url)).model;
 }
 
 export async function loadCustomModelAsset(
@@ -221,8 +295,10 @@ export async function loadCustomModelAsset(
   const gltf = await new Promise<any>((resolve, reject) => {
     dependencies.gltfLoader.parse(data, "", resolve, reject);
   });
+  const model = prepareUploadedModel(gltf.scene);
+  attachEmbeddedAnimationClips(model, gltf.animations ?? []);
   return {
-    model: prepareUploadedModel(gltf.scene),
+    model,
     animations: gltf.animations ?? [],
     data,
   };
