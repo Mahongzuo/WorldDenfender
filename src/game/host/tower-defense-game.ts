@@ -1787,6 +1787,7 @@ export class TowerDefenseGame {
     this.exploreCombat.syncMapContent({
       bosses: map.exploreBosses,
       spawners: map.exploreSpawners,
+      waveRules: map.exploreWaveRules,
     });
     this.exploreCombat.restoreDefeatedBossIds(this.defeatedExploreBossIds);
     const runtimeState = buildRuntimeMapState(map);
@@ -1889,6 +1890,8 @@ export class TowerDefenseGame {
     this.actorGroup.visible = false;
     this.exploreEnemyGroup.visible = false;
     this.exploreProjectileGroup.visible = false;
+    // 恢复塔防 groups 到正常 Y；将探索 groups 沉到地下避免串台
+    this.sinkGroupsForModeIsolation("defense");
     this.exploreHud.setAttribute("aria-hidden", "true");
     this.safeZoneShopPanel.setAttribute("aria-hidden", "true");
     this.inSafeZone = false;
@@ -1952,6 +1955,8 @@ export class TowerDefenseGame {
     this.actorGroup.visible = true;
     this.exploreEnemyGroup.visible = true;
     this.exploreProjectileGroup.visible = true;
+    // 将塔防 groups 沉到地下，探索 groups 恢复正常 Y，防止视觉串台
+    this.sinkGroupsForModeIsolation("explore");
     this.exploreHud.setAttribute("aria-hidden", "false");
     this.gameRootEl.classList.add("game-root--explore");
     // Close gacha panel if it was open
@@ -1972,6 +1977,27 @@ export class TowerDefenseGame {
     this.buildingDefenseHud.syncSkillHudScaleCorrection(this.buildings);
     this.buildingDefenseHud.layoutAll(this.buildings);
     this.syncGeoSquashCompensationAcrossAttachedMeshes();
+  }
+
+  /**
+   * 模式隔离：将非当前模式的 3D groups 沉到 Y=-500 以下，
+   * 避免塔防模式的防御塔攻击特效、敌人等在探索模式可见（反之亦然）。
+   */
+  private sinkGroupsForModeIsolation(activeMode: "defense" | "explore"): void {
+    const SINK_Y = -500;
+    if (activeMode === "defense") {
+      // 塔防正常；探索沉底
+      this.exploreEnemyGroup.position.y = SINK_Y;
+      this.exploreProjectileGroup.position.y = SINK_Y;
+    } else {
+      // 探索正常；塔防沉底（buildGroup/enemyGroup/dropGroup 已被 applyPlayfieldVisualScale 管理，
+      // 这里额外把它们偏移到不可见区域）
+      for (const group of [this.buildGroup, this.enemyGroup, this.dropGroup]) {
+        group.position.y = SINK_Y;
+      }
+      this.exploreEnemyGroup.position.y = 0;
+      this.exploreProjectileGroup.position.y = 0;
+    }
   }
 
   /** GEO 棋盘用 (sx,1,sz) 放大 XZ；子网格需同步还原/施加 Y 向补偿以免「拍扁」或模式切换残留错误倍数 */

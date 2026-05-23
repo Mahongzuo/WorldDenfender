@@ -100,6 +100,10 @@ export interface SaveData {
   exploreMapIndex: number;
   baseHp: number;
   wave: number;
+  /** 探索肉鸽当前波次 */
+  exploreWave?: number;
+  /** 探索肉鸽已装备技能模组 */
+  exploreEquippedModules?: Array<{ moduleId: string; level: number }>;
   nextWaveDelay: number;
   spawnRemaining: number;
   spawnCooldown: number;
@@ -313,6 +317,62 @@ export interface ExploreSpawnerPlacement {
   totalLimit?: number;
   disableWhenBossDefeated?: boolean;
   rewards?: ExploreRewardSpec[];
+  /** 肉鸽波次模式：仅在指定波次激活（未设置则始终激活，兼容旧行为） */
+  activeOnWaves?: number[];
+}
+
+/* ───── 探索肉鸽：波次刷怪规则 ───── */
+
+export interface ExploreWaveRule {
+  id?: string;
+  /** 波次号（1-based） */
+  waveNumber: number;
+  /** 绑定的刷怪点 id；未设置时使用所有刷怪点 */
+  spawnerId?: string;
+  /** 本条规则出怪数量 */
+  count: number;
+  /** 出怪间隔（秒） */
+  interval?: number;
+  /** 敌人属性标签（映射到 enemyTypeId） */
+  enemyTypeId?: string;
+  element?: ExploreElement;
+  /** 覆盖模型路径 */
+  overrideModelPath?: string;
+  overrideModelScale?: number;
+  /** 覆盖 HP / 攻击 / 速度 */
+  overrideHp?: number;
+  overrideAttack?: number;
+  overrideSpeed?: number;
+  /** 覆盖奖励 */
+  overrideRewardMoney?: number;
+  overrideRewardXp?: number;
+}
+
+/* ───── 探索肉鸽：技能模组 ───── */
+
+export type ExploreSkillSlot = "basic" | "skillE" | "skillR" | "passive";
+
+export interface ExploreSkillModuleDef {
+  id: string;
+  name: string;
+  description: string;
+  slot: ExploreSkillSlot;
+  /** 品质 1–3（普通/稀有/传奇） */
+  rarity: number;
+  icon: string;
+  /** 数值修正：与当前等级加成叠乘 */
+  damageMult?: number;
+  cooldownMult?: number;
+  radiusMult?: number;
+  /** 额外效果标签 */
+  effectTags?: string[];
+  /** 每级提升系数 */
+  levelScaling?: number;
+}
+
+export interface ExploreEquippedModule {
+  moduleId: string;
+  level: number;
 }
 
 export interface ExplorePickupPlacement {
@@ -416,6 +476,8 @@ export interface MapDefinition {
   exploreBosses?: ExploreBossPlacement[];
   exploreSpawners?: ExploreSpawnerPlacement[];
   explorePickups?: ExplorePickupPlacement[];
+  /** 肉鸽波次刷怪规则（与塔防 waveRules 对应的探索版） */
+  exploreWaveRules?: ExploreWaveRule[];
   /** 关卡地域化：敌兵/防御塔 HUD 展示名（同步到编辑器 map.defenseFlavor） */
   defenseFlavor?: DefenseMapFlavor;
 }
@@ -461,6 +523,7 @@ export interface EditorLevelMap {
   exploreBosses?: Array<Record<string, unknown>>;
   exploreSpawners?: Array<Record<string, unknown>>;
   explorePickups?: Array<Record<string, unknown>>;
+  exploreWaveRules?: Array<Record<string, unknown>>;
   explorationLayout?: EditorExplorationLayout;
   boardImageLayers?: MapBoardImageLayer[];
   /** 过场视频配置 */
@@ -511,6 +574,16 @@ export interface EditorExplorationLayout {
 
 /** 探索模式可调数值（地图级）；未设置时用游戏内默认 */
 export interface ExploreGameplaySettings {
+  /** 是否开启肉鸽波次模式（开启后刷怪点按波次节奏出怪） */
+  roguelikeWaveMode?: boolean;
+  /** 波次间歇时间（秒），玩家在此期间选择升级 */
+  wavePauseSec?: number;
+  /** 首波延迟（秒） */
+  firstWaveDelaySec?: number;
+  /** 总波次数（打完后触发 Boss 战） */
+  totalWaves?: number;
+  /** Boss 战开启所需最低波次 */
+  bossUnlockWave?: number;
   /** 慢走按住时的世界空间移动速度（与动画速率无关） */
   moveSpeedWalk?: number;
   /** 奔跑时移动速度 */

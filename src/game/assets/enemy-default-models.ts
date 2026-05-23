@@ -26,10 +26,29 @@ export function getDefaultEnemyBodyRadius(type: EnemyType): number {
     default:
       break;
   }
-  return 0.45 * scale;
+  return 0.9 * scale;
 }
 
 export function getEnemyTargetBodyDiameter(enemy: Enemy): number {
   const r = enemy.bodyRadius ?? getDefaultEnemyBodyRadius(enemy.type);
   return r * 2;
+}
+
+/**
+ * 关卡/城市配置里的 modelScale 作为 auto-fit 后的微调倍率（0.05–8）。
+ * 旧编辑器数据有时用极小值（如 0.01）手动缩小超大 GLB；在已有 auto-fit 后
+ * 再乘这些值会把正常尺寸的模型缩到不可见。
+ */
+export function resolveEnemyModelUserScale(enemy: Enemy): number {
+  const raw = enemy.modelScale ?? 1;
+  if (!Number.isFinite(raw) || raw <= 0) {
+    return 1;
+  }
+  const customPath = enemy.modelPath?.trim();
+  const defaultPath = getDefaultEnemyGlbUrl(enemy.type);
+  const hasCustomModel = !!customPath && customPath !== defaultPath;
+  if (hasCustomModel && raw < 0.05) {
+    return 1;
+  }
+  return Math.min(8, Math.max(0.05, raw));
 }

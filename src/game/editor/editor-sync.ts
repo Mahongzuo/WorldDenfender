@@ -11,6 +11,7 @@ import type {
   ExploreGameplaySettings,
   ExplorePickupPlacement,
   ExploreSpawnerPlacement,
+  ExploreWaveRule,
   GameMode,
   GeoMapConfig,
   GridCell,
@@ -286,6 +287,35 @@ function sanitizeExplorePickups(raw: unknown, project: (cell: EditorCell) => Gri
       ...(typeof r.modelPath === "string" && r.modelPath ? { modelPath: r.modelPath } : {}),
       modelScale: positiveNumber(r.modelScale, 1, 8),
       collectRadius: positiveNumber(r.collectRadius, 1.25, 20),
+    });
+  }
+  return out.length ? out : undefined;
+}
+
+function sanitizeExploreWaveRules(raw: unknown): ExploreWaveRule[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: ExploreWaveRule[] = [];
+  for (let i = 0; i < raw.length; i += 1) {
+    const item = raw[i];
+    if (!item || typeof item !== "object") continue;
+    const r = item as Record<string, unknown>;
+    const waveNumber = Math.max(1, Math.round(Number(r.waveNumber) || 1));
+    const count = Math.max(1, Math.round(Number(r.count) || 1));
+    out.push({
+      ...(typeof r.id === "string" && r.id ? { id: r.id } : { id: `ewr-${i + 1}` }),
+      waveNumber,
+      count,
+      ...(typeof r.spawnerId === "string" && r.spawnerId ? { spawnerId: r.spawnerId } : {}),
+      ...(typeof r.interval === "number" && r.interval > 0 ? { interval: Math.max(0.1, r.interval) } : {}),
+      ...(typeof r.enemyTypeId === "string" && r.enemyTypeId ? { enemyTypeId: r.enemyTypeId } : {}),
+      ...(sanitizeDefenseElement(r.element) ? { element: sanitizeDefenseElement(r.element) } : {}),
+      ...(typeof r.overrideModelPath === "string" && r.overrideModelPath ? { overrideModelPath: r.overrideModelPath } : {}),
+      ...(typeof r.overrideModelScale === "number" && r.overrideModelScale > 0 ? { overrideModelScale: r.overrideModelScale } : {}),
+      ...(typeof r.overrideHp === "number" && r.overrideHp > 0 ? { overrideHp: r.overrideHp } : {}),
+      ...(typeof r.overrideAttack === "number" && r.overrideAttack > 0 ? { overrideAttack: r.overrideAttack } : {}),
+      ...(typeof r.overrideSpeed === "number" && r.overrideSpeed > 0 ? { overrideSpeed: r.overrideSpeed } : {}),
+      ...(typeof r.overrideRewardMoney === "number" && r.overrideRewardMoney >= 0 ? { overrideRewardMoney: r.overrideRewardMoney } : {}),
+      ...(typeof r.overrideRewardXp === "number" && r.overrideRewardXp >= 0 ? { overrideRewardXp: r.overrideRewardXp } : {}),
     });
   }
   return out.length ? out : undefined;
@@ -823,6 +853,7 @@ export function editorLevelToRuntimeMap(
   const exploreBosses = mode === "explore" ? sanitizeExploreBosses(editorMap.exploreBosses, project) : undefined;
   const exploreSpawners = mode === "explore" ? sanitizeExploreSpawners(editorMap.exploreSpawners, project) : undefined;
   const explorePickups = mode === "explore" ? sanitizeExplorePickups(editorMap.explorePickups, project) : undefined;
+  const exploreWaveRules = mode === "explore" ? sanitizeExploreWaveRules(editorMap.exploreWaveRules) : undefined;
 
   const levelGeo = resolveEditorLevelGeo(level);
 
@@ -877,6 +908,7 @@ export function editorLevelToRuntimeMap(
           ...(exploreBosses?.length ? { exploreBosses } : {}),
           ...(exploreSpawners?.length ? { exploreSpawners } : {}),
           ...(explorePickups?.length ? { explorePickups } : {}),
+          ...(exploreWaveRules?.length ? { exploreWaveRules } : {}),
         }
       : {}),
     ...(mode === "defense"

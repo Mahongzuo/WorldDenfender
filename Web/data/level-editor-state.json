@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "savedAt": "2026-05-11T13:08:13.579Z",
+  "savedAt": "2026-05-23T06:28:56.813Z",
   "catalog": {
     "gameTypes": [],
     "phaseTypes": [],
@@ -1169,7 +1169,7 @@
             "card"
           ],
           "rarity": "S",
-          "placement": "",
+          "placement": "roadside",
           "element": "light",
           "functionTags": [
             "areaAttack",
@@ -1205,7 +1205,7 @@
             "card"
           ],
           "rarity": "S",
-          "placement": "",
+          "placement": "road",
           "element": "force",
           "functionTags": [
             "singleTarget",
@@ -1241,7 +1241,7 @@
             "card"
           ],
           "rarity": "S",
-          "placement": "",
+          "placement": "roadside",
           "element": "sound",
           "functionTags": [
             "areaAttack",
@@ -1277,7 +1277,7 @@
             "card"
           ],
           "rarity": "S",
-          "placement": "",
+          "placement": "roadside",
           "element": "thermal",
           "functionTags": [
             "healing"
@@ -1440,7 +1440,7 @@
             "card"
           ],
           "rarity": "common",
-          "placement": "",
+          "placement": "roadside",
           "element": "force",
           "functionTags": [
             "singleTarget"
@@ -1477,7 +1477,7 @@
             "card"
           ],
           "rarity": "common",
-          "placement": "",
+          "placement": "roadside",
           "element": "thermal",
           "functionTags": [
             "areaAttack"
@@ -1514,7 +1514,7 @@
             "card"
           ],
           "rarity": "common",
-          "placement": "",
+          "placement": "roadside",
           "element": "electric",
           "functionTags": [
             "singleTarget",
@@ -1554,7 +1554,7 @@
             "card"
           ],
           "rarity": "common",
-          "placement": "",
+          "placement": "road",
           "element": "force",
           "functionTags": [
             "areaAttack"
@@ -1591,7 +1591,7 @@
             "card"
           ],
           "rarity": "common",
-          "placement": "",
+          "placement": "roadside",
           "element": "sound",
           "functionTags": [
             "healing"
@@ -6101,7 +6101,7 @@
               "attack": ""
             },
             "modelPath": "/GameModels/Enemy/____.glb",
-            "modelScale": 0.01
+            "modelScale": 1
           },
           "cityCode": "北京",
           "cityName": "北京",
@@ -8635,7 +8635,7 @@
       "bianque": 1
     },
     "globalModelPathScales": {
-      "/gamemodels/enemy/____.glb": 0.01
+      "/gamemodels/enemy/____.glb": 1
     },
     "playerExploreTransform": {
       "offsetMeters": {
@@ -20028,7 +20028,7 @@
             "src": "/Arts/Maps/%E5%8C%97%E4%BA%AC/%E5%8C%97%E4%BA%AC-%E4%BA%AC%E5%9F%8E%E5%A5%87%E9%81%87%E8%AE%B0-defense-board.jpg",
             "centerX": 0,
             "centerY": 0,
-            "widthPct": 43.800364498259114,
+            "widthPct": 103.53706706176925,
             "opacity": 1,
             "order": 0,
             "aspect": 0.6419753086419753
@@ -45889,42 +45889,21 @@
             "name": "趵突泉敌人出口",
             "col": 0,
             "row": 3,
-            "pathId": "path-baotu-spring",
-            "enemyTypeId": "basic",
-            "waveNumbers": [
-              1
-            ],
-            "waveNumber": 1,
-            "count": 12,
-            "interval": 0.95
+            "pathId": "path-baotu-spring"
           },
           {
             "id": "spawn-minghu-bridge",
             "name": "明湖桥敌人出口",
             "col": 0,
             "row": 8,
-            "pathId": "path-minghu-bridge",
-            "enemyTypeId": "hacker",
-            "waveNumbers": [
-              2
-            ],
-            "waveNumber": 2,
-            "count": 9,
-            "interval": 1.15
+            "pathId": "path-minghu-bridge"
           },
           {
             "id": "spawn-qianfo-hill",
             "name": "千佛山敌人出口",
             "col": 0,
             "row": 14,
-            "pathId": "path-qianfo-hill",
-            "enemyTypeId": "swarm",
-            "waveNumbers": [
-              3
-            ],
-            "waveNumber": 3,
-            "count": 16,
-            "interval": 0.7
+            "pathId": "path-qianfo-hill"
           }
         ],
         "enemyExits": [
@@ -45933,42 +45912,21 @@
             "name": "趵突泉敌人出口",
             "col": 0,
             "row": 3,
-            "pathId": "path-baotu-spring",
-            "enemyTypeId": "basic",
-            "waveNumbers": [
-              1
-            ],
-            "waveNumber": 1,
-            "count": 12,
-            "interval": 0.95
+            "pathId": "path-baotu-spring"
           },
           {
             "id": "spawn-minghu-bridge",
             "name": "明湖桥敌人出口",
             "col": 0,
             "row": 8,
-            "pathId": "path-minghu-bridge",
-            "enemyTypeId": "hacker",
-            "waveNumbers": [
-              2
-            ],
-            "waveNumber": 2,
-            "count": 9,
-            "interval": 1.15
+            "pathId": "path-minghu-bridge"
           },
           {
             "id": "spawn-qianfo-hill",
             "name": "千佛山敌人出口",
             "col": 0,
             "row": 14,
-            "pathId": "path-qianfo-hill",
-            "enemyTypeId": "swarm",
-            "waveNumbers": [
-              3
-            ],
-            "waveNumber": 3,
-            "count": 16,
-            "interval": 0.7
+            "pathId": "path-qianfo-hill"
           }
         ],
         "objectivePoint": {
@@ -46406,7 +46364,12 @@
           "introVideo": {
             "url": "/Arts/LevelVideos/%E6%B5%8E%E5%8D%97%E5%B8%82/%E6%B5%8E%E5%8D%97%E5%B8%82-%E6%B5%8E%E5%8D%97test-001.mp4",
             "projectPath": "public/Arts/LevelVideos/济南市/济南市-济南test-001.mp4"
-          }
+          },
+          "waveVideos": [
+            {
+              "afterWave": 1
+            }
+          ]
         }
       },
       "enemyTypes": [
@@ -46423,7 +46386,44 @@
           "reward": 20
         }
       ],
-      "waveRules": [],
+      "waveRules": [
+        {
+          "id": "spawn-baotu-spring-wave-1-rule",
+          "waveNumber": 1,
+          "enemyTypeId": "basic",
+          "count": 12,
+          "interval": 0.95,
+          "spawnPointId": "spawn-baotu-spring",
+          "pathId": "path-baotu-spring",
+          "reward": 50,
+          "overrideModelPath": "",
+          "overrideModelScale": 1
+        },
+        {
+          "id": "spawn-minghu-bridge-wave-2-rule",
+          "waveNumber": 2,
+          "enemyTypeId": "hacker",
+          "count": 9,
+          "interval": 1.15,
+          "spawnPointId": "spawn-minghu-bridge",
+          "pathId": "path-minghu-bridge",
+          "reward": 50,
+          "overrideModelPath": "",
+          "overrideModelScale": 1
+        },
+        {
+          "id": "spawn-qianfo-hill-wave-3-rule",
+          "waveNumber": 3,
+          "enemyTypeId": "swarm",
+          "count": 16,
+          "interval": 0.7,
+          "spawnPointId": "spawn-qianfo-hill",
+          "pathId": "path-qianfo-hill",
+          "reward": 50,
+          "overrideModelPath": "",
+          "overrideModelScale": 1
+        }
+      ],
       "modeProfiles": {
         "towerDefense": {
           "enabled": true

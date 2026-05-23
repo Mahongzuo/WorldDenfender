@@ -5,6 +5,7 @@ import { clone as skeletonClone } from "three/examples/jsm/utils/SkeletonUtils.j
 import {
   getDefaultEnemyGlbUrl,
   getEnemyTargetBodyDiameter,
+  resolveEnemyModelUserScale,
 } from "../assets/enemy-default-models";
 import { clamp } from "../core/runtime-grid";
 import type { Enemy } from "../core/types";
@@ -163,15 +164,34 @@ export class EnemyDefenseVisuals {
         }
       }
 
+      root.position.set(0, 0, 0);
+      root.rotation.set(0, 0, 0);
+      root.scale.set(1, 1, 1);
+      root.updateMatrixWorld(true);
+
+      const boxBefore = new THREE.Box3().setFromObject(root, true);
       const targetDiameter = getEnemyTargetBodyDiameter(enemy);
-      const boxBefore = new THREE.Box3().setFromObject(root);
       const sizeBefore = boxBefore.getSize(new THREE.Vector3());
       const horizontal = Math.max(sizeBefore.x, sizeBefore.z, 0.001);
-      const uniform = targetDiameter / horizontal;
-      const userScale = enemy.modelScale ?? 1;
+      let uniform = targetDiameter / horizontal;
+      if (!Number.isFinite(uniform) || uniform <= 0) {
+        uniform = 1;
+      } else if (uniform > 10) {
+        console.warn(
+          "[EnemyModel] uniform scale 异常:",
+          uniform.toFixed(2),
+          "size=",
+          sizeBefore.x.toFixed(2),
+          sizeBefore.y.toFixed(2),
+          sizeBefore.z.toFixed(2),
+        );
+        uniform = 1;
+      }
+      const userScale = resolveEnemyModelUserScale(enemy);
       root.scale.setScalar(uniform * userScale);
+      root.updateMatrixWorld(true);
 
-      const boxAfter = new THREE.Box3().setFromObject(root);
+      const boxAfter = new THREE.Box3().setFromObject(root, true);
       root.position.y = -boxAfter.min.y;
 
       enemy.mesh.add(root);

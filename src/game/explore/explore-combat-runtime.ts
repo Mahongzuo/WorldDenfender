@@ -11,6 +11,7 @@ import type {
   ExploreProjectile,
   ExploreRewardSpec,
   ExploreSpawnerPlacement,
+  ExploreWaveRule,
   GridCell,
   InventoryItem,
 } from "../core/types";
@@ -23,6 +24,19 @@ import {
   getDefaultExploreBoss,
 } from "./explore-rpg-content";
 import { resolveExploreGameplay } from "./explore-gameplay-settings";
+import {
+  type ExploreWaveTimers,
+  type ExploreWaveSideEffect,
+  createInitialExploreWaveTimers,
+  advanceExploreWaveState,
+  getExploreWaveRulesForWave,
+} from "./explore-wave-spawner";
+import {
+  aggregateSlotModules,
+  getPassiveCritChance,
+  getPassiveDamageReduction,
+  getPassiveSpeedMult,
+} from "./explore-skill-modules";
 
 export interface ExploreCombatHost {
   getPlayerPosition(): THREE.Vector3;
@@ -48,6 +62,15 @@ export interface ExploreCombatHost {
   /** 异步加载关卡里配置的 GLB；失败返回 null（会保留程序化占位体）。 */
   loadExploreGltfScene?(url: string): Promise<THREE.Object3D | null>;
   orientHudToCamera?(hudRoot: THREE.Object3D): void;
+  /** 肉鸽波次开始回调 */
+  onExploreWaveBegin?(wave: number): void;
+  /** 肉鸽波次清完回调 */
+  onExploreWaveClear?(wave: number): void;
+  /** 肉鸽升级选择回调（弹出三选一 UI） */
+  onExploreUpgradeChoice?(wave: number): void;
+  /** 肉鸽全部波次清完 + Boss 战开启 */
+  onExploreAllWavesCleared?(): void;
+  onExploreBossPhaseBegin?(): void;
 }
 
 interface RuntimeSpawnerState {
@@ -76,6 +99,12 @@ export class ExploreCombatRuntime {
   /** 由关卡 explorationLayout.gameplay / MapDefinition.exploreGameplay 同步 */
   private gameplay = resolveExploreGameplay(undefined);
 
+  /* ── 肉鸽波次 ── */
+  private waveTimers: ExploreWaveTimers = createInitialExploreWaveTimers(4);
+  private waveRules: ExploreWaveRule[] = [];
+  private bossPhaseActive = false;
+  private shieldTimer = 0;
+
   constructor(options: {
     enemyGroup: THREE.Group;
     projectileGroup: THREE.Group;
@@ -93,6 +122,8 @@ export class ExploreCombatRuntime {
   /** 载入或切换地图时由宿主调用 */
   syncGameplay(settings?: ExploreGameplaySettings | undefined): void {
     this.gameplay = resolveExploreGameplay(settings ?? undefined);
+    this.waveTimers = createInitialExploreWaveTimers(this.gameplay.firstWaveDelaySec);
+    this.bossPhaseActive = false;
   }
 
   /**
@@ -119,6 +150,7 @@ export class ExploreCombatRuntime {
   syncMapContent(options: {
     bosses?: ExploreBossPlacement[];
     spawners?: ExploreSpawnerPlacement[];
+    waveRules?: ExploreWaveRule[];
   }): void {
     this.bossPlacements = [...(options.bosses ?? [])];
     this.defeatedBossIds.clear();
@@ -127,6 +159,36 @@ export class ExploreCombatRuntime {
       timer: Math.max(0.2, placement.spawnIntervalSec * 0.35),
       spawnedTotal: 0,
     }));
+    this.waveRules = [...(options.waveRules ?? [])];
+  }
+
+  /* ───── 肉鸽波次对外接口 ───── */
+
+  getWaveTimers(): Readonly<ExploreWaveTimers> { return this.waveTimers; }
+  getWaveNumber(): number { return this.waveTimers.wave; }
+  isWaveMode(): boolean { return this.gameplay.roguelikeWaveMode; }
+  isUpgradePending(): boolean { return this.waveTimers.upgradePending; }
+  isBossPhaseActive(): boolean { return this.bossPhaseActive; }
+  isAllWavesCleared(): boolean { return this.waveTimers.allWavesCleared; }
+
+  /** 玩家在 UI 中选择升级后调用 */
+  confirmUpgradeChoice(moduleId: string): void {
+    const toast = this.progress.applyUpgradeChoice(moduleId);
+    if (toast) this.host.showToast(toast, true);
+    this.waveTimers = { ...this.waveTimers, upgradePending: false };
+  }
+
+  /** 全部波次清完后开启 Boss 战 */
+  startBossPhase(): void {
+    this.bossPhaseActive = true;
+    this.spawnPlacedBosses();
+    this.host.showToast("☠️ 最终 Boss 出现了！", true);
+    this.host.onExploreBossPhaseBegin?.();
+  }
+
+  /** 恢复波次进度（读档用） */
+  restoreWave(wave: number): void {
+    this.waveTimers.wave = wave;
   }
 
   getPlayerElement(): ExploreElement {
@@ -210,10 +272,17 @@ export class ExploreCombatRuntime {
       spawner.timer = Math.max(0.2, spawner.placement.spawnIntervalSec * 0.35);
       spawner.spawnedTotal = 0;
     }
-    this.spawnPlacedBosses();
+    // 肉鸽模式：重置波次状态，不立即生 Boss
+    if (this.gameplay.roguelikeWaveMode) {
+      this.waveTimers = createInitialExploreWaveTimers(this.gameplay.firstWaveDelaySec);
+      this.bossPhaseActive = false;
+    } else {
+      this.spawnPlacedBosses();
+    }
     this.attackCooldown = 0;
     this.skillECooldown = 0;
     this.skillRCooldown = 0;
+    this.shieldTimer = 0;
   }
 
   /** When leaving explore mode mid-fight — drop short-lived VFX meshes. */
@@ -234,10 +303,106 @@ export class ExploreCombatRuntime {
     this.attackCooldown = Math.max(0, this.attackCooldown - dt);
     this.skillECooldown = Math.max(0, this.skillECooldown - dt);
     this.skillRCooldown = Math.max(0, this.skillRCooldown - dt);
+    this.shieldTimer = Math.max(0, this.shieldTimer - dt);
+
+    // 被动回血
+    this.progress.tickPassiveRegen(dt);
 
     this.updateProjectiles(dt);
     this.updateEnemies(dt);
-    this.tickSpawners(dt);
+
+    // 肉鸽波次模式
+    if (this.gameplay.roguelikeWaveMode) {
+      this.tickWaveSpawner(dt);
+    } else {
+      this.tickSpawners(dt);
+    }
+  }
+
+  /** 肉鸽波次状态机每帧推进 */
+  private tickWaveSpawner(dt: number): void {
+    // Boss 战期间不再出普通怪
+    if (this.bossPhaseActive) return;
+
+    const aliveNonBoss = this.enemies.filter((e) => !e.dead && !e.boss).length;
+    const result = advanceExploreWaveState({
+      dt,
+      timers: this.waveTimers,
+      aliveEnemyCount: aliveNonBoss,
+      totalWaves: this.gameplay.totalWaves,
+      firstWaveDelay: this.gameplay.firstWaveDelaySec,
+      wavePauseSec: this.gameplay.wavePauseSec,
+      bossUnlockWave: this.gameplay.bossUnlockWave,
+      waveRules: this.waveRules,
+      upgradePending: this.waveTimers.upgradePending,
+    });
+    this.waveTimers = result.timers;
+
+    for (const effect of result.effects) {
+      this.handleWaveEffect(effect);
+    }
+  }
+
+  private handleWaveEffect(effect: ExploreWaveSideEffect): void {
+    switch (effect.kind) {
+      case "toastWaveBegins":
+        this.host.showToast(`⚔️ 第 ${effect.wave} 波开始！`, true);
+        this.host.onExploreWaveBegin?.(effect.wave);
+        break;
+      case "toastWaveClear":
+        this.host.showToast(`✅ 第 ${effect.wave} 波清除！奖励 $${effect.reward}`, true);
+        this.host.onExploreWaveClear?.(effect.wave);
+        break;
+      case "grantMoney":
+        this.host.grantExploreMoney(effect.amount);
+        break;
+      case "grantXp": {
+        const toasts = this.progress.addXp(effect.amount);
+        for (const t of toasts) this.host.showToast(t, true);
+        break;
+      }
+      case "spawnEnemy":
+        this.spawnWaveEnemy(effect.spawnerId);
+        break;
+      case "showUpgradeChoice":
+        this.waveTimers = { ...this.waveTimers, upgradePending: true };
+        this.progress.generateUpgradeChoices();
+        this.host.onExploreUpgradeChoice?.(effect.wave);
+        break;
+      case "allWavesCleared":
+        this.host.showToast(`🏆 全部 ${effect.wave} 波已清除！准备迎战 Boss！`, true);
+        this.host.onExploreAllWavesCleared?.();
+        // 自动开启 Boss 战
+        this.startBossPhase();
+        break;
+      case "bossPhaseBegin":
+        break;
+    }
+  }
+
+  /** 肉鸽波次：从刷怪点生成一只怪 */
+  private spawnWaveEnemy(spawnerId?: string): void {
+    const obstacleKeys = this.host.getObstacleCellKeys();
+    // 找到活跃的刷怪点
+    const candidates = spawnerId
+      ? this.spawnerStates.filter((s) => s.placement.id === spawnerId)
+      : this.spawnerStates.filter((s) => {
+          const p = s.placement;
+          // 若刷怪点配置了 activeOnWaves，检查当前波次是否匹配
+          if (p.activeOnWaves?.length) {
+            return p.activeOnWaves.includes(this.waveTimers.wave);
+          }
+          return true;
+        });
+    if (!candidates.length && this.spawnerStates.length) {
+      // 回退：用任意刷怪点
+      const fallback = this.spawnerStates[Math.floor(Math.random() * this.spawnerStates.length)];
+      this.spawnSpawnerEnemy(fallback, obstacleKeys);
+      return;
+    }
+    if (!candidates.length) return;
+    const chosen = candidates[Math.floor(Math.random() * candidates.length)];
+    this.spawnSpawnerEnemy(chosen, obstacleKeys);
   }
 
   fireBasicAttack(): void {
@@ -245,7 +410,8 @@ export class ExploreCombatRuntime {
       return;
     }
     const kit = this.playerKit();
-    this.attackCooldown = this.gameplay.attackCooldownSec * kit.attackCooldownMult;
+    const basicMods = aggregateSlotModules(this.progress.equippedModules, "basic");
+    this.attackCooldown = this.gameplay.attackCooldownSec * kit.attackCooldownMult * basicMods.cooldownMult;
 
     const playerPos = this.host.getPlayerPosition();
     const HOMING_RANGE = 10;
@@ -271,23 +437,44 @@ export class ExploreCombatRuntime {
       velocity = forward.multiplyScalar(18);
     }
 
+    const baseDamage = (20 + this.progress.level * 4) * kit.basicDamageMult * basicMods.damageMult * this.progress.getLevelDamageMult();
+    // 暗击判定
+    const critChance = getPassiveCritChance(this.progress.equippedModules);
+    const isCrit = Math.random() < critChance;
+    const damage = isCrit ? baseDamage * 2 : baseDamage;
+
     const color = EXPLORE_ELEMENT_COLORS[this.playerElement];
     const geo = new THREE.SphereGeometry(0.15, 8, 6);
-    const mat = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 1.2 });
+    const mat = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: isCrit ? 2.0 : 1.2 });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.copy(playerPos);
     mesh.position.y = 0.75;
 
-    this.projectileGroup.add(mesh);
-    this.projectiles.push({
-      mesh,
-      velocity,
-      damage: (25 + this.progress.level * 3) * kit.basicDamageMult,
-      lifetime: 2.2,
-      type: "basic",
-      target: nearestEnemy,
-      element: this.playerElement,
-    });
+    // 分裂弹幕模组
+    const splitCount = basicMods.effectTags.includes("split3") ? 3 : 1;
+    for (let i = 0; i < splitCount; i++) {
+      const spreadAngle = splitCount > 1 ? ((i - (splitCount - 1) / 2) * 0.3) : 0;
+      const cos = Math.cos(spreadAngle);
+      const sin = Math.sin(spreadAngle);
+      const v = velocity.clone();
+      const vx = v.x * cos - v.z * sin;
+      const vz = v.x * sin + v.z * cos;
+      v.x = vx;
+      v.z = vz;
+
+      const projMesh = i === 0 ? mesh : mesh.clone();
+      if (i > 0) projMesh.position.copy(mesh.position);
+      this.projectileGroup.add(projMesh);
+      this.projectiles.push({
+        mesh: projMesh,
+        velocity: v,
+        damage: damage / splitCount,
+        lifetime: 2.2,
+        type: "basic",
+        target: i === 0 ? nearestEnemy : null,
+        element: this.playerElement,
+      });
+    }
     this.host.onExploreBasicAttackFired?.();
   }
 
@@ -313,11 +500,12 @@ export class ExploreCombatRuntime {
       this.host.showToast("\u9644\u8fd1\u6ca1\u6709\u654c\u4eba\u53ef\u9501\u5b9a\uff01");
       return;
     }
-    this.skillECooldown = this.gameplay.skillECooldownSec;
+    const eMods = aggregateSlotModules(this.progress.equippedModules, "skillE");
+    this.skillECooldown = this.gameplay.skillECooldownSec * eMods.cooldownMult;
     this.host.onExploreSkillEUsed?.();
 
     const targetPos = nearestEnemy.mesh.position.clone();
-    const damage = this.resolveDamageAgainstEnemy(nearestEnemy, (120 + this.progress.level * 15) * this.playerKit().orbDamageMult, this.playerElement);
+    const damage = this.resolveDamageAgainstEnemy(nearestEnemy, (100 + this.progress.level * 18) * this.playerKit().orbDamageMult * eMods.damageMult * this.progress.getLevelDamageMult(), this.playerElement);
     this.damageEnemy(nearestEnemy, damage);
 
     const push = (mesh: THREE.Mesh, velocity: THREE.Vector3, lifetime: number, type: "lightning" | "spark" | "blast") => {
@@ -388,19 +576,27 @@ export class ExploreCombatRuntime {
       this.host.showToast(`R \u6280\u80fd CD: ${Math.ceil(this.skillRCooldown)}s`);
       return;
     }
-    this.skillRCooldown = this.gameplay.skillRCooldownSec;
+    const rMods = aggregateSlotModules(this.progress.equippedModules, "skillR");
+    this.skillRCooldown = this.gameplay.skillRCooldownSec * rMods.cooldownMult;
     this.host.onExploreSkillRUsed?.();
+
+    // 护盾模组
+    if (rMods.effectTags.includes("shield-on-cast")) {
+      this.shieldTimer = 3;
+    }
 
     const playerPos = this.host.getPlayerPosition();
     const kit = this.playerKit();
-    const blastRadius = 5 * kit.burstRadiusMult;
+    const blastRadius = 5 * kit.burstRadiusMult * rMods.radiusMult;
     let hitCount = 0;
     for (const enemy of this.enemies) {
       if (enemy.dead) {
         continue;
       }
       if (playerPos.distanceTo(enemy.mesh.position) <= blastRadius) {
-        this.damageEnemy(enemy, this.resolveDamageAgainstEnemy(enemy, (180 + this.progress.level * 20) * kit.burstDamageMult, this.playerElement));
+        const isLowHp = enemy.hp / enemy.maxHp < 0.3;
+        const executeMult = isLowHp && rMods.effectTags.includes("execute") ? 2 : 1;
+        this.damageEnemy(enemy, this.resolveDamageAgainstEnemy(enemy, (150 + this.progress.level * 22) * kit.burstDamageMult * rMods.damageMult * executeMult * this.progress.getLevelDamageMult(), this.playerElement));
         hitCount++;
       }
     }
@@ -545,18 +741,70 @@ export class ExploreCombatRuntime {
 
   /** 将模型缩放到与程序化体相近的屏幕占比，足底对齐本地 y=0，并居中 XZ。 */
   private fitExploreImportedModel(root: THREE.Object3D, boss: boolean): void {
-    const box = new THREE.Box3().setFromObject(root);
+    // 先将 root 自身变换重置为单位，确保测量准确
+    root.position.set(0, 0, 0);
+    root.rotation.set(0, 0, 0);
+    root.scale.set(1, 1, 1);
+    root.updateMatrixWorld(true);
+
+    // 手动遍历所有几何体顶点来精确计算 bounding box，
+    // 避免 SkinnedMesh clone 后 setFromObject 返回极小值导致 scale 爆炸
+    const box = new THREE.Box3();
+    let hasGeo = false;
+    const _pos = new THREE.Vector3();
+    root.traverse((child) => {
+      const mesh = child as THREE.Mesh;
+      if (!mesh.isMesh || !mesh.geometry) return;
+      const geo = mesh.geometry;
+      geo.computeBoundingBox();
+      if (geo.boundingBox) {
+        mesh.updateMatrixWorld(true);
+        const localBox = geo.boundingBox.clone();
+        localBox.applyMatrix4(mesh.matrixWorld);
+        box.union(localBox);
+        hasGeo = true;
+      }
+    });
+    if (!hasGeo) {
+      box.setFromObject(root);
+    }
+
     const size = box.getSize(new THREE.Vector3());
     const maxDim = Math.max(size.x, size.y, size.z, 0.001);
-    const target = boss ? 2.1 : 1.45;
-    root.scale.multiplyScalar(target / maxDim);
+    const target = boss ? 4.2 : 2.9;
+    let scaleFactor = target / maxDim;
+    // 安全上限：如果 scale 超过 10，说明 bounding box 测量可能有误
+    if (scaleFactor > 10) {
+      console.warn("[ExploreCombat] fitModel: scaleFactor 过大 (", scaleFactor.toFixed(2), "), 限制为 0.02。maxDim=", maxDim.toFixed(4), "size=", size.x.toFixed(2), size.y.toFixed(2), size.z.toFixed(2));
+      scaleFactor = 0.02;
+    }
+    root.scale.setScalar(scaleFactor);
     root.updateMatrixWorld(true);
-    const b2 = new THREE.Box3().setFromObject(root);
+
+    // 重新计算缩放后的 bounding box 用于居中和底部对齐
+    const b2 = new THREE.Box3();
+    let hasGeo2 = false;
+    root.traverse((child) => {
+      const mesh = child as THREE.Mesh;
+      if (!mesh.isMesh || !mesh.geometry) return;
+      const geo = mesh.geometry;
+      if (geo.boundingBox) {
+        mesh.updateMatrixWorld(true);
+        const localBox = geo.boundingBox.clone();
+        localBox.applyMatrix4(mesh.matrixWorld);
+        b2.union(localBox);
+        hasGeo2 = true;
+      }
+    });
+    if (!hasGeo2) {
+      b2.setFromObject(root);
+    }
+
     const cx = (b2.min.x + b2.max.x) / 2;
     const cz = (b2.min.z + b2.max.z) / 2;
-    root.position.x -= cx;
-    root.position.z -= cz;
-    root.position.y -= b2.min.y;
+    root.position.x = -cx;
+    root.position.z = -cz;
+    root.position.y = -b2.min.y;
     root.traverse((child) => {
       const mesh = child as THREE.Mesh;
       if (mesh.isMesh) {
@@ -594,6 +842,7 @@ export class ExploreCombatRuntime {
     enemy.dead = true;
     this.enemyGroup.remove(enemy.mesh);
     this.host.onExploreEnemyKilled?.();
+    this.progress.totalKills += 1;
 
     if (enemy.placementId) {
       this.defeatedBossIds.add(enemy.placementId);
@@ -689,7 +938,13 @@ export class ExploreCombatRuntime {
     visual.group.position.copy(this.host.worldCellToWorld(spawnCell));
     this.enemyGroup.add(visual.group);
     void this.trySwapProceduralForGltf(visual.group, visual.proceduralRoot, p.modelPath?.trim(), false);
-    const maxHp = this.gameplay.enemyBaseHp + this.progress.level * this.gameplay.enemyHpPerLevel;
+    // 肉鸽模式：敌人属性同时按波次和等级缩放
+    const waveScale = this.gameplay.roguelikeWaveMode ? 1 + this.waveTimers.wave * 0.12 : 1;
+    const maxHp = Math.round((this.gameplay.enemyBaseHp + this.progress.level * this.gameplay.enemyHpPerLevel) * waveScale);
+    const enemySpeed = Math.min(5, (this.gameplay.enemyBaseSpeed + this.progress.level * this.gameplay.enemySpeedPerLevel) * (1 + this.waveTimers.wave * 0.015));
+    const enemyDmg = Math.round((this.gameplay.enemyBaseDamage + this.progress.level * this.gameplay.enemyDamagePerLevel) * waveScale);
+    const baseRewardMoney = p.rewards?.[0]?.money ?? 12;
+    const baseRewardXp = p.rewards?.[0]?.xp ?? 10;
     this.enemies.push({
       id: `ee-${this.host.allocateUid()}`,
       name: p.name,
@@ -700,11 +955,11 @@ export class ExploreCombatRuntime {
       maxHp,
       element,
       sourceSpawnerId: p.id,
-      rewardMoney: p.rewards?.[0]?.money ?? 12,
-      rewardXp: p.rewards?.[0]?.xp ?? 10,
+      rewardMoney: Math.round(baseRewardMoney * (1 + this.waveTimers.wave * 0.05)),
+      rewardXp: Math.round(baseRewardXp * (1 + this.waveTimers.wave * 0.08)),
       rewardItems: p.rewards?.filter((reward) => reward.itemName),
-      speed: this.gameplay.enemyBaseSpeed + this.progress.level * this.gameplay.enemySpeedPerLevel,
-      attackDamage: this.gameplay.enemyBaseDamage + this.progress.level * this.gameplay.enemyDamagePerLevel,
+      speed: enemySpeed,
+      attackDamage: enemyDmg,
       aggroRange: this.gameplay.enemyAggroRange,
       attackCooldown: this.gameplay.enemyAttackCooldown,
       attackTimer: 0,
@@ -719,7 +974,14 @@ export class ExploreCombatRuntime {
   }
 
   private resolveDamageAgainstPlayer(baseDamage: number, element?: ExploreElement): number {
-    return Math.max(0, baseDamage * computeElementMultiplier(element, this.playerElement));
+    let damage = Math.max(0, baseDamage * computeElementMultiplier(element, this.playerElement));
+    // 被动减伤模组
+    damage *= getPassiveDamageReduction(this.progress.equippedModules);
+    // R 技能护盾
+    if (this.shieldTimer > 0) {
+      damage *= 0.5;
+    }
+    return damage;
   }
 
   private damageEnemy(enemy: ExploreEnemy, damage: number): void {
