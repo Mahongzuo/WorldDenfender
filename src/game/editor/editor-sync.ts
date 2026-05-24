@@ -2,7 +2,7 @@ import { hasEditorDefenseLayout, hasEditorExploreLayout, parseEditorColor, parse
 import { sanitizeLevelMapAudioFromEditor } from "../audio/game-audio";
 import { CITY_GEO_CONFIG, BUILD_SPECS } from "../data/content";
 import { DEFENSE_MAP_FLAVORS } from "../data/defense-map-flavors";
-import { clamp, orderEditorPathCells, sameCell, uniqueCells, GRID_COLS, GRID_ROWS } from "../core/runtime-grid";
+import { clamp, orderEditorPathCells, sameCell, traceDefensePathAlongPaintedCells, uniqueCells, GRID_COLS, GRID_ROWS } from "../core/runtime-grid";
 import type {
   EditorCell,
   EditorLevel,
@@ -705,19 +705,25 @@ function sanitizeSpawnWaveNumbers(raw: unknown): number[] {
 function sanitizeEditorWaveRules(
   level: EditorLevel,
   spawnPoints: readonly DefenseSpawnPoint[],
+  pathIdBySpawnId?: ReadonlyMap<string, string>,
 ): DefenseWaveRule[] | undefined {
-  const explicit = (level.waveRules ?? []).map((rule, index) => ({
-    id: String(rule.id || `wave-${index + 1}`),
-    waveNumber: Math.max(1, Math.round(Number(rule.waveNumber) || index + 1)),
-    enemyTypeId: String(rule.enemyTypeId || ""),
-    count: Math.max(1, Math.round(Number(rule.count) || 10)),
-    interval: Math.max(0.1, Number(rule.interval) || 1),
-    spawnPointId: String(rule.spawnPointId || ""),
-    pathId: String(rule.pathId || "path-main"),
-    reward: Math.max(0, Number(rule.reward) || 0),
-    overrideModelPath: String(rule.overrideModelPath || ""),
-    overrideModelScale: Math.max(0.1, Number(rule.overrideModelScale) || 1),
-  }));
+  const explicit = (level.waveRules ?? []).map((rule, index) => {
+    const spawnPointId = String(rule.spawnPointId || "");
+    const fallbackPathId = String(rule.pathId || "path-main");
+    const mappedPathId = spawnPointId ? pathIdBySpawnId?.get(spawnPointId) : undefined;
+    return {
+      id: String(rule.id || `wave-${index + 1}`),
+      waveNumber: Math.max(1, Math.round(Number(rule.waveNumber) || index + 1)),
+      enemyTypeId: String(rule.enemyTypeId || ""),
+      count: Math.max(1, Math.round(Number(rule.count) || 10)),
+      interval: Math.max(0.1, Number(rule.interval) || 1),
+      spawnPointId,
+      pathId: String(mappedPathId || fallbackPathId),
+      reward: Math.max(0, Number(rule.reward) || 0),
+      overrideModelPath: String(rule.overrideModelPath || ""),
+      overrideModelScale: Math.max(0.1, Number(rule.overrideModelScale) || 1),
+    };
+  });
   if (explicit.length) return explicit;
   const rawSpawns = level.map?.spawnPoints ?? [];
   const spawnRules = spawnPoints
@@ -741,6 +747,12 @@ function sanitizeEditorWaveRules(
   return spawnRules.length ? spawnRules : undefined;
 }
 
+interface BuiltEditorDefensePathResult {
+  paths: DefenseEnemyPath[];
+  spawnPoints: DefenseSpawnPoint[];
+  pathIdBySpawnId: ReadonlyMap<string, string>;
+}
+
 function buildEditorDefensePaths(
   editorMap: EditorLevelMap,
   spawnPoints: readonly DefenseSpawnPoint[],
@@ -748,38 +760,77 @@ function buildEditorDefensePaths(
   project: (cell: EditorCell) => GridCell,
   sourceCols: number,
   sourceRows: number,
-): DefenseEnemyPath[] {
+): BuiltEditorDefensePathResult {
   const sourcePaths = editorMap.enemyPaths?.filter((path) => path.cells?.length) ?? [];
+  const nextSpawnPoints = spawnPoints.map((spawn) => ({ ...spawn }));
+  const pathIdBySpawnId = new Map<string, string>();
   if (!spawnPoints.length && !sourcePaths.length) {
-    return [{
-      id: "path-main",
-      name: "主敌人路径",
-      cells: orderEditorPathCells(uniqueCells((editorMap.roads ?? []).map(project), sourceCols, sourceRows), { col: 0, row: objective.row }, objective, sourceCols, sourceRows),
-    }];
-  }
-  const paths = sourcePaths.map((path, index) => {
-    const spawn = spawnPoints.find((point) => point.pathId === path.id) ?? spawnPoints[index] ?? spawnPoints[0] ?? { col: 0, row: objective.row };
     return {
-      id: String(path.id || `path-${index + 1}`),
-      name: String(path.name || `敌人路径 ${index + 1}`),
-      cells: orderEditorPathCells(uniqueCells((path.cells ?? []).map(project), sourceCols, sourceRows), spawn, objective, sourceCols, sourceRows),
+      paths: [{
+        id: "path-main",
+        name: "主敌人路径",
+        cells: orderEditorPathCells(uniqueCells((editorMap.roads ?? []).map(project), sourceCols, sourceRows), { col: 0, row: objective.row }, objective, sourceCols, sourceRows),
+      }],
+      spawnPoints: nextSpawnPoints,
+      pathIdBySpawnId,
     };
-  });
-  for (const [index, spawn] of spawnPoints.entries()) {
+  }
+  const paths: DefenseEnemyPath[] = [];
+  for (const [index, path] of sourcePaths.entries()) {
+    const baseId = String(path.id || `path-${index + 1}`);
+    const baseName = String(path.name || `敌人路径 ${index + 1}`);
+    const authoredCells = uniqueCells((path.cells ?? []).map(project), sourceCols, sourceRows);
+    const linkedSpawns = nextSpawnPoints.filter((point) => point.pathId === baseId);
+    const spawnsForPath = linkedSpawns.length
+      ? linkedSpawns
+      : [nextSpawnPoints[index] ?? nextSpawnPoints[0] ?? { col: 0, row: objective.row }];
+
+    for (const [spawnIndex, spawn] of spawnsForPath.entries()) {
+      const runtimePathId = linkedSpawns.length > 1 && "id" in spawn && spawn.id
+        ? `${baseId}__${spawn.id}`
+        : baseId;
+      const tracedCells = traceDefensePathAlongPaintedCells(authoredCells, spawn, objective, sourceCols, sourceRows);
+      paths.push({
+        id: runtimePathId,
+        name: linkedSpawns.length > 1 && "name" in spawn && spawn.name ? `${baseName} · ${spawn.name}` : baseName,
+        cells: tracedCells?.length
+          ? tracedCells
+          : orderEditorPathCells(authoredCells, spawn, objective, sourceCols, sourceRows),
+      });
+      if (spawnIndex < linkedSpawns.length && "id" in spawn && spawn.id) {
+        spawn.pathId = runtimePathId;
+        pathIdBySpawnId.set(spawn.id, runtimePathId);
+      }
+    }
+  }
+  for (const [index, spawn] of nextSpawnPoints.entries()) {
+    if (!spawn.id) {
+      continue;
+    }
+    if (pathIdBySpawnId.has(spawn.id)) {
+      continue;
+    }
     if (paths.some((path) => path.id === spawn.pathId)) {
+      pathIdBySpawnId.set(spawn.id, String(spawn.pathId || `path-${index + 1}`));
       continue;
     }
     const midpoint = {
       col: clamp(Math.floor((spawn.col + objective.col) / 2), 0, sourceCols - 1),
       row: spawn.row,
     };
+    const runtimePathId = String(spawn.pathId || `path-${index + 1}`);
     paths.push({
-      id: String(spawn.pathId || `path-${index + 1}`),
+      id: runtimePathId,
       name: `敌人路径 ${index + 1}`,
       cells: orderEditorPathCells([spawn, midpoint, { col: midpoint.col, row: objective.row }, objective], spawn, objective, sourceCols, sourceRows),
     });
+    pathIdBySpawnId.set(spawn.id, runtimePathId);
   }
-  return paths.length ? paths : [{ id: "path-main", name: "主敌人路径", cells: [] }];
+  return {
+    paths: paths.length ? paths : [{ id: "path-main", name: "主敌人路径", cells: [] }],
+    spawnPoints: nextSpawnPoints,
+    pathIdBySpawnId,
+  };
 }
 
 export function editorLevelToRuntimeMap(
@@ -806,13 +857,15 @@ export function editorLevelToRuntimeMap(
       ? project(editorMap.objectivePoint)
       : { col: sourceCols - 1, row: Math.floor(sourceRows / 2) };
   const spawnPoints = sanitizeDefenseSpawnPoints(editorMap.spawnPoints, project);
-  const spawn = spawnPoints[0] ?? { col: 0, row: objective.row };
+  const defenseLayout = buildEditorDefensePaths(editorMap, spawnPoints, objective, project, sourceCols, sourceRows);
+  const defenseSpawnPoints = defenseLayout.spawnPoints;
+  const spawn = defenseSpawnPoints[0] ?? { col: 0, row: objective.row };
   const exploreStart = exploreLayout?.startPoint
     ? project(exploreLayout.startPoint)
     : editorMap.explorationPoints?.[0]
       ? project(editorMap.explorationPoints[0])
       : spawn;
-  const defenseEnemyPaths = buildEditorDefensePaths(editorMap, spawnPoints, objective, project, sourceCols, sourceRows);
+  const defenseEnemyPaths = defenseLayout.paths;
   /** 探索模式：仅使用 explorationLayout.path；勿用探索点 POI 或塔防道路冒充路径 */
   const explorePathAuthored = uniqueCells(
     (exploreLayout?.path ?? []).map(project),
@@ -895,7 +948,13 @@ export function editorLevelToRuntimeMap(
       hoverColorBad: parseEditorColor(theme.hoverColorBad, 0xc28e89),
     },
     path,
-    ...(mode === "defense" ? { enemyPaths: defenseEnemyPaths, spawnPoints, waveRules: sanitizeEditorWaveRules(level, spawnPoints) } : {}),
+    ...(mode === "defense"
+      ? {
+          enemyPaths: defenseEnemyPaths,
+          spawnPoints: defenseSpawnPoints,
+          waveRules: sanitizeEditorWaveRules(level, defenseSpawnPoints, defenseLayout.pathIdBySpawnId),
+        }
+      : {}),
     obstacles,
     actors: extractEditorActors(editorMap, gameModelPublicUrlByCatalogId),
     safeZones: mode === "explore"

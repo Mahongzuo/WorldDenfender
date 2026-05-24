@@ -312,9 +312,9 @@ export const CITY_MAP: Record<string, { label: string; defenseIndex: number; exp
 };
 
 export const CITY_EDITOR_ALIASES: Record<string, string[]> = {
-  beijing: ["北京", "北京市", "中国·北京", "中国 · 北京"],
-  shanghai: ["上海", "上海市", "中国·上海", "中国 · 上海"],
-  guangzhou: ["广州", "广州市", "中国·广州", "中国 · 广州"],
-  shenzhen: ["深圳", "深圳市", "中国·深圳", "中国 · 深圳"],
+  beijing: ["北京", "北京市", "中国·北京", "中国 · 北京", "110000"],
+  shanghai: ["上海", "上海市", "中国·上海", "中国 · 上海", "310000"],
+  guangzhou: ["广州", "广州市", "中国·广州", "中国 · 广州", "440100"],
+  shenzhen: ["深圳", "深圳市", "中国·深圳", "中国 · 深圳", "440300"],
   jinan: ["济南", "济南市", "山东·济南", "山东 · 济南", "中国·济南", "中国 · 济南", "泉城", "闯荡山东", "370100", "shandong", "cn-370100", "shandong_370100"],
 };

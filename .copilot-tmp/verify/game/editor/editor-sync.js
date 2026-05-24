@@ -1,0 +1,895 @@
+import { hasEditorDefenseLayout, hasEditorExploreLayout, parseEditorColor, parseEditorOpacity, runtimeMapToEditorExplorationLayout, runtimeMapToEditorMap } from "./editor-runtime";
+import { sanitizeLevelMapAudioFromEditor } from "../audio/game-audio";
+import { CITY_GEO_CONFIG, BUILD_SPECS } from "../data/content";
+import { DEFENSE_MAP_FLAVORS } from "../data/defense-map-flavors";
+import { clamp, orderEditorPathCells, sameCell, traceDefensePathAlongPaintedCells, uniqueCells, GRID_COLS, GRID_ROWS } from "../core/runtime-grid";
+import { sanitizeDefenseElement } from "../defense/defense-taxonomy";
+function sanitizeBoardImageLayers(raw) {
+    if (!Array.isArray(raw)) {
+        return undefined;
+    }
+    const out = [];
+    for (let i = 0; i < raw.length; i += 1) {
+        const item = raw[i];
+        if (!item || typeof item !== "object") {
+            continue;
+        }
+        const o = item;
+        const src = typeof o.src === "string" ? o.src.trim() : "";
+        if (!src) {
+            continue;
+        }
+        const clampPct = (n, fallback) => {
+            const v = Number(n);
+            if (!Number.isFinite(v))
+                return fallback;
+            return Math.max(0, Math.min(100, v));
+        };
+        const widthPct = Number(o.widthPct);
+        const wp = Number.isFinite(widthPct) ? Math.max(5, Math.min(500, widthPct)) : 40;
+        const aspectRaw = Number(o.aspect);
+        const aspectOk = Number.isFinite(aspectRaw) && aspectRaw > 0 ? Math.min(24, Math.max(0.04, aspectRaw)) : undefined;
+        const opacityRaw = Number(o.opacity);
+        const opacity = Number.isFinite(opacityRaw) ? Math.max(0, Math.min(1, opacityRaw)) : 1;
+        const orderRaw = Number(o.order);
+        const ord = Number.isFinite(orderRaw) ? Math.round(orderRaw) : i;
+        out.push({
+            id: typeof o.id === "string" && o.id.trim() ? o.id.trim() : `bil-${i + 1}`,
+            src,
+            centerX: clampPct(o.centerX, 0),
+            centerY: clampPct(o.centerY, 0),
+            widthPct: wp,
+            ...(opacity !== 1 ? { opacity } : {}),
+            ...(aspectOk !== undefined ? { aspect: aspectOk } : {}),
+            order: ord,
+        });
+    }
+    return out.length ? out.sort((a, b) => (a.order ?? 0) - (b.order ?? 0)) : undefined;
+}
+function sanitizeCutsceneClip(raw) {
+    if (!raw || typeof raw !== "object")
+        return undefined;
+    const iv = raw;
+    const url = typeof iv.url === "string" ? iv.url.trim() : "";
+    if (!url)
+        return undefined;
+    return {
+        url,
+        ...(typeof iv.title === "string" && iv.title ? { title: iv.title.trim() } : {}),
+        ...(typeof iv.projectPath === "string" && iv.projectPath.trim() ? { projectPath: iv.projectPath.trim() } : {}),
+    };
+}
+function sanitizeLevelCutscenes(raw) {
+    if (!raw || typeof raw !== "object")
+        return undefined;
+    const r = raw;
+    const introVideo = sanitizeCutsceneClip(r.introVideo);
+    let waveVideos;
+    if (Array.isArray(r.waveVideos)) {
+        const parsed = r.waveVideos.flatMap((item) => {
+            if (!item || typeof item !== "object")
+                return [];
+            const wv = item;
+            const afterWave = Math.round(Number(wv.afterWave));
+            const url = typeof wv.url === "string" ? wv.url.trim() : "";
+            if (!Number.isFinite(afterWave) || afterWave < 1 || !url)
+                return [];
+            return [
+                {
+                    afterWave,
+                    url,
+                    ...(typeof wv.title === "string" && wv.title ? { title: wv.title.trim() } : {}),
+                    ...(typeof wv.projectPath === "string" && wv.projectPath.trim()
+                        ? { projectPath: wv.projectPath.trim() }
+                        : {}),
+                },
+            ];
+        });
+        if (parsed.length)
+            waveVideos = parsed;
+    }
+    const exploreBossVictoryVideo = sanitizeCutsceneClip(r.exploreBossVictoryVideo);
+    if (!introVideo && !waveVideos && !exploreBossVictoryVideo)
+        return undefined;
+    return {
+        ...(introVideo ? { introVideo } : {}),
+        ...(waveVideos ? { waveVideos } : {}),
+        ...(exploreBossVictoryVideo ? { exploreBossVictoryVideo } : {}),
+    };
+}
+const EDITOR_FLAVOR_ENEMY_TYPES = new Set(["basic", "scout", "hacker", "tank", "swarm"]);
+function sanitizeDefenseFlavor(raw) {
+    if (!raw || typeof raw !== "object") {
+        return undefined;
+    }
+    const r = raw;
+    const towerNamesRaw = r.towerNames && typeof r.towerNames === "object" ? r.towerNames : undefined;
+    const enemyNamesRaw = r.enemyNames && typeof r.enemyNames === "object" ? r.enemyNames : undefined;
+    const towerNames = {};
+    const enemyNames = {};
+    if (towerNamesRaw) {
+        for (const [key, val] of Object.entries(towerNamesRaw)) {
+            if (Object.prototype.hasOwnProperty.call(BUILD_SPECS, key) && typeof val === "string" && val.trim()) {
+                towerNames[key] = val.trim();
+            }
+        }
+    }
+    if (enemyNamesRaw) {
+        for (const [key, val] of Object.entries(enemyNamesRaw)) {
+            if (EDITOR_FLAVOR_ENEMY_TYPES.has(key) && typeof val === "string" && val.trim()) {
+                enemyNames[key] = val.trim();
+            }
+        }
+    }
+    if (!Object.keys(towerNames).length && !Object.keys(enemyNames).length) {
+        return undefined;
+    }
+    return {
+        ...(Object.keys(towerNames).length ? { towerNames } : {}),
+        ...(Object.keys(enemyNames).length ? { enemyNames } : {}),
+    };
+}
+/** 两个济南编辑器关卡（泉城 / 奥体）均未写 map.defenseFlavor 时注入与内置 jinan-harbor 一致的 HUD 地名 */
+function shouldApplyJinanEditorDefenseFlavor(level) {
+    const ext = level.extensions;
+    if (ext && typeof ext === "object" && ext.syncedBuiltInLayout?.city === "jinan") {
+        return true;
+    }
+    const text = [
+        level.id,
+        level.name,
+        level.location?.cityCode,
+        level.location?.cityName,
+        level.location?.regionLabel,
+    ]
+        .filter(Boolean)
+        .join(" ");
+    return /济南|泉城|济南市|370100|山东[·\s_]?济南|CN_shandong_370100|city-cn-370100/i.test(text);
+}
+function positiveNumber(raw, fallback, max = 1e9) {
+    const v = Number(raw);
+    return Number.isFinite(v) && v > 0 ? Math.min(v, max) : fallback;
+}
+function positiveNumberInRange(raw, fallback, min, max = 1e9) {
+    const v = Number(raw);
+    return Number.isFinite(v) && v >= min && v > 0 ? clamp(v, min, max) : fallback;
+}
+function nonNegativeNumber(raw, fallback, max = 1e9) {
+    const v = Number(raw);
+    return Number.isFinite(v) && v >= 0 ? Math.min(v, max) : fallback;
+}
+function sanitizeExploreBosses(raw, project) {
+    if (!Array.isArray(raw))
+        return undefined;
+    const out = [];
+    for (let i = 0; i < raw.length; i += 1) {
+        const item = raw[i];
+        if (!item || typeof item !== "object")
+            continue;
+        const r = item;
+        const override = r.overrideStats && typeof r.overrideStats === "object" ? r.overrideStats : {};
+        out.push({
+            id: String(r.id || `explore-boss-${i + 1}`),
+            bossId: String(r.bossId || "ai-atlas"),
+            ...(typeof r.name === "string" && r.name.trim() ? { name: r.name.trim() } : {}),
+            ...project({ col: Number(r.col), row: Number(r.row) }),
+            ...(typeof r.modelId === "string" && r.modelId ? { modelId: r.modelId } : {}),
+            ...(typeof r.modelPath === "string" && r.modelPath ? { modelPath: r.modelPath } : {}),
+            modelScale: positiveNumber(r.modelScale, 1.8, 12),
+            ...(sanitizeDefenseElement(r.element) ? { element: sanitizeDefenseElement(r.element) } : {}),
+            level: Math.max(1, Math.round(Number(r.level) || 1)),
+            triggerRadius: positiveNumber(r.triggerRadius, 9, 80),
+            respawn: !!r.respawn,
+            overrideStats: {
+                maxHp: nonNegativeNumber(override.maxHp, 0),
+                attack: nonNegativeNumber(override.attack, 0),
+                defense: nonNegativeNumber(override.defense, 0),
+                speed: nonNegativeNumber(override.speed, 0),
+                rewardMoney: nonNegativeNumber(override.rewardMoney, 0),
+                rewardXp: nonNegativeNumber(override.rewardXp, 0),
+            },
+        });
+    }
+    return out.length ? out : undefined;
+}
+function sanitizeExploreSpawners(raw, project) {
+    if (!Array.isArray(raw))
+        return undefined;
+    const out = [];
+    for (let i = 0; i < raw.length; i += 1) {
+        const item = raw[i];
+        if (!item || typeof item !== "object")
+            continue;
+        const r = item;
+        out.push({
+            id: String(r.id || `explore-spawner-${i + 1}`),
+            name: String(r.name || `AI 刷怪点 ${i + 1}`),
+            ...project({ col: Number(r.col), row: Number(r.row) }),
+            enemyTypeId: String(r.enemyTypeId || "ai-drone"),
+            ...(sanitizeDefenseElement(r.element) ? { element: sanitizeDefenseElement(r.element) } : {}),
+            ...(typeof r.modelId === "string" && r.modelId ? { modelId: r.modelId } : {}),
+            ...(typeof r.modelPath === "string" && r.modelPath ? { modelPath: r.modelPath } : {}),
+            modelScale: positiveNumber(r.modelScale, 1, 10),
+            maxConcurrent: Math.max(1, Math.round(Number(r.maxConcurrent) || 3)),
+            spawnIntervalSec: positiveNumber(r.spawnIntervalSec, 6, 3600),
+            spawnCount: Math.max(1, Math.round(Number(r.spawnCount) || 1)),
+            triggerRadius: positiveNumber(r.triggerRadius, 12, 120),
+            activeRadius: positiveNumber(r.activeRadius, 18, 180),
+            totalLimit: Math.max(0, Math.round(Number(r.totalLimit) || 0)),
+            disableWhenBossDefeated: !!r.disableWhenBossDefeated,
+            rewards: Array.isArray(r.rewards)
+                ? r.rewards.flatMap((reward) => {
+                    if (!reward || typeof reward !== "object")
+                        return [];
+                    const rr = reward;
+                    return [{
+                            money: nonNegativeNumber(rr.money, 12),
+                            xp: nonNegativeNumber(rr.xp, 10),
+                            ...(typeof rr.itemName === "string" && rr.itemName ? { itemName: rr.itemName } : {}),
+                            ...(typeof rr.itemIcon === "string" && rr.itemIcon ? { itemIcon: rr.itemIcon.slice(0, 2) } : {}),
+                            quantity: Math.max(1, Math.round(Number(rr.quantity) || 1)),
+                        }];
+                })
+                : [{ money: 12, xp: 10 }],
+        });
+    }
+    return out.length ? out : undefined;
+}
+function sanitizeExplorePickups(raw, project) {
+    if (!Array.isArray(raw))
+        return undefined;
+    const out = [];
+    for (let i = 0; i < raw.length; i += 1) {
+        const item = raw[i];
+        if (!item || typeof item !== "object")
+            continue;
+        const r = item;
+        const type = r.type === "item" ? "item" : "money";
+        out.push({
+            id: String(r.id || `explore-pickup-${i + 1}`),
+            type,
+            name: String(r.name || (type === "money" ? "城市算力资金" : "AI 道具")),
+            ...project({ col: Number(r.col), row: Number(r.row) }),
+            moneyAmount: nonNegativeNumber(r.moneyAmount, type === "money" ? 50 : 0),
+            ...(typeof r.itemId === "string" && r.itemId ? { itemId: r.itemId } : {}),
+            itemName: String(r.itemName || r.name || "AI 记忆碎片"),
+            itemType: r.itemType === "consumable" ? "consumable" : "material",
+            itemIcon: String(r.itemIcon || (type === "money" ? "$" : "AI")).slice(0, 2),
+            quantity: Math.max(1, Math.round(Number(r.quantity) || 1)),
+            ...(typeof r.modelId === "string" && r.modelId ? { modelId: r.modelId } : {}),
+            ...(typeof r.modelPath === "string" && r.modelPath ? { modelPath: r.modelPath } : {}),
+            modelScale: positiveNumber(r.modelScale, 1, 8),
+            collectRadius: positiveNumber(r.collectRadius, 1.25, 20),
+        });
+    }
+    return out.length ? out : undefined;
+}
+function sanitizeExploreWaveRules(raw) {
+    if (!Array.isArray(raw))
+        return undefined;
+    const out = [];
+    for (let i = 0; i < raw.length; i += 1) {
+        const item = raw[i];
+        if (!item || typeof item !== "object")
+            continue;
+        const r = item;
+        const waveNumber = Math.max(1, Math.round(Number(r.waveNumber) || 1));
+        const count = Math.max(1, Math.round(Number(r.count) || 1));
+        out.push({
+            ...(typeof r.id === "string" && r.id ? { id: r.id } : { id: `ewr-${i + 1}` }),
+            waveNumber,
+            count,
+            ...(typeof r.spawnerId === "string" && r.spawnerId ? { spawnerId: r.spawnerId } : {}),
+            ...(typeof r.interval === "number" && r.interval > 0 ? { interval: Math.max(0.1, r.interval) } : {}),
+            ...(typeof r.enemyTypeId === "string" && r.enemyTypeId ? { enemyTypeId: r.enemyTypeId } : {}),
+            ...(sanitizeDefenseElement(r.element) ? { element: sanitizeDefenseElement(r.element) } : {}),
+            ...(typeof r.overrideModelPath === "string" && r.overrideModelPath ? { overrideModelPath: r.overrideModelPath } : {}),
+            ...(typeof r.overrideModelScale === "number" && r.overrideModelScale > 0 ? { overrideModelScale: r.overrideModelScale } : {}),
+            ...(typeof r.overrideHp === "number" && r.overrideHp > 0 ? { overrideHp: r.overrideHp } : {}),
+            ...(typeof r.overrideAttack === "number" && r.overrideAttack > 0 ? { overrideAttack: r.overrideAttack } : {}),
+            ...(typeof r.overrideSpeed === "number" && r.overrideSpeed > 0 ? { overrideSpeed: r.overrideSpeed } : {}),
+            ...(typeof r.overrideRewardMoney === "number" && r.overrideRewardMoney >= 0 ? { overrideRewardMoney: r.overrideRewardMoney } : {}),
+            ...(typeof r.overrideRewardXp === "number" && r.overrideRewardXp >= 0 ? { overrideRewardXp: r.overrideRewardXp } : {}),
+        });
+    }
+    return out.length ? out : undefined;
+}
+export function syncEditorLevelsToRuntime(options) {
+    const { levels, requestedLevelId, maps, exploreMaps, cityMap, cityAliases, cityGameplayConfigs, gameModelPublicUrlByCatalogId } = options;
+    let importedCount = 0;
+    let requestedDefIdx = -1;
+    let requestedExpIdx = -1;
+    const importedPriority = new Map();
+    for (const level of levels) {
+        if (!level.map) {
+            continue;
+        }
+        const cityCode = matchEditorLevelCity(level, cityAliases);
+        const isRequested = sameLevelId(level.id, requestedLevelId);
+        if (!cityCode && !isRequested) {
+            continue;
+        }
+        const effectiveCityCode = cityCode || `__requested__${level.id}`;
+        const priority = editorLevelRuntimePriority(level);
+        if (priority < (importedPriority.get(effectiveCityCode) ?? -1)) {
+            continue;
+        }
+        const syncedLevel = cityCode ? levelWithBuiltInLayouts(level, cityCode, cityMap, maps, exploreMaps) : level;
+        const levelGeo = cityCode ? resolveEditorLevelGeo(syncedLevel, cityMap[cityCode]?.geo) : resolveEditorLevelGeo(syncedLevel);
+        const runtimeLevel = levelGeo ? { ...syncedLevel, map: { ...syncedLevel.map, geo: levelGeo } } : syncedLevel;
+        const defenseTowerModels = extractTowerModelUrlsFromCityConfigs(runtimeLevel, cityGameplayConfigs);
+        const defenseTowerScales = extractTowerModelScalesFromCityConfigs(runtimeLevel, cityGameplayConfigs);
+        const defenseEnemyConfigs = extractDefenseEnemyConfigsFromCityConfigs(runtimeLevel, cityGameplayConfigs);
+        const defenseMap = editorLevelToRuntimeMap(runtimeLevel, "defense", defenseTowerModels, defenseEnemyConfigs, defenseTowerScales, gameModelPublicUrlByCatalogId);
+        const exploreMap = editorLevelToRuntimeMap(runtimeLevel, "explore", undefined, undefined, undefined, gameModelPublicUrlByCatalogId);
+        const defenseIndex = maps.push(defenseMap) - 1;
+        const exploreIndex = exploreMaps.push(exploreMap) - 1;
+        if (cityCode) {
+            cityMap[cityCode] = {
+                label: syncedLevel.location?.cityName || syncedLevel.location?.regionLabel || cityMap[cityCode]?.label || level.name || cityCode,
+                defenseIndex,
+                exploreIndex,
+                geo: levelGeo,
+            };
+        }
+        importedPriority.set(effectiveCityCode, priority);
+        importedCount += 1;
+        if (sameLevelId(level.id, requestedLevelId)) {
+            requestedDefIdx = defenseIndex;
+            requestedExpIdx = exploreIndex;
+        }
+    }
+    return { importedCount, requestedDefIdx, requestedExpIdx };
+}
+function sameLevelId(left, right) {
+    const a = String(left || "").trim().toLowerCase();
+    const b = String(right || "").trim().toLowerCase();
+    return !!a && !!b && a === b;
+}
+export function matchEditorLevelCity(level, cityAliases) {
+    const haystack = [
+        level.name,
+        level.id,
+        level.location?.cityName,
+        level.location?.regionLabel,
+        level.location?.cityCode,
+        level.location?.countryName,
+    ]
+        .filter(Boolean)
+        .join(" ")
+        .replace(/\s+/g, "");
+    for (const [cityCode, aliases] of Object.entries(cityAliases)) {
+        if (aliases.some((alias) => haystack.includes(alias.replace(/\s+/g, "")))) {
+            return cityCode;
+        }
+    }
+    return "";
+}
+export function levelWithBuiltInLayouts(level, cityCode, cityMap, maps, exploreMaps) {
+    const cityInfo = cityMap[cityCode];
+    if (!cityInfo || !level.map) {
+        return level;
+    }
+    const needsDefenseLayout = !hasEditorDefenseLayout(level.map);
+    const needsExploreLayout = !hasEditorExploreLayout(level.map);
+    if (!needsDefenseLayout && !needsExploreLayout) {
+        return level;
+    }
+    const map = { ...level.map };
+    if (needsDefenseLayout) {
+        const builtInMap = maps[cityInfo.defenseIndex];
+        Object.assign(map, runtimeMapToEditorMap(builtInMap, map));
+    }
+    if (needsExploreLayout) {
+        const builtInExploreMap = exploreMaps[cityInfo.exploreIndex];
+        map.explorationLayout = runtimeMapToEditorExplorationLayout(builtInExploreMap);
+        if (!map.explorationPoints?.length) {
+            map.explorationPoints = builtInExploreMap.path.map((cell, index) => ({
+                id: `explore-point-${index + 1}`,
+                name: index === 0 ? "探索起点" : `探索点 ${index + 1}`,
+                ...cell,
+            }));
+        }
+    }
+    return { ...level, map };
+}
+function normalizeCityConfigIdentity(value) {
+    return String(value || "")
+        .trim()
+        .toLowerCase()
+        .replace(/[·\s]/g, "")
+        .replace(/市$/g, "");
+}
+function levelCityIdentities(level) {
+    const loc = level.location ?? {};
+    const ids = [
+        level.id,
+        loc.cityCode,
+        loc.cityName,
+        loc.regionLabel,
+        loc.countryName,
+    ]
+        .map(normalizeCityConfigIdentity)
+        .filter(Boolean);
+    return new Set(ids);
+}
+function extractTowerModelUrlsFromCityConfigs(level, rawConfigs) {
+    if (!rawConfigs || typeof rawConfigs !== "object") {
+        return undefined;
+    }
+    const levelIds = levelCityIdentities(level);
+    for (const [configKey, rawCfg] of Object.entries(rawConfigs)) {
+        if (!rawCfg || typeof rawCfg !== "object") {
+            continue;
+        }
+        const cfg = rawCfg;
+        const cfgIds = [
+            configKey,
+            cfg.cityCode,
+            cfg.cityName,
+            ...(Array.isArray(cfg.aliases) ? cfg.aliases : []),
+        ]
+            .map(normalizeCityConfigIdentity)
+            .filter(Boolean);
+        let match = false;
+        for (const cid of cfgIds) {
+            if (levelIds.has(cid)) {
+                match = true;
+                break;
+            }
+        }
+        if (!match) {
+            continue;
+        }
+        const out = {};
+        for (const t of cfg.towers ?? []) {
+            const tid = String(t.id ?? "").trim();
+            const path = String(t.assetRefs?.modelPath ?? "").trim();
+            if (!path || !Object.prototype.hasOwnProperty.call(BUILD_SPECS, tid)) {
+                continue;
+            }
+            out[tid] = path;
+        }
+        return Object.keys(out).length ? out : undefined;
+    }
+    return undefined;
+}
+function extractTowerModelScalesFromCityConfigs(level, rawConfigs) {
+    if (!rawConfigs || typeof rawConfigs !== "object") {
+        return undefined;
+    }
+    const levelIds = levelCityIdentities(level);
+    for (const [configKey, rawCfg] of Object.entries(rawConfigs)) {
+        if (!rawCfg || typeof rawCfg !== "object") {
+            continue;
+        }
+        const cfg = rawCfg;
+        const cfgIds = [
+            configKey,
+            cfg.cityCode,
+            cfg.cityName,
+            ...(Array.isArray(cfg.aliases) ? cfg.aliases : []),
+        ]
+            .map(normalizeCityConfigIdentity)
+            .filter(Boolean);
+        let match = false;
+        for (const cid of cfgIds) {
+            if (levelIds.has(cid)) {
+                match = true;
+                break;
+            }
+        }
+        if (!match) {
+            continue;
+        }
+        const out = {};
+        for (const t of cfg.towers ?? []) {
+            const tid = String(t.id ?? "").trim();
+            const rawScale = t.assetRefs?.modelScale;
+            const scale = typeof rawScale === "number" && Number.isFinite(rawScale) ? rawScale : Number(rawScale);
+            if (!Number.isFinite(scale) || scale <= 0 || !Object.prototype.hasOwnProperty.call(BUILD_SPECS, tid)) {
+                continue;
+            }
+            out[tid] = clamp(scale, 0.05, 8);
+        }
+        return Object.keys(out).length ? out : undefined;
+    }
+    return undefined;
+}
+function extractDefenseEnemyConfigsFromCityConfigs(level, rawConfigs) {
+    if (!rawConfigs || typeof rawConfigs !== "object") {
+        return undefined;
+    }
+    const levelIds = levelCityIdentities(level);
+    for (const [configKey, rawCfg] of Object.entries(rawConfigs)) {
+        if (!rawCfg || typeof rawCfg !== "object") {
+            continue;
+        }
+        const cfg = rawCfg;
+        const cfgIds = [
+            configKey,
+            cfg.cityCode,
+            cfg.cityName,
+            ...(Array.isArray(cfg.aliases) ? cfg.aliases : []),
+        ]
+            .map(normalizeCityConfigIdentity)
+            .filter(Boolean);
+        let match = false;
+        for (const cid of cfgIds) {
+            if (levelIds.has(cid)) {
+                match = true;
+                break;
+            }
+        }
+        if (!match) {
+            continue;
+        }
+        const out = [];
+        for (const enemy of cfg.enemies ?? []) {
+            const id = String(enemy.id ?? "").trim();
+            if (!id)
+                continue;
+            const stats = enemy.stats && typeof enemy.stats === "object" ? enemy.stats : {};
+            const assetRefs = enemy.assetRefs && typeof enemy.assetRefs === "object" ? enemy.assetRefs : {};
+            const modelPath = String(assetRefs.modelPath ?? "").trim();
+            const modelScale = positiveNumberInRange(assetRefs.modelScale, 1, 0.01, 100);
+            const hp = positiveNumber(stats.hp, 0, 1e9);
+            const speed = positiveNumber(stats.speed, 0, 1e4);
+            const reward = nonNegativeNumber(stats.reward, 0, 1e9);
+            const towerSiegeDps = nonNegativeNumber(stats.attack, 0, 1e9);
+            out.push({
+                id,
+                ...(typeof enemy.name === "string" && enemy.name.trim() ? { name: enemy.name.trim() } : {}),
+                ...(modelPath ? { modelPath } : {}),
+                ...(modelScale > 0 && modelScale !== 1 ? { modelScale } : {}),
+                ...(hp > 0 ? { hp } : {}),
+                ...(speed > 0 ? { speed } : {}),
+                ...(reward > 0 ? { reward } : {}),
+                ...(towerSiegeDps > 0 ? { towerSiegeDps } : {}),
+            });
+        }
+        return out.length ? out : undefined;
+    }
+    return undefined;
+}
+function sanitizeDefenseSpawnPoints(raw, project) {
+    return (raw ?? []).map((point, index) => {
+        const hasWaveNumbers = Array.isArray(point.waveNumbers);
+        const waveNumbers = sanitizeSpawnWaveNumbers(hasWaveNumbers ? point.waveNumbers : point.waveNumber != null ? [point.waveNumber] : [index + 1]);
+        const count = Math.max(1, Math.round(Number(point.count) || 12));
+        const interval = Math.max(0.1, Number(point.interval) || 1.2);
+        return {
+            ...project(point),
+            id: String(point.id || `spawn-${index + 1}`),
+            name: String(point.name || `敌人出口 ${index + 1}`),
+            pathId: String(point.pathId || `path-${index + 1}`),
+            ...(point.enemyTypeId ? { enemyTypeId: String(point.enemyTypeId) } : {}),
+            waveNumbers,
+            ...(waveNumbers.length ? { waveNumber: waveNumbers[0] } : {}),
+            count,
+            interval,
+        };
+    });
+}
+function sanitizeSpawnWaveNumbers(raw) {
+    const values = Array.isArray(raw) ? raw : raw != null ? [raw] : [];
+    const seen = new Set();
+    const out = [];
+    for (const item of values) {
+        const waveNumber = Math.max(1, Math.round(Number(item) || 0));
+        if (!waveNumber || seen.has(waveNumber))
+            continue;
+        seen.add(waveNumber);
+        out.push(waveNumber);
+    }
+    return out.sort((a, b) => a - b);
+}
+function sanitizeEditorWaveRules(level, spawnPoints) {
+    const explicit = (level.waveRules ?? []).map((rule, index) => ({
+        id: String(rule.id || `wave-${index + 1}`),
+        waveNumber: Math.max(1, Math.round(Number(rule.waveNumber) || index + 1)),
+        enemyTypeId: String(rule.enemyTypeId || ""),
+        count: Math.max(1, Math.round(Number(rule.count) || 10)),
+        interval: Math.max(0.1, Number(rule.interval) || 1),
+        spawnPointId: String(rule.spawnPointId || ""),
+        pathId: String(rule.pathId || "path-main"),
+        reward: Math.max(0, Number(rule.reward) || 0),
+        overrideModelPath: String(rule.overrideModelPath || ""),
+        overrideModelScale: Math.max(0.1, Number(rule.overrideModelScale) || 1),
+    }));
+    if (explicit.length)
+        return explicit;
+    const rawSpawns = level.map?.spawnPoints ?? [];
+    const spawnRules = spawnPoints
+        .map((spawn, index) => ({ spawn, raw: rawSpawns[index], index }))
+        .filter(({ raw }) => !!raw && (raw.enemyTypeId || Array.isArray(raw.waveNumbers) || raw.waveNumber != null || raw.count != null || raw.interval != null))
+        .flatMap(({ spawn, index }) => {
+        const waveNumbers = sanitizeSpawnWaveNumbers(spawn.waveNumbers?.length ? spawn.waveNumbers : spawn.waveNumber != null ? [spawn.waveNumber] : []);
+        return waveNumbers.map((waveNumber) => ({
+            id: `${spawn.id || `spawn-${index + 1}`}-wave-${waveNumber}-rule`,
+            waveNumber,
+            enemyTypeId: String(spawn.enemyTypeId || "basic"),
+            count: Math.max(1, Math.round(Number(spawn.count) || 12)),
+            interval: Math.max(0.1, Number(spawn.interval) || 1.2),
+            spawnPointId: String(spawn.id || ""),
+            pathId: String(spawn.pathId || `path-${index + 1}`),
+            reward: 50,
+        }));
+    });
+    return spawnRules.length ? spawnRules : undefined;
+}
+function buildEditorDefensePaths(editorMap, spawnPoints, objective, project, sourceCols, sourceRows) {
+    const sourcePaths = editorMap.enemyPaths?.filter((path) => path.cells?.length) ?? [];
+    if (!spawnPoints.length && !sourcePaths.length) {
+        return [{
+                id: "path-main",
+                name: "主敌人路径",
+                cells: orderEditorPathCells(uniqueCells((editorMap.roads ?? []).map(project), sourceCols, sourceRows), { col: 0, row: objective.row }, objective, sourceCols, sourceRows),
+            }];
+    }
+    const paths = sourcePaths.map((path, index) => {
+        const spawn = spawnPoints.find((point) => point.pathId === path.id) ?? spawnPoints[index] ?? spawnPoints[0] ?? { col: 0, row: objective.row };
+        const authoredCells = uniqueCells((path.cells ?? []).map(project), sourceCols, sourceRows);
+        const tracedCells = traceDefensePathAlongPaintedCells(authoredCells, spawn, objective, sourceCols, sourceRows);
+        return {
+            id: String(path.id || `path-${index + 1}`),
+            name: String(path.name || `敌人路径 ${index + 1}`),
+            cells: tracedCells?.length
+                ? tracedCells
+                : orderEditorPathCells(authoredCells, spawn, objective, sourceCols, sourceRows),
+        };
+    });
+    for (const [index, spawn] of spawnPoints.entries()) {
+        if (paths.some((path) => path.id === spawn.pathId)) {
+            continue;
+        }
+        const midpoint = {
+            col: clamp(Math.floor((spawn.col + objective.col) / 2), 0, sourceCols - 1),
+            row: spawn.row,
+        };
+        paths.push({
+            id: String(spawn.pathId || `path-${index + 1}`),
+            name: `敌人路径 ${index + 1}`,
+            cells: orderEditorPathCells([spawn, midpoint, { col: midpoint.col, row: objective.row }, objective], spawn, objective, sourceCols, sourceRows),
+        });
+    }
+    return paths.length ? paths : [{ id: "path-main", name: "主敌人路径", cells: [] }];
+}
+export function editorLevelToRuntimeMap(level, mode, defenseTowerModelUrls, defenseEnemyConfigs, defenseTowerModelScales, gameModelPublicUrlByCatalogId) {
+    const editorMap = level.map ?? {};
+    const exploreLayout = mode === "explore" ? editorMap.explorationLayout : undefined;
+    const grid = exploreLayout?.grid ?? editorMap.grid ?? {};
+    const sourceCols = clamp(Math.floor(grid.cols ?? GRID_COLS), 4, 80);
+    const sourceRows = clamp(Math.floor(grid.rows ?? GRID_ROWS), 4, 80);
+    const project = (cell) => ({
+        col: clamp(Math.round(Number(cell.col) || 0), 0, sourceCols - 1),
+        row: clamp(Math.round(Number(cell.row) || 0), 0, sourceRows - 1),
+    });
+    const objective = mode === "explore" && exploreLayout?.exitPoint
+        ? project(exploreLayout.exitPoint)
+        : editorMap.objectivePoint
+            ? project(editorMap.objectivePoint)
+            : { col: sourceCols - 1, row: Math.floor(sourceRows / 2) };
+    const spawnPoints = sanitizeDefenseSpawnPoints(editorMap.spawnPoints, project);
+    const spawn = spawnPoints[0] ?? { col: 0, row: objective.row };
+    const exploreStart = exploreLayout?.startPoint
+        ? project(exploreLayout.startPoint)
+        : editorMap.explorationPoints?.[0]
+            ? project(editorMap.explorationPoints[0])
+            : spawn;
+    const defenseEnemyPaths = buildEditorDefensePaths(editorMap, spawnPoints, objective, project, sourceCols, sourceRows);
+    /** 探索模式：仅使用 explorationLayout.path；勿用探索点 POI 或塔防道路冒充路径 */
+    const explorePathAuthored = uniqueCells((exploreLayout?.path ?? []).map(project), sourceCols, sourceRows);
+    const projectedPath = mode === "explore"
+        ? explorePathAuthored.length > 0
+            ? orderEditorPathCells(explorePathAuthored, exploreStart, objective, sourceCols, sourceRows)
+            : []
+        : defenseEnemyPaths[0]?.cells ?? editorMap.roads ?? [];
+    const fallbackPath = mode === "explore"
+        ? buildFallbackPath(exploreStart, objective, sourceCols, sourceRows)
+        : buildFallbackPath(spawn, objective, sourceCols, sourceRows);
+    /** 探索：未铺任何道路格子时路径为空，避免 orderEditorPathCells([], start, end) 与 fallback 生成「看不见却删不掉」的默认折线 */
+    const path = mode === "explore"
+        ? explorePathAuthored.length === 0
+            ? []
+            : projectedPath.length >= 2
+                ? projectedPath
+                : fallbackPath
+        : projectedPath.length >= 2
+            ? projectedPath
+            : fallbackPath;
+    const obstacleSource = mode === "explore" ? exploreLayout?.obstacles ?? editorMap.obstacles ?? [] : editorMap.obstacles ?? [];
+    const obstacles = uniqueCells(obstacleSource.map(project), sourceCols, sourceRows).filter((cell) => !path.some((pathCell) => sameCell(pathCell, cell)));
+    const theme = exploreLayout?.theme ?? editorMap.theme ?? {};
+    const boardImageLayers = sanitizeBoardImageLayers(editorMap.boardImageLayers);
+    const levelAudio = sanitizeLevelMapAudioFromEditor(editorMap.levelAudio);
+    const flavorFromEditorMap = mode === "defense" ? sanitizeDefenseFlavor(editorMap.defenseFlavor) : undefined;
+    const jinanDefenseFallback = mode === "defense" && !flavorFromEditorMap && shouldApplyJinanEditorDefenseFlavor(level)
+        ? sanitizeDefenseFlavor(DEFENSE_MAP_FLAVORS["jinan-harbor"])
+        : undefined;
+    const defenseFlavorSan = flavorFromEditorMap ?? jinanDefenseFallback;
+    const exploreBosses = mode === "explore" ? sanitizeExploreBosses(editorMap.exploreBosses, project) : undefined;
+    const exploreSpawners = mode === "explore" ? sanitizeExploreSpawners(editorMap.exploreSpawners, project) : undefined;
+    const explorePickups = mode === "explore" ? sanitizeExplorePickups(editorMap.explorePickups, project) : undefined;
+    const exploreWaveRules = mode === "explore" ? sanitizeExploreWaveRules(editorMap.exploreWaveRules) : undefined;
+    const levelGeo = resolveEditorLevelGeo(level);
+    const boardUrlRaw = typeof theme.boardTextureUrl === "string" ? theme.boardTextureUrl.trim() : "";
+    const boardTextureUrl = boardUrlRaw ? boardUrlRaw : undefined;
+    const cutscenesAll = sanitizeLevelCutscenes(editorMap.cutscenes);
+    const cutscenesDefense = cutscenesAll;
+    const cutscenesExplore = cutscenesAll?.exploreBossVictoryVideo != null
+        ? { exploreBossVictoryVideo: cutscenesAll.exploreBossVictoryVideo }
+        : undefined;
+    return {
+        id: `${level.id || "editor-level"}-${mode}`,
+        name: `${level.name || "编辑器关卡"}${mode === "explore" ? " · 探索" : ""}`,
+        description: level.description || "由关卡编辑器同步生成的运行时地图。",
+        ...(level.status ? { editorStatus: level.status } : {}),
+        cols: sourceCols,
+        rows: sourceRows,
+        geo: levelGeo,
+        theme: {
+            ground: parseEditorColor(theme.ground, mode === "explore" ? 0x5f706a : 0x73857f),
+            groundAlt: parseEditorColor(theme.groundAlt, mode === "explore" ? 0x53625d : 0x697a75),
+            path: parseEditorColor(theme.path ?? theme.road, mode === "explore" ? 0x819187 : 0x92a39a),
+            obstacle: parseEditorColor(theme.obstacle, mode === "explore" ? 0x756d66 : 0x8a8077),
+            accent: parseEditorColor(theme.accent, mode === "explore" ? 0x98a38f : 0xaab6a3),
+            fog: parseEditorColor(theme.fog, mode === "explore" ? 0x44504c : 0x56645f),
+            ...(boardTextureUrl ? { boardTextureUrl } : {}),
+            geoTileOpacity: parseEditorOpacity(theme.geoTileOpacity, 0.48),
+            geoPathOpacity: parseEditorOpacity(theme.geoPathOpacity, 0.92),
+            boardBaseOpacity: parseEditorOpacity(theme.boardBaseOpacity, 0.42),
+            gridLineOpacity: parseEditorOpacity(theme.gridLineOpacity, 0.42),
+            rimOpacity: parseEditorOpacity(theme.rimOpacity, 0.32),
+            pathGlowOpacity: parseEditorOpacity(theme.pathGlowOpacity, 0.46),
+            pathDetailOpacity: parseEditorOpacity(theme.pathDetailOpacity, 0.82),
+            hoverCellOpacity: parseEditorOpacity(theme.hoverCellOpacity, 0.42),
+            hoverColorOk: parseEditorColor(theme.hoverColorOk, 0x7ea08f),
+            hoverColorBad: parseEditorColor(theme.hoverColorBad, 0xc28e89),
+        },
+        path,
+        ...(mode === "defense" ? { enemyPaths: defenseEnemyPaths, spawnPoints, waveRules: sanitizeEditorWaveRules(level, spawnPoints) } : {}),
+        obstacles,
+        actors: extractEditorActors(editorMap, gameModelPublicUrlByCatalogId),
+        safeZones: mode === "explore"
+            ? uniqueCells((exploreLayout?.safeZones ?? []).map(project), sourceCols, sourceRows)
+            : [],
+        ...(mode === "explore" ? { exploreStart, exploreExit: objective } : {}),
+        ...(mode === "explore"
+            ? {
+                exploreGameplay: { ...(exploreLayout?.gameplay ?? {}) },
+                ...(exploreBosses?.length ? { exploreBosses } : {}),
+                ...(exploreSpawners?.length ? { exploreSpawners } : {}),
+                ...(explorePickups?.length ? { explorePickups } : {}),
+                ...(exploreWaveRules?.length ? { exploreWaveRules } : {}),
+            }
+            : {}),
+        ...(mode === "defense"
+            ? {
+                ...(cutscenesDefense ? { cutscenes: cutscenesDefense } : {}),
+                ...(defenseFlavorSan ? { defenseFlavor: defenseFlavorSan } : {}),
+                ...(defenseEnemyConfigs?.length ? { defenseEnemyConfigs } : {}),
+                ...(defenseTowerModelUrls && Object.keys(defenseTowerModelUrls).length ? { towerModelUrls: defenseTowerModelUrls } : {}),
+                ...(defenseTowerModelScales && Object.keys(defenseTowerModelScales).length ? { towerModelScales: defenseTowerModelScales } : {}),
+            }
+            : {}),
+        ...(mode === "explore" && cutscenesExplore ? { cutscenes: cutscenesExplore } : {}),
+        ...(levelAudio ? { levelAudio } : {}),
+        ...(boardImageLayers?.length ? { boardImageLayers } : {}),
+    };
+}
+function extractEditorActors(editorMap, catalogPublicUrlById) {
+    const raw = editorMap.actors ?? [];
+    const result = [];
+    for (const a of raw) {
+        let modelPath = String(a.modelPath ?? "").trim();
+        if (!modelPath) {
+            const assetId = String(a.modelId ?? "").trim();
+            if (assetId && catalogPublicUrlById?.size) {
+                modelPath = (catalogPublicUrlById.get(assetId) ?? "").trim();
+            }
+        }
+        if (!modelPath)
+            continue;
+        const offset = a.worldOffsetMeters && typeof a.worldOffsetMeters === "object"
+            ? a.worldOffsetMeters : {};
+        result.push({
+            id: String(a.id ?? ""),
+            modelPath,
+            col: Math.round(Number(a.col) || 0),
+            row: Math.round(Number(a.row) || 0),
+            worldOffsetMeters: {
+                x: Number(offset.x) || 0,
+                y: Number(offset.y) || 0,
+                z: Number(offset.z) || 0,
+            },
+            rotation: Number(a.rotation) || 0,
+            scale: Number(a.scale) > 0 ? Number(a.scale) : 1,
+        });
+    }
+    return result;
+}
+function resolvePresetGeoForLevel(level) {
+    const text = [
+        level.id,
+        level.name,
+        level.location?.cityCode,
+        level.location?.cityName,
+        level.location?.regionLabel,
+    ]
+        .filter(Boolean)
+        .join(" ")
+        .replace(/\s+/g, "");
+    if (/city-cn-370100|中国·济南市|中国·济南|济南市/.test(text)) {
+        return CITY_GEO_CONFIG.jinanOlympic;
+    }
+    if (/CN_shandong_370100|泉城浮生录|山东·济南|山东_370100/i.test(text)) {
+        return CITY_GEO_CONFIG.jinan;
+    }
+    if (/CN_beijing|city-cn-110100|京城|北京|北京市|beijing/i.test(text)) {
+        return CITY_GEO_CONFIG.beijing;
+    }
+    if (/CN_shanghai|city-cn-310100|上海|上海市|shanghai/i.test(text)) {
+        return CITY_GEO_CONFIG.shanghai;
+    }
+    if (/city-cn-440100|广州|广州市|guangzhou/i.test(text)) {
+        return CITY_GEO_CONFIG.guangzhou;
+    }
+    if (/CN_guangdong_440300|city-cn-440300|深圳|深圳市|shenzhen/i.test(text)) {
+        return CITY_GEO_CONFIG.shenzhen;
+    }
+    if (/^FRA$|保卫巴黎|卢浮宫|埃菲尔|巴黎|法国|France|Paris|paris/i.test(text)) {
+        return CITY_GEO_CONFIG.paris;
+    }
+    return undefined;
+}
+export function buildFallbackPath(start, end, cols = GRID_COLS, rows = GRID_ROWS) {
+    const midA = { col: clamp(Math.floor((start.col + end.col) / 2), 0, cols - 1), row: start.row };
+    const midB = { col: midA.col, row: end.row };
+    return uniqueCells([start, midA, midB, end], cols, rows);
+}
+function geoMapConfigIsUsable(geo) {
+    if (!geo?.enabled || !Number.isFinite(geo.center?.lat) || !Number.isFinite(geo.center?.lon)) {
+        return false;
+    }
+    if (geo.center.lat === 0 && geo.center.lon === 0) {
+        return false;
+    }
+    return true;
+}
+function resolveEditorLevelGeo(level, fallback) {
+    const preset = resolvePresetGeoForLevel(level);
+    const stored = level.map?.geo ?? level.location?.geo;
+    let candidate = stored ?? fallback ?? preset;
+    if (!geoMapConfigIsUsable(stored)) {
+        candidate = preset ?? fallback ?? stored;
+    }
+    if (!candidate || !geoMapConfigIsUsable(candidate)) {
+        return undefined;
+    }
+    return {
+        enabled: true,
+        provider: candidate.provider ?? "cesium-ion",
+        assetId: candidate.assetId,
+        center: {
+            lat: Number(candidate.center.lat),
+            lon: Number(candidate.center.lon),
+            heightMeters: Number(candidate.center.heightMeters) || 0,
+        },
+        extentMeters: Number(candidate.extentMeters) || undefined,
+        rotationDeg: Number(candidate.rotationDeg) || 0,
+        yOffsetMeters: Number(candidate.yOffsetMeters) || 0,
+        boardHeightMeters: Number(candidate.boardHeightMeters) || undefined,
+        scale: Number(candidate.scale) || undefined,
+    };
+}
+function editorLevelRuntimePriority(level) {
+    const map = level.map;
+    const designScore = (map?.roads?.length ?? 0) +
+        (map?.enemyPaths?.reduce((sum, path) => sum + (path.cells?.length ?? 0), 0) ?? 0) +
+        (map?.obstacles?.length ?? 0) +
+        (map?.spawnPoints?.length ?? 0) +
+        (map?.explorationPoints?.length ?? 0);
+    const statusScore = level.status === "designed" ? 30 : level.status === "needs-work" ? 20 : 10;
+    return statusScore + Math.min(designScore, 9);
+}

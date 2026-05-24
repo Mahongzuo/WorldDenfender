@@ -1,0 +1,131 @@
+import * as THREE from "three";
+import { findNearestEnemyTarget, getTowerBuffMultiplier } from "./defense-runtime";
+import { addStatusOutlineEffect, addTowerProjectileImpactFx, } from "../fx/effects-runtime";
+import { TILE_SIZE, cellToWorld, distanceXZ } from "../core/runtime-grid";
+import { buildDefenseDamageSource } from "./defense-damage";
+import { applyBuildingEffectsToEnemy } from "./defense-status";
+/** 所有可造成伤害的防御塔（不含治疗/纯装置）在未配置 critChance 时的基础暴击率 */
+const DEFAULT_TOWER_CRIT_CHANCE = 0.05;
+const DEFAULT_TOWER_CRIT_DAMAGE_MULT = 2;
+/** 与各塔 procedural 网格大致匹配的炮口局部偏移 */
+const PRESET_TOWER_MUZZLE_LOCAL = {
+    machine: new THREE.Vector3(0, 0.9, -0.78),
+    cannon: new THREE.Vector3(0, 0.96, -1.08),
+    frost: new THREE.Vector3(0, 1.05, -0.88),
+    stellar: new THREE.Vector3(0, 1.15, -0.98),
+    liqingzhao: new THREE.Vector3(0, 1.08, -0.92),
+};
+const DEFAULT_PRESET_MUZZLE_LOCAL = new THREE.Vector3(0, 0.88, -0.82);
+function towerProjectileMuzzleWorld(building) {
+    building.mesh.updateMatrixWorld(true);
+    const local = PRESET_TOWER_MUZZLE_LOCAL[building.spec.id]?.clone() ?? DEFAULT_PRESET_MUZZLE_LOCAL.clone();
+    return building.mesh.localToWorld(local);
+}
+function isDamageDealingDefenseTower(building) {
+    return building.spec.category === "tower" && building.spec.role !== "healer";
+}
+/** 对每个受击敌人独立掷骰暴击（溅射每名敌人各自判定）。 */
+function rollTowerStrikeDamage(building) {
+    let damage = Math.max(0, building.spec.damage ?? 0);
+    if (!isDamageDealingDefenseTower(building) || damage <= 0) {
+        return { damage, critical: false };
+    }
+    const chance = building.spec.critChance ?? DEFAULT_TOWER_CRIT_CHANCE;
+    const mult = building.spec.critDamageMult ?? DEFAULT_TOWER_CRIT_DAMAGE_MULT;
+    if (Math.random() < Math.min(1, Math.max(0, chance))) {
+        return { damage: damage * mult, critical: true };
+    }
+    return { damage, critical: false };
+}
+function applyTowerEffects(deps, building, enemy) {
+    applyBuildingEffectsToEnemy(building, enemy, deps.elapsed);
+    if (building.spec.id === "frost" || building.spec.id === "liqingzhao") {
+        addStatusOutlineEffect(deps.effects, deps.fxGroup, enemy.mesh, 0x00e5ff, 0.4);
+    }
+}
+function fireAt(deps, building, target) {
+    const origin = towerProjectileMuzzleWorld(building);
+    const destination = deps.aimWorldCenter(target);
+    const splashRadiusWorld = building.spec.splash !== undefined && building.spec.splash > 0
+        ? building.spec.splash * TILE_SIZE
+        : undefined;
+    addTowerProjectileImpactFx(deps.effects, deps.fxGroup, origin, destination, building.spec.color, building.spec.id, splashRadiusWorld);
+    deps.onTowerFired?.(building);
+    const damageSource = buildDefenseDamageSource(building.spec);
+    if (splashRadiusWorld) {
+        const anchor = target.mesh.position;
+        for (const enemy of [...deps.enemies]) {
+            if (distanceXZ(anchor, enemy.mesh.position) <= splashRadiusWorld) {
+                applyTowerEffects(deps, building, enemy);
+                const { damage, critical } = rollTowerStrikeDamage(building);
+                deps.damageEnemy(enemy, damage, damageSource, { critical });
+            }
+        }
+        return;
+    }
+    applyTowerEffects(deps, building, target);
+    const one = rollTowerStrikeDamage(building);
+    deps.damageEnemy(target, one.damage, damageSource, { critical: one.critical });
+}
+export function tickTowerDefenseCombat(dt, deps) {
+    for (const building of deps.buildings) {
+        if (building.skillCooldownTimer > 0) {
+            building.skillCooldownTimer -= dt;
+        }
+        if (building.spec.role === "melee") {
+            building.cooldown -= dt;
+            if (building.cooldown <= 0 && building.blockingEnemies.length > 0) {
+                building.blockingEnemies = building.blockingEnemies.filter((e) => e.hp > 0);
+                let dealt = false;
+                const damageSource = buildDefenseDamageSource(building.spec);
+                for (const e of building.blockingEnemies) {
+                    applyBuildingEffectsToEnemy(building, e, deps.elapsed);
+                    const meleeHit = rollTowerStrikeDamage(building);
+                    deps.damageEnemy(e, meleeHit.damage, damageSource, { critical: meleeHit.critical });
+                    dealt = true;
+                }
+                if (dealt) {
+                    deps.onTowerFired?.(building);
+                }
+                building.cooldown = 1 / (building.spec.fireRate ?? 1);
+            }
+            continue;
+        }
+        if (building.spec.role === "healer") {
+            building.cooldown -= dt;
+            if (building.cooldown <= 0) {
+                const origin = cellToWorld(building.cell);
+                const range = (building.spec.healRange ?? 0) * TILE_SIZE;
+                let healed = false;
+                for (const target of deps.buildings) {
+                    if (target.hp < (target.spec.maxHp ?? 1) && distanceXZ(origin, cellToWorld(target.cell)) <= range) {
+                        target.hp = Math.min(target.hp + (building.spec.healAmount ?? 0), target.spec.maxHp ?? 1);
+                        deps.addBeam(origin, cellToWorld(target.cell), 0x4caf50);
+                        healed = true;
+                    }
+                }
+                if (healed) {
+                    building.cooldown = 1 / (building.spec.fireRate ?? 1);
+                }
+            }
+            continue;
+        }
+        if (building.spec.category !== "tower" || building.spec.role === "device") {
+            continue;
+        }
+        const buff = getTowerBuffMultiplier(building, deps.buildings);
+        if (buff > 1 && Math.random() < 0.05) {
+            addStatusOutlineEffect(deps.effects, deps.fxGroup, building.mesh, 0xffd700, 0.3);
+        }
+        building.cooldown -= dt;
+        if (building.cooldown > 0) {
+            continue;
+        }
+        const target = findNearestEnemyTarget(building, deps.enemies);
+        if (!target) {
+            continue;
+        }
+        fireAt(deps, building, target);
+        building.cooldown = 1 / ((building.spec.fireRate ?? 1) * buff);
+    }
+}

@@ -1,0 +1,824 @@
+import * as THREE from "three";
+import { lookupGlobalModelPathScale } from "../assets/model-path-scale";
+import { TILE_SIZE, cellKey, cellToWorld, expandPath, expandPathToOrderedCells, getActiveGridCols, getActiveGridRows, mapCols, mapRows, setActiveRuntimeGrid, } from "../core/runtime-grid";
+/** 济南/泉城系整块底板占位 URL（仓库无资源时仍会走加载失败兜底） */
+const JINAN_REGIONAL_FALLBACK_BOARD_URL = "/Arts/Maps/jinan_full_map.png";
+/**
+ * 泉城风「整块底板 + 高光路径」：无 theme.boardTextureUrl 时仍可启用。
+ * 选关入口可能没带 `city=jinan`，编辑器 id 常为 CN_shandong…。
+ */
+function mapEligibleForJinanRegionalFlatPreset(map, currentCity) {
+    if (currentCity === "jinan") {
+        return true;
+    }
+    const id = map.id.toLowerCase();
+    const name = map.name ?? "";
+    if (id.includes("jinan")) {
+        return true;
+    }
+    if (/(泉城|济南|闯荡山东|山东[^\s·]*济南|370100)/u.test(name)) {
+        return true;
+    }
+    if (/(quan[cheng]?|jinan|shandong|370100)/i.test(id)) {
+        return true;
+    }
+    return false;
+}
+/** 障碍物顶面纯色（不用贴图）：始终由底色与 accent 混合，避免出现贴图 UV + 高光造成的「发白顶」 */
+function obstacleTopFaceTint(obstacleHex, accentHex) {
+    const base = new THREE.Color(obstacleHex);
+    const accent = new THREE.Color(accentHex);
+    return base.clone().lerp(accent, 0.34).offsetHSL(0, 0.035, 0.06).getHex();
+}
+function softPathGuideCenter(pathHex, accentHex) {
+    return new THREE.Color(pathHex).lerp(new THREE.Color(accentHex), 0.42).offsetHSL(0, 0.02, 0.07).getHex();
+}
+function runtimePathGroups(map) {
+    const authored = map.enemyPaths
+        ?.map((path) => path.cells)
+        .filter((cells) => Array.isArray(cells) && cells.length > 0);
+    return authored?.length ? authored : [map.path];
+}
+export function buildRuntimeMapState(map) {
+    setActiveRuntimeGrid(map);
+    const pathCells = new Set();
+    for (const path of runtimePathGroups(map)) {
+        for (const key of expandPath(path)) {
+            pathCells.add(key);
+        }
+    }
+    const obstacleCells = new Set(map.obstacles
+        .filter((cell) => !pathCells.has(cellKey(cell)))
+        .map((cell) => cellKey(cell)));
+    const pathTrace = expandPathToOrderedCells(runtimePathGroups(map)[0] ?? map.path);
+    return {
+        pathCells,
+        obstacleCells,
+        pathWorldPoints: pathTrace.map((cell) => cellToWorld(cell)),
+    };
+}
+function stampGeoBackdropDepthBias(materials) {
+    for (const m of materials) {
+        m.polygonOffset = true;
+        m.polygonOffsetFactor = -0.92;
+        m.polygonOffsetUnits = -0.92;
+    }
+}
+export function renderRuntimeMapScene(options) {
+    const { scene, mapGroup, hoverMesh, map, pathCells, obstacleCells, currentCity, mode, useGeoBackdrop, safeZoneCells, mapGroupWorldXzScale = 1, } = options;
+    const xzScale = Number.isFinite(mapGroupWorldXzScale) && mapGroupWorldXzScale > 0 ? mapGroupWorldXzScale : 1;
+    mapGroup.add(hoverMesh);
+    hoverMesh.visible = false;
+    const tileGeometry = new THREE.BoxGeometry(TILE_SIZE * 0.96, 0.18, TILE_SIZE * 0.96);
+    const pathGeometry = new THREE.BoxGeometry(TILE_SIZE * 0.98, 0.22, TILE_SIZE * 0.98);
+    const obstacleGeometry = new THREE.BoxGeometry(TILE_SIZE * 0.85, 1.2, TILE_SIZE * 0.85);
+    const obstacleCapGeometry = new THREE.BoxGeometry(TILE_SIZE * 0.82, 0.1, TILE_SIZE * 0.82);
+    const groundMaterial = new THREE.MeshStandardMaterial({
+        color: map.theme.ground,
+        roughness: 0.4,
+        metalness: 0.1,
+    });
+    const groundAltMaterial = new THREE.MeshStandardMaterial({
+        color: map.theme.groundAlt,
+        roughness: 0.4,
+        metalness: 0.1,
+    });
+    const pathMaterial = new THREE.MeshStandardMaterial({
+        color: map.theme.path,
+        emissive: map.theme.path,
+        emissiveIntensity: 0.025,
+        roughness: 0.55,
+        metalness: 0,
+        polygonOffset: true,
+        polygonOffsetFactor: -2.4,
+        polygonOffsetUnits: -2.4,
+    });
+    const isJinanRegion = mapEligibleForJinanRegionalFlatPreset(map, currentCity);
+    const isBeijing = currentCity === "beijing" || map.id.startsWith("beijing");
+    const usesGeoBackdrop = !!useGeoBackdrop && !!map.geo?.enabled;
+    const geoVerticalStretch = usesGeoBackdrop && xzScale > 1 ? xzScale : 1;
+    const trimmedBoard = (map.theme.boardTextureUrl ?? "").trim();
+    const hasCustomBoardImage = trimmedBoard.length > 0;
+    /** 整块底板平面（泉城预设或编辑器 theme.boardTextureUrl）；地理映射开启时也使用，与关底板一致的可读棋盘 */
+    const jinanRegionalFlatPreset = isJinanRegion && !hasCustomBoardImage;
+    /** 程序化格子 +  voxel 路径换为整块贴图 + 平面路径条带 */
+    const surfaceBoardPresentation = jinanRegionalFlatPreset || hasCustomBoardImage;
+    const pathGlowOpacity = map.theme.pathGlowOpacity ?? 0.46;
+    const pathDetailOpacity = map.theme.pathDetailOpacity ?? 0.82;
+    scene.background = new THREE.Color(usesGeoBackdrop ? 0x9eb8c4 : map.theme.fog);
+    scene.fog = usesGeoBackdrop ? new THREE.Fog(0x9eb8c4, 1500, 8500) : new THREE.Fog(map.theme.fog, 150, 320);
+    const boardTexture = createBoardTexture(map.theme.ground, map.theme.groundAlt);
+    const pathTexture = createPathTexture(map.theme.path, map.theme.accent);
+    const obstacleTexture = createObstacleTexture(map.theme.obstacle, map.theme.accent);
+    const obstacleTopTint = obstacleTopFaceTint(map.theme.obstacle, map.theme.accent);
+    const obstacleSideMat = new THREE.MeshStandardMaterial({
+        map: obstacleTexture,
+        color: new THREE.Color(map.theme.obstacle).multiplyScalar(1.02),
+        roughness: 0.88,
+        metalness: 0,
+    });
+    const obstacleTopMat = new THREE.MeshStandardMaterial({
+        color: obstacleTopTint,
+        roughness: 0.94,
+        metalness: 0,
+    });
+    const obstacleMaterials = obstacleSideMat;
+    groundMaterial.map = boardTexture;
+    groundMaterial.color.copy(new THREE.Color(map.theme.ground)).multiplyScalar(1.02);
+    groundMaterial.roughness = 0.9;
+    groundMaterial.metalness = 0;
+    groundAltMaterial.map = boardTexture;
+    groundAltMaterial.color.copy(new THREE.Color(map.theme.groundAlt)).multiplyScalar(1.02);
+    groundAltMaterial.roughness = 0.92;
+    groundAltMaterial.metalness = 0;
+    pathMaterial.map = pathTexture;
+    pathMaterial.color.copy(new THREE.Color(map.theme.path)).multiplyScalar(1.02);
+    pathMaterial.emissiveIntensity = 0.05;
+    if (usesGeoBackdrop) {
+        stampGeoBackdropDepthBias([
+            groundMaterial,
+            groundAltMaterial,
+            pathMaterial,
+            obstacleSideMat,
+            obstacleTopMat,
+        ]);
+        /** 地理底板开启时也不再半透棋盘：与关闭映射一致（opaque + depthWrite），否则血条/弹道易与远景底板穿插 */
+        for (const m of [groundMaterial, groundAltMaterial, pathMaterial]) {
+            m.transparent = false;
+            m.opacity = 1;
+            m.depthWrite = true;
+            m.needsUpdate = true;
+        }
+    }
+    if (usesGeoBackdrop || (!surfaceBoardPresentation && !isJinanRegion)) {
+        addBoardBase(mapGroup, map, usesGeoBackdrop);
+    }
+    if (usesGeoBackdrop) {
+        addGridOverlay(mapGroup, map, map.theme.accent, true);
+    }
+    const textureLoader = new THREE.TextureLoader();
+    const beijingTextures = {};
+    if (isBeijing && !usesGeoBackdrop) {
+        const types = ["grass", "water", "urban", "house", "forest"];
+        types.forEach(t => {
+            // 预先使用动态生成的保底纹理
+            beijingTextures[t] = createDynamicTexture(t);
+            // 尝试异步加载实际资产
+            textureLoader.load(`/Arts/Maps/beijing_${t}.png`, (tex) => {
+                tex.colorSpace = THREE.SRGBColorSpace;
+                beijingTextures[t].dispose();
+                beijingTextures[t] = tex;
+            });
+        });
+    }
+    for (let row = 0; row < mapRows(map); row += 1) {
+        for (let col = 0; col < mapCols(map); col += 1) {
+            const cell = { col, row };
+            const key = cellKey(cell);
+            const position = cellToWorld(cell);
+            if (pathCells.has(key)) {
+                if (surfaceBoardPresentation) {
+                    addPathOverlayTile(mapGroup, position, map.theme.path, pathGlowOpacity);
+                }
+                else if (usesGeoBackdrop) {
+                    const mesh = new THREE.Mesh(pathGeometry, pathMaterial);
+                    mesh.position.set(position.x, 0.14, position.z);
+                    mesh.renderOrder = 6;
+                    mesh.receiveShadow = true;
+                    if (geoVerticalStretch > 1) {
+                        mesh.scale.set(1, geoVerticalStretch, 1);
+                    }
+                    mapGroup.add(mesh);
+                    addPathTileDetails(mapGroup, cell, position, map.theme.accent, pathCells, pathDetailOpacity);
+                }
+                else if (isBeijing) {
+                    const plane = new THREE.Mesh(new THREE.PlaneGeometry(TILE_SIZE, TILE_SIZE), new THREE.MeshStandardMaterial({
+                        map: beijingTextures["urban"],
+                        color: 0x8a9e96,
+                        roughness: 0.8
+                    }));
+                    plane.rotation.x = -Math.PI / 2;
+                    plane.position.set(position.x, 0.02, position.z);
+                    plane.receiveShadow = true;
+                    mapGroup.add(plane);
+                }
+                else {
+                    const mesh = new THREE.Mesh(pathGeometry, pathMaterial);
+                    mesh.position.set(position.x, 0.06, position.z);
+                    mesh.receiveShadow = true;
+                    mapGroup.add(mesh);
+                    addPathTileDetails(mapGroup, cell, position, map.theme.accent, pathCells, pathDetailOpacity);
+                }
+            }
+            else if (obstacleCells.has(key)) {
+                if (usesGeoBackdrop && !surfaceBoardPresentation) {
+                    const mesh = new THREE.Mesh(obstacleGeometry, obstacleMaterials);
+                    mesh.position.set(position.x, 0.6, position.z);
+                    mesh.castShadow = true;
+                    mesh.receiveShadow = true;
+                    if (geoVerticalStretch > 1) {
+                        mesh.scale.set(1, geoVerticalStretch, 1);
+                    }
+                    mapGroup.add(mesh);
+                    const cap = new THREE.Mesh(obstacleCapGeometry, obstacleTopMat);
+                    cap.position.set(position.x, 1.25, position.z);
+                    cap.castShadow = true;
+                    cap.receiveShadow = true;
+                    if (geoVerticalStretch > 1) {
+                        cap.scale.set(1, geoVerticalStretch, 1);
+                    }
+                    mapGroup.add(cap);
+                }
+                else if (isBeijing && !surfaceBoardPresentation) {
+                    const buildingHeight = 1.0 + (Math.sin(col * 0.5) + Math.cos(row * 0.5)) * 0.5;
+                    const mesh = new THREE.Mesh(new THREE.BoxGeometry(TILE_SIZE * 0.85, buildingHeight, TILE_SIZE * 0.85), new THREE.MeshStandardMaterial({
+                        map: beijingTextures["house"],
+                        color: 0x948888,
+                    }));
+                    mesh.position.set(position.x, buildingHeight / 2, position.z);
+                    mesh.castShadow = true;
+                    mesh.receiveShadow = true;
+                    mapGroup.add(mesh);
+                }
+                else {
+                    const mesh = new THREE.Mesh(obstacleGeometry, obstacleMaterials);
+                    mesh.position.set(position.x, 0.6, position.z);
+                    mesh.castShadow = true;
+                    mesh.receiveShadow = true;
+                    if (!jinanRegionalFlatPreset) {
+                        mapGroup.add(mesh);
+                        const cap = new THREE.Mesh(obstacleCapGeometry, obstacleTopMat);
+                        cap.position.set(position.x, 1.25, position.z);
+                        cap.castShadow = true;
+                        cap.receiveShadow = true;
+                        mapGroup.add(cap);
+                    }
+                }
+            }
+            else {
+                if (usesGeoBackdrop && !surfaceBoardPresentation) {
+                    const mesh = new THREE.Mesh(tileGeometry, (col + row) % 2 === 0 ? groundMaterial : groundAltMaterial);
+                    mesh.position.set(position.x, -0.01, position.z);
+                    mesh.receiveShadow = true;
+                    if (geoVerticalStretch > 1) {
+                        mesh.scale.set(1, geoVerticalStretch, 1);
+                    }
+                    mapGroup.add(mesh);
+                }
+                else if (isBeijing && !surfaceBoardPresentation) {
+                    // Use pseudo-random biomes for Beijing ground
+                    const noise = (Math.sin(col * 0.3) + Math.cos(row * 0.3) + 2) / 4;
+                    let type = "grass";
+                    let fallbackColor = 0x2d3e2d; // Deep grass
+                    if (noise < 0.2) {
+                        type = "water";
+                        fallbackColor = 0x1a2b3c; // Deep water
+                    }
+                    else if (noise > 0.7) {
+                        type = "forest";
+                        fallbackColor = 0x1b2e1b; // Deep forest
+                    }
+                    else if (noise > 0.5) {
+                        type = "urban";
+                        fallbackColor = 0x2a2a2a; // Deep urban
+                    }
+                    const plane = new THREE.Mesh(new THREE.PlaneGeometry(TILE_SIZE, TILE_SIZE), new THREE.MeshStandardMaterial({
+                        map: beijingTextures[type],
+                        color: (col + row) % 2 === 0 ? fallbackColor : new THREE.Color(fallbackColor).multiplyScalar(0.92).getHex(),
+                        roughness: 0.9
+                    }));
+                    plane.rotation.x = -Math.PI / 2;
+                    plane.position.set(position.x, 0, position.z);
+                    plane.receiveShadow = true;
+                    mapGroup.add(plane);
+                }
+                else {
+                    const mesh = new THREE.Mesh(tileGeometry, (col + row) % 2 === 0 ? groundMaterial : groundAltMaterial);
+                    mesh.position.set(position.x, -0.01, position.z);
+                    mesh.receiveShadow = true;
+                    if (!surfaceBoardPresentation) {
+                        mapGroup.add(mesh);
+                    }
+                }
+            }
+        }
+    }
+    if (surfaceBoardPresentation) {
+        const planeUrl = hasCustomBoardImage ? trimmedBoard : JINAN_REGIONAL_FALLBACK_BOARD_URL;
+        const textureLoader = new THREE.TextureLoader();
+        const provisionalMap = createBoardTexture(map.theme.ground, map.theme.groundAlt);
+        provisionalMap.wrapS = provisionalMap.wrapT = THREE.ClampToEdgeWrapping;
+        const planeGeo = new THREE.PlaneGeometry(getActiveGridCols() * TILE_SIZE, getActiveGridRows() * TILE_SIZE);
+        const planeMat = new THREE.MeshBasicMaterial({ map: provisionalMap });
+        const plane = new THREE.Mesh(planeGeo, planeMat);
+        plane.rotation.x = -Math.PI / 2;
+        plane.position.y = 0.05;
+        mapGroup.add(plane);
+        textureLoader.load(planeUrl, (tex) => {
+            tex.colorSpace = THREE.SRGBColorSpace;
+            tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+            if (planeMat.map && planeMat.map !== tex) {
+                planeMat.map.dispose?.();
+            }
+            planeMat.map = tex;
+            planeMat.needsUpdate = true;
+        }, undefined, () => {
+            console.warn("[renderRuntimeMapScene] board texture load failed, using procedural fallback:", planeUrl);
+        });
+        for (const path of runtimePathGroups(map)) {
+            addJinanPathGuides(mapGroup, path, map.theme.path, softPathGuideCenter(map.theme.path, map.theme.accent));
+        }
+    }
+    /* 略高于程序性格子 / flat 整块底板，低于路径高亮与安全区 */
+    const decorY = usesGeoBackdrop
+        ? surfaceBoardPresentation
+            ? 0.063
+            : 0.048
+        : surfaceBoardPresentation
+            ? 0.063
+            : 0.098;
+    addBoardDecorImageLayers(mapGroup, map, decorY, xzScale);
+    if (mode === "defense") {
+        const spawnPoints = map.spawnPoints?.length ? map.spawnPoints : [map.path[0]];
+        for (const spawn of spawnPoints) {
+            addEndpointMarker(mapGroup, spawn, 0x6bbf90, "入口", geoVerticalStretch);
+        }
+        addEndpointMarker(mapGroup, map.path[map.path.length - 1], 0xd87880, "基地", geoVerticalStretch);
+    }
+    else {
+        const exploreStart = map.exploreStart ?? map.path[0];
+        if (exploreStart) {
+            addEndpointMarker(mapGroup, exploreStart, map.theme.accent, "探索起点", geoVerticalStretch);
+        }
+    }
+    // Safe zone floor overlays
+    if (safeZoneCells && safeZoneCells.size > 0) {
+        const safeGeo = new THREE.PlaneGeometry(TILE_SIZE * 0.94, TILE_SIZE * 0.94);
+        const safeMat = new THREE.MeshBasicMaterial({
+            color: 0x22dd77,
+            transparent: true,
+            opacity: 0.38,
+            depthWrite: false,
+            polygonOffset: true,
+            polygonOffsetFactor: -4,
+            polygonOffsetUnits: -4,
+        });
+        const borderGeo = new THREE.RingGeometry(TILE_SIZE * 0.40, TILE_SIZE * 0.47, 4);
+        const borderMat = new THREE.MeshBasicMaterial({
+            color: 0x55ffaa,
+            transparent: true,
+            opacity: 0.7,
+            depthWrite: false,
+            polygonOffset: true,
+            polygonOffsetFactor: -5,
+            polygonOffsetUnits: -5,
+        });
+        for (const key of safeZoneCells) {
+            const parts = key.split(",");
+            const cell = { col: Number(parts[0]), row: Number(parts[1]) };
+            const pos = cellToWorld(cell);
+            const plane = new THREE.Mesh(safeGeo, safeMat);
+            plane.rotation.x = -Math.PI / 2;
+            plane.position.set(pos.x, 0.12, pos.z);
+            plane.renderOrder = 5;
+            mapGroup.add(plane);
+            const ring = new THREE.Mesh(borderGeo, borderMat);
+            ring.rotation.x = -Math.PI / 2;
+            ring.rotation.z = Math.PI / 4;
+            ring.position.set(pos.x, 0.14, pos.z);
+            ring.renderOrder = 6;
+            mapGroup.add(ring);
+        }
+    }
+}
+function boardFootprintClipPlanes(halfWidthX, halfDepthZ) {
+    return [
+        new THREE.Plane(new THREE.Vector3(-1, 0, 0), halfWidthX),
+        new THREE.Plane(new THREE.Vector3(1, 0, 0), halfWidthX),
+        new THREE.Plane(new THREE.Vector3(0, 0, -1), halfDepthZ),
+        new THREE.Plane(new THREE.Vector3(0, 0, 1), halfDepthZ),
+    ];
+}
+function decorClampPct(v, fallback) {
+    if (!Number.isFinite(v))
+        return fallback;
+    return Math.max(0, Math.min(100, v));
+}
+function decorClamp01(v, fallback) {
+    if (!Number.isFinite(v))
+        return fallback;
+    return Math.max(0, Math.min(1, v));
+}
+function addBoardDecorImageLayers(mapGroup, map, y, worldXzFootprintStretch = 1) {
+    const layers = map.boardImageLayers;
+    if (!layers?.length)
+        return;
+    const textureLoader = new THREE.TextureLoader();
+    const cols = mapCols(map);
+    const rows = mapRows(map);
+    const spanX = cols * TILE_SIZE;
+    const spanZ = rows * TILE_SIZE;
+    const s = Number.isFinite(worldXzFootprintStretch) && worldXzFootprintStretch > 0 ? worldXzFootprintStretch : 1;
+    const clipPlanes = boardFootprintClipPlanes((spanX / 2) * s, (spanZ / 2) * s);
+    [...layers].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).forEach(layer => {
+        textureLoader.load(layer.src, tex => {
+            tex.colorSpace = THREE.SRGBColorSpace;
+            tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+            let aspect = 1;
+            if (Number.isFinite(Number(layer.aspect)) && Number(layer.aspect) > 0) {
+                aspect = Number(layer.aspect);
+            }
+            if (tex.image && "width" in tex.image && tex.image.width > 0) {
+                aspect = tex.image.height / tex.image.width;
+            }
+            const rawWp = Number(layer.widthPct);
+            const widthPctClamped = decorClampPct(layer.widthPct, 45);
+            const stretchFillGrid = Number.isFinite(rawWp) && rawWp >= 100;
+            let planeW;
+            let planeH;
+            let cx;
+            let cz;
+            if (stretchFillGrid) {
+                planeW = spanX;
+                planeH = spanZ;
+                cx = 0;
+                cz = 0;
+            }
+            else {
+                planeW = (widthPctClamped / 100) * spanX;
+                planeH = planeW * aspect;
+                const leftPct = decorClampPct(layer.centerX, 0);
+                const topPct = decorClampPct(layer.centerY, 0);
+                const wx0 = -spanX / 2 + (leftPct / 100) * spanX;
+                const wz0 = -spanZ / 2 + (topPct / 100) * spanZ;
+                cx = wx0 + planeW / 2;
+                cz = wz0 + planeH / 2;
+            }
+            const opacity = decorClamp01(layer.opacity ?? 1, 1);
+            const decoMat = new THREE.MeshBasicMaterial({
+                map: tex,
+                transparent: opacity < 0.999,
+                opacity,
+                depthWrite: false,
+                polygonOffset: true,
+                polygonOffsetFactor: -1.35,
+                polygonOffsetUnits: -1.35,
+            });
+            const decoAny = decoMat;
+            decoAny.clipping = true;
+            decoAny.clippingPlanes = clipPlanes;
+            decoAny.clipIntersection = false;
+            const mesh = new THREE.Mesh(new THREE.PlaneGeometry(planeW, planeH), decoMat);
+            mesh.rotation.x = -Math.PI / 2;
+            mesh.position.set(cx, y, cz);
+            mesh.renderOrder = s > 1.001 ? 14 : 4;
+            mapGroup.add(mesh);
+        }, undefined, () => console.warn("[map-runtime] boardImageLayer load failed:", layer.src.slice(0, 80)));
+    });
+}
+function createDynamicTexture(type) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 64;
+    canvas.height = 64;
+    const ctx = canvas.getContext("2d");
+    const colors = {
+        grass: "#1a2e1a",
+        water: "#0a1a2a",
+        urban: "#1a1a1a",
+        house: "#2a1a1a",
+        forest: "#0a1e0a",
+        path: "#2a3a4a"
+    };
+    ctx.fillStyle = colors[type] || "#111";
+    ctx.fillRect(0, 0, 64, 64);
+    const strokeRgb = colors[type] || "#111";
+    const strokeCol = new THREE.Color(strokeRgb);
+    ctx.strokeStyle = `rgba(${Math.round(strokeCol.r * 255)},${Math.round(strokeCol.g * 255)},${Math.round(strokeCol.b * 255)},0.09)`;
+    for (let i = 0; i <= 64; i += 16) {
+        ctx.beginPath();
+        ctx.moveTo(i, 0);
+        ctx.lineTo(i, 64);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(0, i);
+        ctx.lineTo(64, i);
+        ctx.stroke();
+    }
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+    return texture;
+}
+function createBoardTexture(primary, secondary) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 128;
+    canvas.height = 128;
+    const ctx = canvas.getContext("2d");
+    const p = new THREE.Color(primary);
+    const s = new THREE.Color(secondary);
+    const gradient = ctx.createLinearGradient(0, 0, 128, 128);
+    gradient.addColorStop(0, `#${p.clone().multiplyScalar(1.04).getHexString()}`);
+    gradient.addColorStop(1, `#${s.clone().multiplyScalar(0.88).getHexString()}`);
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, 128, 128);
+    const rimLit = p.clone().lerp(s, 0.5).offsetHSL(0, 0, 0.14);
+    ctx.strokeStyle = `rgba(${Math.round(rimLit.r * 255)},${Math.round(rimLit.g * 255)},${Math.round(rimLit.b * 255)},0.22)`;
+    ctx.lineWidth = 3;
+    ctx.strokeRect(5, 5, 118, 118);
+    ctx.strokeStyle = "rgba(0,0,0,0.18)";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(12, 12, 104, 104);
+    const hi = p.clone().offsetHSL(0, -0.02, 0.05);
+    ctx.fillStyle = `rgba(${Math.round(hi.r * 255)},${Math.round(hi.g * 255)},${Math.round(hi.b * 255)},0.06)`;
+    ctx.fillRect(8, 8, 18, 18);
+    ctx.fillRect(102, 102, 18, 18);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    return texture;
+}
+function createPathTexture(base, accent) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 128;
+    canvas.height = 128;
+    const ctx = canvas.getContext("2d");
+    const baseColor = new THREE.Color(base);
+    const accentColor = new THREE.Color(accent);
+    ctx.fillStyle = `#${baseColor.clone().multiplyScalar(0.84).getHexString()}`;
+    ctx.fillRect(0, 0, 128, 128);
+    ctx.fillStyle = `#${baseColor.clone().multiplyScalar(1.08).getHexString()}`;
+    ctx.fillRect(0, 14, 128, 100);
+    ctx.strokeStyle = `#${accentColor.getHexString()}`;
+    ctx.globalAlpha = 0.55;
+    ctx.lineWidth = 4;
+    ctx.setLineDash([14, 10]);
+    ctx.beginPath();
+    ctx.moveTo(0, 64);
+    ctx.lineTo(128, 64);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 0.26;
+    const pathRim = baseColor.clone().offsetHSL(0, 0, 0.12);
+    ctx.strokeStyle = `#${pathRim.getHexString()}`;
+    ctx.lineWidth = 3;
+    ctx.strokeRect(5, 5, 118, 118);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    return texture;
+}
+function createObstacleTexture(base, accent) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 128;
+    canvas.height = 128;
+    const ctx = canvas.getContext("2d");
+    const baseColor = new THREE.Color(base);
+    const accentColor = new THREE.Color(accent);
+    ctx.fillStyle = `#${baseColor.clone().multiplyScalar(0.82).getHexString()}`;
+    ctx.fillRect(0, 0, 128, 128);
+    ctx.fillStyle = `#${baseColor.clone().multiplyScalar(0.94).getHexString()}`;
+    ctx.fillRect(12, 10, 104, 108);
+    ctx.fillStyle = `#${baseColor.clone().lerp(accentColor, 0.16).multiplyScalar(1.03).getHexString()}`;
+    ctx.fillRect(18, 18, 92, 14);
+    ctx.globalAlpha = 0.16;
+    ctx.fillStyle = `#${accentColor.getHexString()}`;
+    for (let x = 22; x <= 94; x += 24) {
+        ctx.fillRect(x, 42, 8, 58);
+    }
+    ctx.globalAlpha = 0.28;
+    ctx.strokeStyle = `#${accentColor.clone().multiplyScalar(0.88).getHexString()}`;
+    ctx.lineWidth = 3;
+    ctx.strokeRect(18, 18, 92, 92);
+    ctx.globalAlpha = 1;
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    return texture;
+}
+function addBoardBase(mapGroup, map, usesGeoBackdrop) {
+    const width = mapCols(map) * TILE_SIZE + TILE_SIZE * 1.2;
+    const height = mapRows(map) * TILE_SIZE + TILE_SIZE * 1.2;
+    const baseMat = new THREE.MeshStandardMaterial({
+        color: new THREE.Color(map.theme.ground).multiplyScalar(0.72),
+        roughness: 0.72,
+        metalness: 0.08,
+        polygonOffset: true,
+        polygonOffsetFactor: 1.06,
+        polygonOffsetUnits: 1.06,
+        transparent: false,
+        opacity: 1,
+        depthWrite: true,
+    });
+    const base = new THREE.Mesh(new THREE.BoxGeometry(width, 0.16, height), baseMat);
+    /** 整块底板下移，避免与地面格子盒体顶/底重合产生 z-fighting（约 0.1+ 净空）*/
+    base.position.y = usesGeoBackdrop ? -0.36 : -0.32;
+    base.receiveShadow = true;
+    mapGroup.add(base);
+    const rimOpacity = map.theme.rimOpacity ?? 0.32;
+    const rim = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(width, 0.18, height)), new THREE.LineBasicMaterial({ color: map.theme.accent, transparent: true, opacity: rimOpacity }));
+    rim.position.y = usesGeoBackdrop ? -0.24 : -0.22;
+    mapGroup.add(rim);
+}
+function addGridOverlay(mapGroup, map, color, geoBias = false) {
+    const cols = mapCols(map);
+    const rows = mapRows(map);
+    const halfW = (cols * TILE_SIZE) / 2;
+    const halfH = (rows * TILE_SIZE) / 2;
+    const points = [];
+    for (let col = 0; col <= cols; col += 1) {
+        const x = -halfW + col * TILE_SIZE;
+        points.push(new THREE.Vector3(x, 0.38, -halfH), new THREE.Vector3(x, 0.38, halfH));
+    }
+    for (let row = 0; row <= rows; row += 1) {
+        const z = -halfH + row * TILE_SIZE;
+        points.push(new THREE.Vector3(-halfW, 0.38, z), new THREE.Vector3(halfW, 0.38, z));
+    }
+    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+    const gridOpacity = map.theme.gridLineOpacity ?? 0.42;
+    const lineMat = new THREE.LineBasicMaterial({
+        color,
+        transparent: true,
+        opacity: gridOpacity,
+        depthWrite: false,
+        ...(geoBias ? { polygonOffset: true, polygonOffsetFactor: -0.92, polygonOffsetUnits: -0.92 } : {}),
+    });
+    const grid = new THREE.LineSegments(geometry, lineMat);
+    mapGroup.add(grid);
+}
+function addPathOverlayTile(mapGroup, position, color, opacity) {
+    const borderTint = new THREE.Color(color).offsetHSL(0, 0.02, 0.14).getHex();
+    const glow = new THREE.Mesh(new THREE.PlaneGeometry(TILE_SIZE * 1.02, TILE_SIZE * 1.02), new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity,
+        depthWrite: false,
+    }));
+    glow.rotation.x = -Math.PI / 2;
+    glow.position.set(position.x, 0.16, position.z);
+    mapGroup.add(glow);
+    const border = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.PlaneGeometry(TILE_SIZE * 1.02, TILE_SIZE * 1.02)), new THREE.LineBasicMaterial({ color: borderTint, transparent: true, opacity: 0.82 }));
+    border.rotation.x = -Math.PI / 2;
+    border.position.set(position.x, 0.17, position.z);
+    mapGroup.add(border);
+}
+function addPathTileDetails(mapGroup, cell, position, color, pathCells, pathDetailOpacity = 0.82) {
+    const material = new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: pathDetailOpacity,
+        depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -1.4,
+        polygonOffsetUnits: -1.4,
+    });
+    const directions = [
+        { dc: -1, dr: 0, x: -1, z: 0 },
+        { dc: 1, dr: 0, x: 1, z: 0 },
+        { dc: 0, dr: -1, x: 0, z: -1 },
+        { dc: 0, dr: 1, x: 0, z: 1 },
+    ].filter((dir) => pathCells.has(cellKey({ col: cell.col + dir.dc, row: cell.row + dir.dr })));
+    const connected = directions.length ? directions : [{ dc: 0, dr: 0, x: 0, z: 1 }];
+    for (const dir of connected) {
+        const horizontal = dir.x !== 0;
+        const stripe = new THREE.Mesh(new THREE.PlaneGeometry(horizontal ? TILE_SIZE * 0.66 : TILE_SIZE * 0.14, horizontal ? TILE_SIZE * 0.14 : TILE_SIZE * 0.66), material);
+        stripe.rotation.x = -Math.PI / 2;
+        stripe.position.set(position.x + dir.x * TILE_SIZE * 0.24, 0.32, position.z + dir.z * TILE_SIZE * 0.24);
+        stripe.renderOrder = 9;
+        mapGroup.add(stripe);
+    }
+    const hub = new THREE.Mesh(new THREE.CircleGeometry(TILE_SIZE * 0.13, 18), material);
+    hub.rotation.x = -Math.PI / 2;
+    hub.position.set(position.x, 0.325, position.z);
+    hub.renderOrder = 10;
+    mapGroup.add(hub);
+}
+function addJinanPathGuides(mapGroup, path, laneColor, centerColor) {
+    const laneMaterial = new THREE.MeshBasicMaterial({
+        color: laneColor,
+        transparent: true,
+        opacity: 0.48,
+        depthWrite: false,
+    });
+    const centerMaterial = new THREE.MeshBasicMaterial({
+        color: centerColor,
+        transparent: true,
+        opacity: 0.72,
+        depthWrite: false,
+    });
+    const expandedPath = expandPathToOrderedCells(path);
+    const pathSet = new Set(expandedPath.map((cell) => cellKey(cell)));
+    for (const cell of expandedPath) {
+        const position = cellToWorld(cell);
+        const directions = [
+            { dc: -1, dr: 0, x: -1, z: 0 },
+            { dc: 1, dr: 0, x: 1, z: 0 },
+            { dc: 0, dr: -1, x: 0, z: -1 },
+            { dc: 0, dr: 1, x: 0, z: 1 },
+        ].filter((dir) => pathSet.has(cellKey({ col: cell.col + dir.dc, row: cell.row + dir.dr })));
+        const connected = directions.length ? directions : [{ dc: 0, dr: 0, x: 0, z: 1 }];
+        const hubLane = new THREE.Mesh(new THREE.PlaneGeometry(TILE_SIZE * 0.62, TILE_SIZE * 0.62), laneMaterial);
+        hubLane.rotation.x = -Math.PI / 2;
+        hubLane.position.set(position.x, 0.18, position.z);
+        mapGroup.add(hubLane);
+        const hubCenter = new THREE.Mesh(new THREE.CircleGeometry(TILE_SIZE * 0.12, 18), centerMaterial);
+        hubCenter.rotation.x = -Math.PI / 2;
+        hubCenter.position.set(position.x, 0.2, position.z);
+        mapGroup.add(hubCenter);
+        for (const dir of connected) {
+            const horizontal = dir.x !== 0;
+            const lane = new THREE.Mesh(new THREE.PlaneGeometry(horizontal ? TILE_SIZE * 0.72 : TILE_SIZE * 0.52, horizontal ? TILE_SIZE * 0.52 : TILE_SIZE * 0.72), laneMaterial);
+            lane.rotation.x = -Math.PI / 2;
+            lane.position.set(position.x + dir.x * TILE_SIZE * 0.25, 0.18, position.z + dir.z * TILE_SIZE * 0.25);
+            mapGroup.add(lane);
+            const center = new THREE.Mesh(new THREE.PlaneGeometry(horizontal ? TILE_SIZE * 0.72 : TILE_SIZE * 0.14, horizontal ? TILE_SIZE * 0.14 : TILE_SIZE * 0.72), centerMaterial);
+            center.rotation.x = -Math.PI / 2;
+            center.position.set(lane.position.x, 0.2, lane.position.z);
+            mapGroup.add(center);
+        }
+    }
+}
+function addEndpointMarker(mapGroup, cell, color, label, verticalStretch = 1) {
+    const group = new THREE.Group();
+    const position = cellToWorld(cell);
+    group.position.set(position.x, 0.2, position.z);
+    if (verticalStretch > 1 && Number.isFinite(verticalStretch)) {
+        group.scale.set(1, verticalStretch, 1);
+    }
+    const halo = new THREE.Mesh(new THREE.CircleGeometry(0.9, 48), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.22, depthWrite: false }));
+    halo.rotation.x = -Math.PI / 2;
+    halo.position.y = 0.02;
+    group.add(halo);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.62, 0.055, 12, 48), new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.65, roughness: 0.28 }));
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = 0.1;
+    group.add(ring);
+    const beacon = new THREE.Mesh(new THREE.ConeGeometry(0.24, 0.95, 6), new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.55, roughness: 0.2 }));
+    beacon.position.y = 0.62;
+    group.add(beacon);
+    group.userData.label = label;
+    mapGroup.add(group);
+}
+async function loadActorModelRoot(modelPath, gltfLoader, objLoader, fbxLoader) {
+    const u = String(modelPath ?? "").trim();
+    if (!u) {
+        return null;
+    }
+    if (/\.(glb|gltf)(\?|$)/i.test(u)) {
+        const gltf = await new Promise((resolve, reject) => {
+            gltfLoader.load(u, resolve, undefined, reject);
+        });
+        return gltf.scene.clone(true);
+    }
+    if (/\.obj(\?|$)/i.test(u)) {
+        if (!objLoader) {
+            console.warn(`[MapActors] 缺少 OBJLoader，跳过 ${u}`);
+            return null;
+        }
+        const obj = await objLoader.loadAsync(u);
+        return obj.clone(true);
+    }
+    if (/\.fbx(\?|$)/i.test(u)) {
+        if (!fbxLoader) {
+            console.warn(`[MapActors] 缺少 FBXLoader，跳过 ${u}`);
+            return null;
+        }
+        const root = await fbxLoader.loadAsync(u);
+        return root.clone(true);
+    }
+    console.warn(`[MapActors] 不支持的格式: ${u}`);
+    return null;
+}
+export async function loadMapActors(options) {
+    const { group, map, gltfLoader, objLoader, fbxLoader, globalModelPathScales, isStale, playfieldScale = 1, yOffset = 0, } = options;
+    const actors = map.actors ?? [];
+    if (!actors.length)
+        return;
+    await Promise.allSettled(actors.map(async (actor) => {
+        try {
+            const root = await loadActorModelRoot(actor.modelPath, gltfLoader, objLoader, fbxLoader);
+            if (!root || isStale?.())
+                return;
+            const worldPos = cellToWorld({ col: actor.col, row: actor.row });
+            const ox = actor.worldOffsetMeters?.x ?? 0;
+            const oy = actor.worldOffsetMeters?.y ?? 0;
+            const oz = actor.worldOffsetMeters?.z ?? 0;
+            const instanceSc = (actor.scale ?? 1) > 0 ? (actor.scale ?? 1) : 1;
+            const pathSc = lookupGlobalModelPathScale(globalModelPathScales, actor.modelPath);
+            const sc = instanceSc * pathSc;
+            root.position.set(worldPos.x + ox, oy + yOffset, worldPos.z + oz);
+            root.rotation.y = ((actor.rotation ?? 0) * Math.PI) / 180;
+            if (playfieldScale !== 1) {
+                root.scale.set(sc, sc * playfieldScale, sc);
+            }
+            else {
+                root.scale.setScalar(sc);
+            }
+            root.traverse((child) => {
+                if (child.isMesh)
+                    child.castShadow = true;
+            });
+            if (!isStale?.()) {
+                group.add(root);
+            }
+        }
+        catch (e) {
+            console.warn(`[MapActors] 加载失败 ${actor.modelPath}:`, e);
+        }
+    }));
+}

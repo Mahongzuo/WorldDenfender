@@ -139,19 +139,19 @@ export function renderRuntimeMapScene(options: {
 
   const groundMaterial = new THREE.MeshStandardMaterial({
     color: map.theme.ground,
-    roughness: 0.4,
-    metalness: 0.1,
+    roughness: 0.9,
+    metalness: 0,
   });
   const groundAltMaterial = new THREE.MeshStandardMaterial({
     color: map.theme.groundAlt,
-    roughness: 0.4,
-    metalness: 0.1,
+    roughness: 0.92,
+    metalness: 0,
   });
   const pathMaterial = new THREE.MeshStandardMaterial({
     color: map.theme.path,
     emissive: map.theme.path,
-    emissiveIntensity: 0.025,
-    roughness: 0.55,
+    emissiveIntensity: 0.05,
+    roughness: 0.3,
     metalness: 0,
     polygonOffset: true,
     polygonOffsetFactor: -2.4,
@@ -168,6 +168,7 @@ export function renderRuntimeMapScene(options: {
   const jinanRegionalFlatPreset = isJinanRegion && !hasCustomBoardImage;
   /** 程序化格子 +  voxel 路径换为整块贴图 + 平面路径条带 */
   const surfaceBoardPresentation = jinanRegionalFlatPreset || hasCustomBoardImage;
+  const preferEditorPreviewMaterialProfile = !!map.editorStatus;
   const pathGlowOpacity = map.theme.pathGlowOpacity ?? 0.46;
   const pathDetailOpacity = map.theme.pathDetailOpacity ?? 0.82;
   scene.background = new THREE.Color(usesGeoBackdrop ? 0x9eb8c4 : map.theme.fog);
@@ -179,8 +180,8 @@ export function renderRuntimeMapScene(options: {
 
   const obstacleTopTint = obstacleTopFaceTint(map.theme.obstacle, map.theme.accent);
   const obstacleSideMat = new THREE.MeshStandardMaterial({
-    map: obstacleTexture,
-    color: new THREE.Color(map.theme.obstacle).multiplyScalar(1.02),
+    ...(preferEditorPreviewMaterialProfile ? {} : { map: obstacleTexture }),
+    color: preferEditorPreviewMaterialProfile ? map.theme.obstacle : new THREE.Color(map.theme.obstacle).multiplyScalar(1.02),
     roughness: 0.88,
     metalness: 0,
   });
@@ -191,17 +192,20 @@ export function renderRuntimeMapScene(options: {
   });
   const obstacleMaterials: THREE.Material | THREE.Material[] = obstacleSideMat;
 
-  groundMaterial.map = boardTexture;
-  groundMaterial.color.copy(new THREE.Color(map.theme.ground)).multiplyScalar(1.02);
-  groundMaterial.roughness = 0.9;
-  groundMaterial.metalness = 0;
-  groundAltMaterial.map = boardTexture;
-  groundAltMaterial.color.copy(new THREE.Color(map.theme.groundAlt)).multiplyScalar(1.02);
-  groundAltMaterial.roughness = 0.92;
-  groundAltMaterial.metalness = 0;
-  pathMaterial.map = pathTexture;
-  pathMaterial.color.copy(new THREE.Color(map.theme.path)).multiplyScalar(1.02);
-  pathMaterial.emissiveIntensity = 0.05;
+  if (preferEditorPreviewMaterialProfile) {
+    groundMaterial.color.setHex(map.theme.ground);
+    groundAltMaterial.color.setHex(map.theme.groundAlt);
+    pathMaterial.color.setHex(map.theme.path);
+    pathMaterial.emissive.setHex(map.theme.path);
+  } else {
+    groundMaterial.map = boardTexture;
+    groundMaterial.color.copy(new THREE.Color(map.theme.ground)).multiplyScalar(1.02);
+    groundAltMaterial.map = boardTexture;
+    groundAltMaterial.color.copy(new THREE.Color(map.theme.groundAlt)).multiplyScalar(1.02);
+    pathMaterial.map = pathTexture;
+    pathMaterial.color.copy(new THREE.Color(map.theme.path)).multiplyScalar(1.02);
+    pathMaterial.emissiveIntensity = 0.05;
+  }
 
   if (usesGeoBackdrop) {
     stampGeoBackdropDepthBias([

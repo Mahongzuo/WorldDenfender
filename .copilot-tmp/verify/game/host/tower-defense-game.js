@@ -1,0 +1,3897 @@
+import * as THREE from "three";
+import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
+import { clone as skeletonClone } from "three/examples/jsm/utils/SkeletonUtils.js";
+import { attachEmbeddedAnimationClips, getEmbeddedAnimationClips, loadAnimationAsset, loadCustomModelAsset, loadPersistedGameAssetConfig, modelTargetLabel as getModelTargetLabel, parseModelData as parsePersistedModelData, prepareUploadedModel as normalizeUploadedModel, uploadModelFile as uploadPersistedModelFile, } from "../assets/asset-loading";
+import { playDefenseEnemyKilled, playExploreBasicAttack, playExploreEnemyKilled, playExplorePlayerHit, playTowerBuild, playTowerFire, refreshBgmForMode, setGameSessionActive, setGlobalGameAudio, setLevelAudioMaps, } from "../audio/game-audio";
+import { BuildingDefenseHud } from "../defense/building-defense-hud";
+import { EnemyDefenseVisuals } from "../defense/enemy-defense-visuals";
+import { BUILD_SPECS, CITY_MAP } from "../data/content";
+import { tryCastDefenseActiveSkill } from "../defense/defense-active-skills";
+import { DefenseSession } from "../defense/defense-session";
+import { advanceDefenseSpawnState, spawnDefenseWaveEnemy, } from "../defense/defense-wave-spawner";
+import { clampDefenseDifficulty, formatDefenseDifficultyHud } from "../defense/defense-difficulty";
+import { tickDefenseMines } from "../defense/defense-mines";
+import { applyDefenseEnemyDamage } from "../defense/defense-enemy-hit";
+import { tickDefenseEnemyWave } from "../defense/defense-enemy-wave-sim";
+import { updateAutoCollectDrops, updateMoneyDropVisibility } from "../drops/drops-runtime";
+import { tickDefenseKeyboardCameraPan, tickDefenseSceneCamera } from "../camera/defense-camera";
+import { GameEffectsFacade } from "../fx/game-effects-facade";
+import { refreshBuildCardModelFlags, refreshGameplayHud, refreshMapButtonsActiveState, } from "../ui/gameplay-hud";
+import { ExploreCombatRuntime } from "../explore/explore-combat-runtime";
+import { buildExploreInventoryGridHtml, ExploreInventory } from "../explore/explore-inventory";
+import { ExplorePlayerProgress } from "../explore/explore-player-progress";
+import { resolveExploreGameplay } from "../explore/explore-gameplay-settings";
+import { getExploreMoveIntent, orientPlayerToMovement } from "../explore/explore-runtime";
+import { tickExploreSession } from "../explore/explore-session";
+import { tickExploreFollowCamera } from "../camera/explore-camera";
+import { pullEditorLevelsFromProjectFile as importEditorLevelsFromProjectFile, } from "../editor/editor-sync-session";
+import { GeoTilesRuntime, canUseGeoTiles } from "../geo/geo-tiles-runtime";
+import { getGameGeoMappingEnabled, setGameGeoMappingEnabled } from "../geo/game-geo-mapping-pref";
+import { DEFAULT_PLAYER_MODEL_URLS, DEFENSE_DIFFICULTY_DEFAULT, INITIAL_BASE_HP, DEFENSE_STANDARD_WAVE_COUNT } from "../core/game-config";
+import { GameEconomy } from "../economy/game-economy";
+import { GameModelCustomization } from "../assets/game-model-customization";
+import { GachaPanelPresenter } from "../ui/gacha-panel";
+import { applyCameraZoom, beginCameraDrag as beginInputCameraDrag, bindGameInputHandlers, endCameraDrag as endInputCameraDrag, resizeViewport, rotateCameraFromPointer as rotateInputCameraFromPointer, shouldStartCameraDrag as shouldStartInputCameraDrag, } from "../camera/input-controls";
+import { applySharedRunFailureCleanup, presentGameOverScreen, presentVictoryScreen, } from "../persistence/game-flow-coordinator";
+import { HudBillboardOrient } from "../ui/hud-billboard-orient";
+import { spawnDefenseMoneyDropAtWorld, spawnPlacedExplorePickup } from "../drops/money-drop-spawn";
+import { buildRuntimeMapState, loadMapActors, renderRuntimeMapScene, } from "../maps/map-runtime";
+import { EXPLORE_MAPS, MAPS } from "../data/maps";
+import { createBuildingMesh as createRenderedBuildingMesh, createFallbackPlayerMesh, createMoneyDropMesh as createRenderedMoneyDropMesh, } from "../assets/render-factories";
+import { createSaveData, getSaveSummaryText, readSaveData, writeSaveData } from "../persistence/save-system";
+import { clearGroup as clearSceneGroup, configureGameRenderer, configureGameScene, createHoverMesh, } from "../rendering/scene-runtime";
+import { PlayerExploreAnimator } from "../explore/player-explore-animator";
+import { renderGameUiShell } from "../ui/ui-shell";
+import { playCutsceneIfPresent } from "../ui/cutscene-player";
+import { tickTowerDefenseCombat } from "../defense/tower-defense-combat";
+import { ToastController } from "../ui/toast-controller";
+import { resolveDefenseDamage } from "../defense/defense-damage";
+import { cleanseDefenseStatuses, tickDefenseEnemyStatuses } from "../defense/defense-status";
+import { getDefenseConsumableById, getDefenseConsumables } from "../defense/defense-taxonomy";
+import { cellKey, cellToWorld, clamp, expandPathToOrderedCells, getActiveGridCols, getActiveGridRows, sameCell, setActiveRuntimeGrid, worldToCell, } from "../core/runtime-grid";
+import { UI_THEME_STORAGE_KEY, applyUiColorMode, getUiColorMode, toggleUiColorMode } from "../ui/ui-theme";
+const GEO_PLAYFIELD_SCALE = 20;
+const GEO_PLAYFIELD_LIFT_METERS = 32;
+export class TowerDefenseGame {
+    constructor() {
+        Object.defineProperty(this, "scene", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new THREE.Scene()
+        });
+        Object.defineProperty(this, "camera", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 10000)
+        });
+        /** logarithmicDepthBuffer：城市级 3D Tiles 与同场景棋盘并排时减弱深度缓冲区闪烁 */
+        Object.defineProperty(this, "renderer", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true })
+        });
+        Object.defineProperty(this, "gltfLoader", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new GLTFLoader()
+        });
+        Object.defineProperty(this, "objLoader", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new OBJLoader()
+        });
+        Object.defineProperty(this, "fbxLoader", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new FBXLoader()
+        });
+        Object.defineProperty(this, "textureLoader", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new THREE.TextureLoader()
+        });
+        /** 默认敌人 GLB 首包缓存（按 URL），实例用 SkeletonUtils.clone。 */
+        Object.defineProperty(this, "enemyDefaultGltfTemplateByUrl", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new Map()
+        });
+        Object.defineProperty(this, "mapActorGen", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: 0
+        });
+        Object.defineProperty(this, "textures", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: {}
+        });
+        Object.defineProperty(this, "raycaster", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new THREE.Raycaster()
+        });
+        Object.defineProperty(this, "pointer", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new THREE.Vector2()
+        });
+        Object.defineProperty(this, "groundPlane", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
+        });
+        Object.defineProperty(this, "geoGroup", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new THREE.Group()
+        });
+        Object.defineProperty(this, "mapGroup", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new THREE.Group()
+        });
+        Object.defineProperty(this, "buildGroup", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new THREE.Group()
+        });
+        Object.defineProperty(this, "enemyGroup", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new THREE.Group()
+        });
+        Object.defineProperty(this, "dropGroup", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new THREE.Group()
+        });
+        Object.defineProperty(this, "actorGroup", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new THREE.Group()
+        });
+        Object.defineProperty(this, "fxGroup", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new THREE.Group()
+        });
+        Object.defineProperty(this, "geoTilesRuntime", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new GeoTilesRuntime({
+                mapGroup: this.geoGroup,
+                camera: this.camera,
+                renderer: this.renderer,
+                onStatus: (message, isError) => {
+                    if (isError) {
+                        console.warn(message);
+                    }
+                    this.showToast(message, true);
+                },
+            })
+        });
+        Object.defineProperty(this, "keys", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new Set()
+        });
+        Object.defineProperty(this, "hudBillboardOrient", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new HudBillboardOrient()
+        });
+        Object.defineProperty(this, "modelCustomization", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new GameModelCustomization(BUILD_SPECS)
+        });
+        Object.defineProperty(this, "playerAnimator", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new PlayerExploreAnimator()
+        });
+        Object.defineProperty(this, "sceneHost", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "toastElement", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "sideToastElement", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "modeElement", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "moneyElement", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "baseElement", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "waveElement", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "exploreWaveElement", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "mapElement", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "dropElement", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "selectedElement", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "cameraElement", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "mapButtonsElement", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "selectedUnitPanel", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "selectedUnitName", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "selectedUnitStats", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "activeSkillMeta", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "activeSkillButton", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "gachaPanel", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "homeOverlay", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "gameGeoMappingToggle", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "topGeoMappingToggle", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "saveSummaryElement", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "gachaPullsElement", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "gachaPityElement", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "gachaUnlockElement", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "gachaResultElement", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "gachaStageElement", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "gachaTitleElement", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "gachaDescElement", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "gachaFeaturedNameElement", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "gachaStageImgElement", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "gachaPoolTabsElement", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "gachaFocusTabsElement", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "pausePanel", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "defenseDifficultyHome", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "defenseDifficultyHomeHint", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "defenseDifficultyPause", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "defenseDifficultyPauseHint", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "gameRootEl", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "hoverMesh", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "player", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "playfieldVisualScale", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: 1
+        });
+        Object.defineProperty(this, "playfieldYOffset", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: 0
+        });
+        // Explore HUD and inventory DOM refs (populated via Object.assign from ui-shell)
+        Object.defineProperty(this, "exploreHud", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "exploreLevelBadge", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "exploreXpBar", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "exploreHpBar", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "exploreHpText", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "exploreSkillAttackCd", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "exploreSkillECd", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "exploreSkillRCd", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "inventoryPanel", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "inventoryGrid", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "exploreProgress", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new ExplorePlayerProgress()
+        });
+        Object.defineProperty(this, "exploreInventory", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new ExploreInventory()
+        });
+        Object.defineProperty(this, "exploreCombat", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "inventoryOpen", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: false
+        });
+        Object.defineProperty(this, "exploreEnemyGroup", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new THREE.Group()
+        });
+        Object.defineProperty(this, "exploreProjectileGroup", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new THREE.Group()
+        });
+        Object.defineProperty(this, "exploreSafeZoneCells", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new Set()
+        });
+        // Game-over / victory / 塔防通关抉择
+        Object.defineProperty(this, "gameOverPanel", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "defenseVictoryPromptPanel", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "gameVictoryPanel", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "gameVictoryTitle", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "gameVictoryReason", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "safeZoneShopPanel", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "gameOverActive", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: false
+        });
+        Object.defineProperty(this, "gameVictoryActive", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: false
+        });
+        Object.defineProperty(this, "defenseVictoryAwaitingChoice", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: false
+        });
+        Object.defineProperty(this, "defenseStandardVictoryCleared", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: false
+        });
+        Object.defineProperty(this, "defenseEndless", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: false
+        });
+        Object.defineProperty(this, "defeatedExploreBossIds", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: []
+        });
+        // Safe-zone shop state
+        Object.defineProperty(this, "inSafeZone", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: false
+        });
+        Object.defineProperty(this, "defenseMapIndex", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: 0
+        });
+        Object.defineProperty(this, "exploreMapIndex", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: 0
+        });
+        Object.defineProperty(this, "mode", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: "defense"
+        });
+        Object.defineProperty(this, "cameraMode", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: "free"
+        });
+        Object.defineProperty(this, "selectedBuild", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: "machine"
+        });
+        Object.defineProperty(this, "economy", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new GameEconomy(() => this.updateUi())
+        });
+        Object.defineProperty(this, "gachaOpen", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: false
+        });
+        Object.defineProperty(this, "gachaAnimating", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: false
+        });
+        Object.defineProperty(this, "selectedGachaPool", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: "standard"
+        });
+        /** 济南等多 UP：按卡池 id 记住选中的当期补给 */
+        Object.defineProperty(this, "gachaFocusPickByPool", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: {}
+        });
+        Object.defineProperty(this, "toasts", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "gachaPresenter", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "baseHp", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: INITIAL_BASE_HP
+        });
+        Object.defineProperty(this, "wave", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: 1
+        });
+        Object.defineProperty(this, "nextWaveDelay", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: 3
+        });
+        Object.defineProperty(this, "spawnRemaining", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: 0
+        });
+        Object.defineProperty(this, "spawnCooldown", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: 0
+        });
+        Object.defineProperty(this, "currentWaveSpawned", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: 0
+        });
+        Object.defineProperty(this, "authoredSpawnStates", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: []
+        });
+        Object.defineProperty(this, "waveActive", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: false
+        });
+        /** 塔防运行时难度 1–5；仅影响后续刷怪与波规模，不重载棋盘 */
+        Object.defineProperty(this, "defenseDifficulty", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: DEFENSE_DIFFICULTY_DEFAULT
+        });
+        /** true 时游戏逻辑暂停，等待过场视频播完或跳过 */
+        Object.defineProperty(this, "cutsceneActive", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: false
+        });
+        Object.defineProperty(this, "selectedBuilding", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: null
+        });
+        Object.defineProperty(this, "dropTimer", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: resolveExploreGameplay(undefined).moneyDropRespawnIntervalSec
+        });
+        Object.defineProperty(this, "elapsed", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: 0
+        });
+        Object.defineProperty(this, "lastFrameTime", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: performance.now()
+        });
+        Object.defineProperty(this, "nextUid", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: 1
+        });
+        Object.defineProperty(this, "hoverCell", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: null
+        });
+        Object.defineProperty(this, "pathCells", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new Set()
+        });
+        Object.defineProperty(this, "obstacleCells", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new Set()
+        });
+        Object.defineProperty(this, "pathWorldPoints", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: []
+        });
+        Object.defineProperty(this, "defensePathCells", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new Set()
+        });
+        Object.defineProperty(this, "defenseObstacleCells", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new Set()
+        });
+        Object.defineProperty(this, "defensePathWorldPoints", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: []
+        });
+        Object.defineProperty(this, "explorePathCells", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new Set()
+        });
+        Object.defineProperty(this, "exploreObstacleCells", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new Set()
+        });
+        Object.defineProperty(this, "buildings", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: []
+        });
+        Object.defineProperty(this, "enemies", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: []
+        });
+        Object.defineProperty(this, "drops", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: []
+        });
+        Object.defineProperty(this, "effects", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: []
+        });
+        Object.defineProperty(this, "effectsFacade", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new GameEffectsFacade(this.fxGroup, () => this.effects, (next) => {
+                this.effects = next;
+            })
+        });
+        Object.defineProperty(this, "cameraPan", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new THREE.Vector3(0, 0, 0)
+        });
+        Object.defineProperty(this, "freeCameraYaw", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: -Math.PI / 4
+        });
+        Object.defineProperty(this, "freeCameraPitch", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: 0.55
+        });
+        Object.defineProperty(this, "freeCameraDistance", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: 86
+        });
+        Object.defineProperty(this, "topdownDistance", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: 120
+        });
+        Object.defineProperty(this, "exploreCameraYaw", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: 0
+        });
+        Object.defineProperty(this, "exploreCameraPitch", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: 0.48
+        });
+        Object.defineProperty(this, "exploreCameraDistance", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: 9.5
+        });
+        Object.defineProperty(this, "exploreFollowPivotSmoothed", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new THREE.Vector3(0, 1.35, 0)
+        });
+        Object.defineProperty(this, "exploreCameraYawSmoothed", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: 0
+        });
+        Object.defineProperty(this, "exploreCameraPitchSmoothed", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: 0.48
+        });
+        /** 探索模式：true = 慢走，false = 奔跑（默认奔跑，Ctrl 切换） */
+        Object.defineProperty(this, "exploreWalkMode", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: false
+        });
+        Object.defineProperty(this, "isCameraDragging", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: false
+        });
+        Object.defineProperty(this, "cameraDragButton", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: -1
+        });
+        Object.defineProperty(this, "cameraDragMoved", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: false
+        });
+        Object.defineProperty(this, "lastPointerX", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: 0
+        });
+        Object.defineProperty(this, "lastPointerY", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: 0
+        });
+        Object.defineProperty(this, "exploreMapInitialized", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: false
+        });
+        Object.defineProperty(this, "gameStarted", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: false
+        });
+        Object.defineProperty(this, "currentCity", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: ""
+        });
+        Object.defineProperty(this, "currentCityLabel", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: ""
+        });
+        Object.defineProperty(this, "requestedLevelId", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: ""
+        });
+        Object.defineProperty(this, "requestedRegionCode", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: ""
+        });
+        Object.defineProperty(this, "requestedRegionName", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: ""
+        });
+        Object.defineProperty(this, "requestedDefIdx", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: -1
+        });
+        Object.defineProperty(this, "requestedExpIdx", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: -1
+        });
+        /** URL `playtest=1`：初始化完成后直接进入塔防试玩（需配合 `levelId` 且项目关卡已同步） */
+        Object.defineProperty(this, "playtestFromUrl", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: false
+        });
+        /** 首次挂载前快照，编辑器多次同步时需先清空 `syncEditorLevelsToRuntime` 追加的地图条目 */
+        Object.defineProperty(this, "bundledCityMapJson", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: ""
+        });
+        Object.defineProperty(this, "bundledBuildSpecsJson", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: ""
+        });
+        /** level-editor-state.json 中全局塔模型 URL；切换防御地图时与 map.towerModelUrls 合并 */
+        Object.defineProperty(this, "globalCustomModelUrls", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: {}
+        });
+        Object.defineProperty(this, "globalModelScales", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: {}
+        });
+        /** 从编辑器标签页保存后返回时防抖热重载 */
+        Object.defineProperty(this, "editorProjectReloadTimer", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: 0
+        });
+        /** 跳过首次文档可见事件，避免启动时重复拉取与 loadEditorRuntimeMaps 竞态 */
+        Object.defineProperty(this, "skipNextVisibilityEditorReload", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: true
+        });
+        Object.defineProperty(this, "buildingDefenseHud", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "enemyDefenseVisuals", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "defenseSession", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "paused", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: false
+        });
+        Object.defineProperty(this, "playerExploreTransform", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: {
+                offsetMeters: { x: 0, y: 0, z: 0 },
+                rotationDeg: { x: 0, y: 0, z: 0 },
+            }
+        });
+        applyUiColorMode(getUiColorMode());
+        this.bundledCityMapJson = JSON.stringify(CITY_MAP);
+        this.bundledBuildSpecsJson = JSON.stringify(BUILD_SPECS);
+        this.createDom();
+        this.toasts = new ToastController(this.toastElement, this.sideToastElement);
+        this.gachaPresenter = new GachaPanelPresenter({
+            panel: this.gachaPanel,
+            poolTabsElement: this.gachaPoolTabsElement,
+            focusTabsElement: this.gachaFocusTabsElement,
+            titleElement: this.gachaTitleElement,
+            descElement: this.gachaDescElement,
+            featuredNameElement: this.gachaFeaturedNameElement,
+            stageImgElement: this.gachaStageImgElement,
+            pityDisplayElement: this.gachaPityElement,
+            resultElement: this.gachaResultElement,
+            stageElement: this.gachaStageElement,
+        }, {
+            getCurrentCity: () => this.currentCity,
+            economy: this.economy,
+            getSelectedPool: () => this.selectedGachaPool,
+            setSelectedPool: (id) => {
+                this.selectedGachaPool = id;
+            },
+            focusPickByPool: this.gachaFocusPickByPool,
+            getAnimating: () => this.gachaAnimating,
+            setAnimating: (v) => {
+                this.gachaAnimating = v;
+            },
+            setPanelOpen: (open) => {
+                this.gachaOpen = open;
+            },
+            getSelectedBuild: () => this.selectedBuild,
+            setSelectedBuild: (id) => {
+                this.selectedBuild = id;
+            },
+            refreshUi: () => this.updateUi(),
+            toast: (m, c) => this.showToast(m, c),
+            scheduleReveal: (fn, ms) => window.setTimeout(fn, ms),
+        });
+        this.configureRenderer();
+        this.configureScene();
+        this.bindEvents();
+        this.buildingDefenseHud = new BuildingDefenseHud({
+            buildGroupScaleX: () => this.buildGroup.scale.x,
+            playfieldVisualScale: () => this.playfieldVisualScale,
+            elapsed: () => this.elapsed,
+            selectedBuilding: () => this.selectedBuilding,
+            orientHudToCamera: (obj) => this.hudBillboardOrient.orient(this.camera, this.mode, this.cameraMode, obj),
+            allBuildings: () => this.buildings,
+        });
+        this.enemyDefenseVisuals = new EnemyDefenseVisuals({
+            hudScale: () => this.buildingDefenseHud.hudScale(),
+            applyGeoPlayfieldSquashCompensation: (mesh) => this.applyGeoPlayfieldSquashCompensation(mesh),
+            gltfLoader: this.gltfLoader,
+            templateByUrl: this.enemyDefaultGltfTemplateByUrl,
+            enemies: () => this.enemies,
+            orientHudToCamera: (obj) => this.hudBillboardOrient.orient(this.camera, this.mode, this.cameraMode, obj),
+        });
+        this.defenseSession = new DefenseSession({
+            isDefenseMode: () => this.mode === "defense",
+            moveDefenseCamera: (dt) => this.moveDefenseCamera(dt),
+            updateSpawner: (dt) => this.updateSpawner(dt),
+            updateEnemies: (dt) => this.updateEnemies(dt),
+            updateTowers: (dt) => this.updateTowers(dt),
+            updateMines: () => this.updateMines(),
+        });
+        document.addEventListener("visibilitychange", () => this.onDocumentVisibilityChange());
+        const params = new URLSearchParams(window.location.search);
+        const cityCode = params.get("city") || "";
+        this.currentCity = cityCode && CITY_MAP[cityCode] ? cityCode : "";
+        this.currentCityLabel = this.currentCity ? CITY_MAP[this.currentCity].label : "";
+        this.requestedLevelId = params.get("levelId") || "";
+        this.requestedRegionCode = params.get("regionCode") || "";
+        this.requestedRegionName = params.get("regionName") || "";
+        this.playtestFromUrl = params.get("playtest") === "1";
+        void (async () => {
+            await this.loadGameAssetConfig();
+            await this.loadEditorRuntimeMaps();
+            this.renderShopItems();
+            this.loadInitialCityMap();
+            await this.loadDefaultPlayer();
+            if (this.playtestFromUrl) {
+                if (this.requestedLevelId && this.requestedDefIdx >= 0) {
+                    this.startNewGame();
+                }
+                else {
+                    this.showToast("无法试玩：未同步到该关卡（请先在使用编辑器的标签页保存项目，或检查 levelId）", true);
+                }
+            }
+        })();
+        this.animate();
+    }
+    createDom() {
+        const app = document.querySelector("#app");
+        if (!app) {
+            throw new Error("Missing #app root element.");
+        }
+        const uiShell = renderGameUiShell(app, this.requiredElement.bind(this));
+        Object.assign(this, uiShell);
+        this.wireDefenseDifficultyControls();
+        this.syncGeoMappingTogglesFromStorage();
+        this.gameGeoMappingToggle.addEventListener("change", () => {
+            this.onGameGeoMappingUserChange(this.gameGeoMappingToggle.checked);
+        });
+        this.topGeoMappingToggle.addEventListener("change", () => {
+            this.onGameGeoMappingUserChange(this.topGeoMappingToggle.checked);
+        });
+        this.requiredElement("#newGameButton").addEventListener("click", () => this.startNewGame());
+        this.requiredElement("#loadGameButton").addEventListener("click", () => void this.loadGame());
+        this.requiredElement("#saveGameHomeButton").addEventListener("click", () => this.saveGame());
+        this.requiredElement("#backToSelectionButton").addEventListener("click", () => this.backToSelection());
+        this.requiredElement("#homeButton").addEventListener("click", () => this.backToSelection());
+        this.requiredElement("#saveGameButton").addEventListener("click", () => this.saveGame());
+        this.requiredElement("#modeToggleButton").addEventListener("click", () => this.toggleMode());
+        this.requiredElement("#cameraToggleButton").addEventListener("click", () => this.toggleCameraMode());
+        this.selectedUnitPanel = this.requiredElement("#selectedUnitPanel");
+        this.selectedUnitName = this.requiredElement("#selectedUnitName");
+        this.selectedUnitStats = this.requiredElement("#selectedUnitStats");
+        this.activeSkillMeta = this.requiredElement("#activeSkillMeta");
+        this.activeSkillButton = this.requiredElement("#activeSkillButton");
+        this.activeSkillButton.addEventListener("click", () => this.castActiveSkill());
+        this.requiredElement("#gachaOpenButton").addEventListener("click", () => this.openGacha());
+        this.requiredElement("#gachaCloseButton").addEventListener("click", () => this.closeGacha());
+        this.requiredElement("#pullOneButton").addEventListener("click", () => this.drawGacha(1));
+        this.requiredElement("#pullTenButton").addEventListener("click", () => this.drawGacha(10));
+        this.requiredElement("#pauseButton").addEventListener("click", () => this.togglePause());
+        this.requiredElement("#resumeButton").addEventListener("click", () => this.resumeGame());
+        this.requiredElement("#pauseSaveButton").addEventListener("click", () => this.saveGame());
+        this.requiredElement("#pauseHomeButton").addEventListener("click", () => this.returnToGameHomeFromPause());
+        this.requiredElement("#levelEditorButton").addEventListener("click", () => this.openCurrentLevelEditor());
+        const onUiThemeClick = () => {
+            toggleUiColorMode();
+            this.refreshUiThemeButtonLabels();
+        };
+        this.requiredElement("#uiThemeToggleTop").addEventListener("click", onUiThemeClick);
+        this.requiredElement("#uiThemeToggleHome").addEventListener("click", onUiThemeClick);
+        this.requiredElement("#uiThemeTogglePause").addEventListener("click", onUiThemeClick);
+        this.requiredElement("#rightTerminalHideBtn").addEventListener("click", () => this.setTerminalPanelCollapsed(true));
+        this.requiredElement("#rightTerminalShowBtn").addEventListener("click", () => this.setTerminalPanelCollapsed(false));
+        this.requiredElement("#inventoryCloseBtn").addEventListener("click", () => this.toggleInventory());
+        this.requiredElement("#gameOverRestartBtn").addEventListener("click", () => this.restartAfterGameOver());
+        this.requiredElement("#gameOverMapBtn").addEventListener("click", () => this.returnToHomeFromGameOver());
+        this.requiredElement("#defenseEndlessConfirmBtn").addEventListener("click", () => this.confirmDefenseEndlessMode());
+        this.requiredElement("#defenseStandardCompleteBtn").addEventListener("click", () => this.completeDefenseStandardVictory());
+        this.requiredElement("#gameVictoryRestartBtn").addEventListener("click", () => this.restartAfterVictory());
+        this.requiredElement("#gameVictoryMapBtn").addEventListener("click", () => this.returnHomeFromVictory());
+        this.requiredElement("#shopCloseBtn").addEventListener("click", () => this.closeSafeZoneShop());
+        this.requiredElement("#shopItems").addEventListener("click", (e) => {
+            const btn = e.target.closest(".shop-item-buy");
+            if (btn?.dataset.item)
+                this.buySafeZoneItem(btn.dataset.item);
+        });
+        this.renderShopItems();
+        const { toolbar } = uiShell;
+        for (const spec of Object.values(BUILD_SPECS)) {
+            const card = document.createElement("div");
+            card.className = "build-card";
+            card.dataset.build = spec.id;
+            const button = document.createElement("button");
+            button.className = "build-button";
+            button.dataset.build = spec.id;
+            if (spec.rank) {
+                button.dataset.rank = spec.rank;
+            }
+            button.innerHTML = `
+        <div class="build-image" style="background-image: url('/Arts/Cards/char_${spec.id}.png');"></div>
+        <div class="build-info">
+          <div class="build-name">
+            <span>${spec.key} \u00b7 ${spec.name}</span>
+            <span class="cost">${spec.rank ? spec.rank + "\u7ea7 " : ""}$${spec.cost}</span>
+          </div>
+          <div class="build-desc">${spec.description}</div>
+        </div>
+        ${spec.rank === "S" ? '<div class="s-badge">\u7ec8\u6781</div>' : ""}
+      `;
+            button.addEventListener("click", () => this.selectBuild(spec.id));
+            card.append(button);
+            toolbar.append(card);
+        }
+        this.setupToolbarScrolling(toolbar);
+        this.renderMapButtons();
+        this.updateSaveSummary();
+        this.refreshUiThemeButtonLabels();
+    }
+    setupToolbarScrolling(toolbar) {
+        let isDown = false;
+        let isDragging = false;
+        let startX;
+        let scrollLeft;
+        toolbar.addEventListener("mousedown", (e) => {
+            isDown = true;
+            isDragging = false;
+            startX = e.pageX - toolbar.offsetLeft;
+            scrollLeft = toolbar.scrollLeft;
+        });
+        toolbar.addEventListener("mouseleave", () => {
+            isDown = false;
+            toolbar.classList.remove("toolbar--active");
+        });
+        toolbar.addEventListener("mouseup", () => {
+            isDown = false;
+            // 延迟一帧移除类，防止在 click 事件触发前就让 pointer-events 恢复导致误触
+            setTimeout(() => {
+                toolbar.classList.remove("toolbar--active");
+            }, 0);
+        });
+        toolbar.addEventListener("mousemove", (e) => {
+            if (!isDown) {
+                return;
+            }
+            const x = e.pageX - toolbar.offsetLeft;
+            const dist = Math.abs(x - startX);
+            if (!isDragging && dist > 5) {
+                isDragging = true;
+                toolbar.classList.add("toolbar--active");
+            }
+            if (isDragging) {
+                e.preventDefault();
+                const walk = (x - startX) * 1.5;
+                toolbar.scrollLeft = scrollLeft - walk;
+            }
+        });
+    }
+    refreshUiThemeButtonLabels() {
+        const dark = getUiColorMode() === "dark";
+        const label = dark ? "\u6d45\u8272\u6a21\u5f0f" : "\u6df1\u8272\u6a21\u5f0f";
+        const title = dark ? "\u5207\u6362\u4e3a\u6d45\u8272\u754c\u9762" : "\u5207\u6362\u4e3a\u6df1\u8272\u754c\u9762";
+        for (const id of ["#uiThemeToggleTop", "#uiThemeToggleHome", "#uiThemeTogglePause"]) {
+            const el = document.querySelector(id);
+            if (el) {
+                el.textContent = label;
+                el.title = title;
+            }
+        }
+    }
+    setTerminalPanelCollapsed(collapsed) {
+        this.gameRootEl.classList.toggle("game-root--terminal-collapsed", collapsed);
+        const hideBtn = document.querySelector("#rightTerminalHideBtn");
+        const showBtn = document.querySelector("#rightTerminalShowBtn");
+        hideBtn?.setAttribute("aria-expanded", String(!collapsed));
+        showBtn?.setAttribute("aria-expanded", String(collapsed));
+        if (showBtn) {
+            if (collapsed) {
+                showBtn.removeAttribute("aria-hidden");
+                showBtn.tabIndex = 0;
+            }
+            else {
+                showBtn.setAttribute("aria-hidden", "true");
+                showBtn.tabIndex = -1;
+            }
+        }
+    }
+    requiredElement(selector) {
+        const element = document.querySelector(selector);
+        if (!element) {
+            throw new Error(`Missing DOM element: ${selector}`);
+        }
+        return element;
+    }
+    renderMapButtons() {
+        const maps = this.currentMapList();
+        const sourceMode = this.mode;
+        this.mapButtonsElement.innerHTML = "";
+        const designedMaps = maps
+            .map((map, index) => ({ map, index }))
+            .filter(({ map }) => map.editorStatus === "designed")
+            .sort((a, b) => a.map.name.localeCompare(b.map.name, "zh-Hans-CN", { sensitivity: "base" }));
+        designedMaps.forEach(({ map, index }) => {
+            const button = document.createElement("button");
+            button.className = "map-button";
+            button.dataset.map = String(index);
+            button.innerHTML = `<strong>${map.name}</strong><br /><span>${map.description}</span>`;
+            button.addEventListener("click", () => {
+                this.selectMapForNewRun(index, sourceMode);
+            });
+            this.mapButtonsElement.append(button);
+        });
+    }
+    syncModePairForSelectedMap(index, sourceMode = this.mode) {
+        const matchedCity = Object.entries(CITY_MAP).find(([, info]) => {
+            return sourceMode === "explore" ? info.exploreIndex === index : info.defenseIndex === index;
+        });
+        if (matchedCity) {
+            this.currentCity = matchedCity[0];
+            this.currentCityLabel = CITY_MAP[this.currentCity].label;
+            this.defenseMapIndex = matchedCity[1].defenseIndex;
+            this.exploreMapIndex = matchedCity[1].exploreIndex;
+            return;
+        }
+        this.currentCity = "";
+        this.currentCityLabel = "";
+        if (sourceMode === "explore") {
+            this.exploreMapIndex = index;
+            if (this.defenseMapIndex < 0)
+                this.defenseMapIndex = index;
+        }
+        else {
+            this.defenseMapIndex = index;
+            if (this.exploreMapIndex < 0)
+                this.exploreMapIndex = index;
+        }
+    }
+    selectMapForNewRun(index, sourceMode) {
+        this.syncModePairForSelectedMap(index, sourceMode);
+        this.requestedLevelId = "";
+        this.requestedDefIdx = this.defenseMapIndex;
+        this.requestedExpIdx = this.exploreMapIndex;
+        this.startNewGame();
+    }
+    startNewGame() {
+        this.gameStarted = true;
+        this.homeOverlay.classList.remove("show");
+        this.mode = "defense";
+        this.defenseDifficulty = clampDefenseDifficulty(Number(this.defenseDifficultyHome.value));
+        this.reflectDefenseDifficultySliders(this.defenseDifficulty);
+        this.economy.resetForNewRun();
+        this.defenseMapIndex = this.requestedDefIdx >= 0 ? this.requestedDefIdx : this.defenseMapIndex;
+        this.exploreMapIndex = this.requestedExpIdx >= 0 ? this.requestedExpIdx : this.exploreMapIndex;
+        this.exploreMapInitialized = false;
+        this.defenseStandardVictoryCleared = false;
+        this.defeatedExploreBossIds = [];
+        this.modelCustomization.resetForFreshRun();
+        void this.finishNewGameAfterModels();
+    }
+    async finishNewGameAfterModels() {
+        try {
+            await this.loadGameAssetConfig();
+            this.createPlayer();
+            await this.loadDefaultPlayer();
+            this.renderMapButtons();
+            if (this.requestedLevelId && this.requestedDefIdx >= 0) {
+                this.defenseMapIndex = this.requestedDefIdx;
+                this.exploreMapIndex = this.requestedExpIdx >= 0 ? this.requestedExpIdx : this.exploreMapIndex;
+            }
+            else if (this.currentCity && CITY_MAP[this.currentCity]) {
+                const cityInfo = CITY_MAP[this.currentCity];
+                this.defenseMapIndex = cityInfo.defenseIndex;
+                this.exploreMapIndex = cityInfo.exploreIndex;
+            }
+            setGameSessionActive(true);
+            this.loadDefenseMap(this.defenseMapIndex, true);
+            await this.playIntroVideoCutsceneIfPresent();
+            this.saveGame(false);
+            this.showToast("\u65b0\u6e38\u620f\u5df2\u5f00\u59cb", true);
+        }
+        catch (error) {
+            console.error("[finishNewGameAfterModels] error:", error);
+            this.showToast("\u542f\u52a8\u65b0\u6e38\u620f\u5931\u8d25\uff0c\u8bf7\u67e5\u770b\u63a7\u5236\u53f0\u3002");
+        }
+    }
+    openHome() {
+        this.homeOverlay.classList.add("show");
+        this.reflectDefenseDifficultySliders(this.defenseDifficulty);
+        this.updateSaveSummary();
+        this.syncGeoMappingTogglesFromStorage();
+    }
+    returnToGameHomeFromPause() {
+        this.pausePanel.classList.remove("show");
+        this.paused = false;
+        this.openHome();
+    }
+    backToSelection() {
+        window.location.href = "/Web/map/china.html";
+    }
+    openCurrentLevelEditor() {
+        const levelId = this.resolveCurrentEditorLevelId();
+        const url = levelId
+            ? `/Web/map/level-editor.html?levelId=${encodeURIComponent(levelId)}`
+            : "/Web/map/level-editor.html";
+        window.open(url, "_blank", "noopener,noreferrer");
+    }
+    resolveCurrentEditorLevelId() {
+        const mapId = this.currentMap().id;
+        const stripped = mapId.replace(/-(defense|explore)$/u, "");
+        if (stripped !== mapId) {
+            return stripped;
+        }
+        if (this.requestedLevelId) {
+            return this.requestedLevelId;
+        }
+        if (this.currentCity === "beijing") {
+            return "CN_beijing";
+        }
+        if (this.currentCity === "jinan") {
+            return "city-cn-370100";
+        }
+        return "";
+    }
+    resumeGame() {
+        this.gameStarted = true;
+        this.homeOverlay.classList.remove("show");
+        this.paused = false;
+        this.pausePanel.classList.remove("show");
+        this.updateUi();
+    }
+    saveGame(showFeedback = true) {
+        const data = createSaveData({
+            mode: this.mode,
+            ...this.economy.toSaveSlice(),
+            defenseMapIndex: this.defenseMapIndex,
+            exploreMapIndex: this.exploreMapIndex,
+            baseHp: this.baseHp,
+            wave: this.wave,
+            nextWaveDelay: this.nextWaveDelay,
+            spawnRemaining: this.spawnRemaining,
+            spawnCooldown: this.spawnCooldown,
+            currentWaveSpawned: this.currentWaveSpawned,
+            authoredSpawnStates: this.authoredSpawnStates.map((lane) => ({ ...lane })),
+            waveActive: this.waveActive,
+            defenseDifficulty: this.defenseDifficulty,
+            defenseEndless: this.defenseEndless,
+            defenseVictoryAwaitingChoice: this.defenseVictoryAwaitingChoice,
+            defenseStandardVictoryCleared: this.defenseStandardVictoryCleared,
+            defeatedExploreBossIds: this.defeatedExploreBossIds,
+            buildings: this.buildings.map((building) => ({
+                id: building.spec.id,
+                cell: building.cell,
+            })),
+            customModelUrls: this.modelCustomization.customModelUrls,
+            customDropModelUrl: this.modelCustomization.customDropModelUrl,
+            customPlayerModelUrl: this.modelCustomization.customPlayerModelUrl,
+            customAnimationUrls: this.modelCustomization.customAnimationUrls,
+            modelScales: this.modelCustomization.modelScales,
+        });
+        writeSaveData(data);
+        this.updateSaveSummary();
+        if (showFeedback) {
+            this.showToast("\u5b58\u6863\u5df2\u4fdd\u5b58");
+        }
+    }
+    async loadGame() {
+        try {
+            const data = readSaveData();
+            if (!data) {
+                this.showToast("\u6ca1\u6709\u53ef\u8bfb\u53d6\u7684\u5b58\u6863");
+                return;
+            }
+            this.gameStarted = true;
+            this.economy.applyFromSave(data);
+            this.mode = data.mode ?? "defense";
+            this.modelCustomization.customModels = {};
+            this.modelCustomization.customModelUrls = data.customModelUrls ?? {};
+            this.modelCustomization.customDropModel = null;
+            this.modelCustomization.customDropModelUrl = data.customDropModelUrl ?? "";
+            this.modelCustomization.customPlayerModel = null;
+            this.modelCustomization.customPlayerModelUrl = data.customPlayerModelUrl ?? "";
+            this.modelCustomization.customAnimationUrls = Object.fromEntries(Object.entries(data.customAnimationUrls ?? {}).filter((entry) => typeof entry[1] === "string"));
+            this.modelCustomization.restoreScalesToDefaults();
+            this.modelCustomization.applyPersistedScaleRecord((data.modelScales ?? null));
+            this.modelCustomization.customAnimations = {};
+            await this.modelCustomization.restoreMeshesFromStoredUrls({
+                gltfLoader: this.gltfLoader,
+                objLoader: this.objLoader,
+            });
+            await this.modelCustomization.reloadAnimationsFromStoredUrls({
+                gltfLoader: this.gltfLoader,
+                objLoader: this.objLoader,
+            });
+            if (this.modelCustomization.customPlayerModel) {
+                this.createPlayer();
+            }
+            else {
+                await this.loadDefaultPlayer();
+            }
+            setGameSessionActive(true);
+            this.loadDefenseMap(data.defenseMapIndex ?? 0, true, { skipTowerUrlMerge: true });
+            this.baseHp = data.baseHp ?? INITIAL_BASE_HP;
+            this.wave = data.wave ?? 1;
+            this.nextWaveDelay = data.nextWaveDelay ?? 3;
+            this.spawnRemaining = data.spawnRemaining ?? 0;
+            this.spawnCooldown = data.spawnCooldown ?? 0;
+            this.currentWaveSpawned = data.currentWaveSpawned ?? 0;
+            this.authoredSpawnStates = Array.isArray(data.authoredSpawnStates)
+                ? data.authoredSpawnStates
+                    .map((lane) => ({
+                    waveRuleId: typeof lane?.waveRuleId === "string" ? lane.waveRuleId : undefined,
+                    remaining: Math.max(0, Math.round(Number(lane?.remaining) || 0)),
+                    cooldown: Math.max(0, Number(lane?.cooldown) || 0),
+                    interval: Math.max(0.1, Number(lane?.interval) || 1),
+                }))
+                    .filter((lane) => lane.remaining > 0)
+                : [];
+            this.waveActive = !!data.waveActive;
+            this.defenseDifficulty = clampDefenseDifficulty(data.defenseDifficulty ?? DEFENSE_DIFFICULTY_DEFAULT);
+            this.reflectDefenseDifficultySliders(this.defenseDifficulty);
+            this.defenseEndless = !!data.defenseEndless;
+            this.defenseVictoryAwaitingChoice = !!data.defenseVictoryAwaitingChoice;
+            this.defenseStandardVictoryCleared = !!data.defenseStandardVictoryCleared;
+            this.defeatedExploreBossIds = Array.isArray(data.defeatedExploreBossIds)
+                ? data.defeatedExploreBossIds.filter((id) => typeof id === "string")
+                : [];
+            this.gameVictoryActive = false;
+            this.syncDefenseVictoryPromptVisibility();
+            const restoredUniqueS = new Set();
+            for (const savedBuilding of data.buildings ?? []) {
+                const spec = BUILD_SPECS[savedBuilding.id];
+                if (!spec) {
+                    continue;
+                }
+                if (spec.rank === "S") {
+                    if (restoredUniqueS.has(spec.id)) {
+                        continue;
+                    }
+                    restoredUniqueS.add(spec.id);
+                }
+                const building = {
+                    uid: this.nextUid,
+                    spec,
+                    cell: { ...savedBuilding.cell },
+                    mesh: this.createBuildingMesh(spec),
+                    cooldown: 0,
+                    armed: true,
+                    hp: spec.maxHp ?? 1,
+                    blockingEnemies: [],
+                    skillCooldownTimer: 0,
+                };
+                this.bindBuildingEmbeddedAnimation(building);
+                this.buildingDefenseHud.attachToBuilding(building);
+                this.nextUid += 1;
+                const position = cellToWorld(building.cell);
+                building.mesh.position.set(position.x, 0, position.z);
+                this.buildings.push(building);
+                this.buildGroup.add(building.mesh);
+            }
+            this.exploreMapIndex = data.exploreMapIndex ?? 0;
+            if (this.mode === "explore") {
+                this.loadExploreMap(this.exploreMapIndex, true);
+            }
+            else {
+                this.showDefenseView();
+            }
+            this.renderMapButtons();
+            this.resumeGame();
+            this.showToast("\u5b58\u6863\u8bfb\u53d6\u5b8c\u6210");
+        }
+        catch {
+            this.showToast("\u5b58\u6863\u8bfb\u53d6\u5931\u8d25");
+        }
+    }
+    async loadGameAssetConfig() {
+        try {
+            const loaded = await loadPersistedGameAssetConfig({ gltfLoader: this.gltfLoader, objLoader: this.objLoader }, BUILD_SPECS);
+            if (!loaded) {
+                this.globalCustomModelUrls = {};
+                return;
+            }
+            this.modelCustomization.assignFromLoadedEditorBundle(loaded);
+            this.globalCustomModelUrls = { ...this.modelCustomization.customModelUrls };
+            this.globalModelScales = { ...this.modelCustomization.modelScales };
+            this.playerExploreTransform = loaded.playerExploreTransform;
+            setGlobalGameAudio(loaded.globalAudio);
+        }
+        catch (error) {
+            console.warn("[GameAssetConfig]", error);
+        }
+    }
+    async applyPerMapTowerModelOverrides(map) {
+        const merged = { ...this.globalCustomModelUrls };
+        const overrides = map.towerModelUrls;
+        if (overrides) {
+            for (const [rawKey, url] of Object.entries(overrides)) {
+                const id = rawKey;
+                if (typeof url === "string" && url.trim() && Object.prototype.hasOwnProperty.call(BUILD_SPECS, id)) {
+                    merged[id] = url.trim();
+                }
+            }
+        }
+        this.modelCustomization.customModelUrls = merged;
+        this.modelCustomization.modelScales = { ...this.globalModelScales };
+        const scaleOverrides = map.towerModelScales;
+        if (scaleOverrides) {
+            for (const [rawKey, rawScale] of Object.entries(scaleOverrides)) {
+                const id = rawKey;
+                const scale = typeof rawScale === "number" && Number.isFinite(rawScale) ? rawScale : Number(rawScale);
+                if (Number.isFinite(scale) && scale > 0 && Object.prototype.hasOwnProperty.call(BUILD_SPECS, id)) {
+                    this.modelCustomization.modelScales[id] = clamp(scale, 0.05, 8);
+                }
+            }
+        }
+        try {
+            await this.modelCustomization.restoreMeshesFromStoredUrls({
+                gltfLoader: this.gltfLoader,
+                objLoader: this.objLoader,
+            });
+        }
+        catch (error) {
+            console.warn("[TowerModelOverrides]", error);
+        }
+        refreshBuildCardModelFlags(this.modelCustomization.customModels);
+    }
+    async loadDefaultPlayer() {
+        if (this.modelCustomization.customPlayerModel) {
+            this.createPlayer();
+            return;
+        }
+        for (const url of DEFAULT_PLAYER_MODEL_URLS) {
+            try {
+                const gltf = await new Promise((resolve, reject) => {
+                    this.gltfLoader.load(url, resolve, undefined, reject);
+                });
+                this.modelCustomization.customPlayerModel = this.prepareUploadedModel(gltf.scene);
+                /* Preserve editor/save scale; do not force player scale back to 1. */
+                this.modelCustomization.ingestEmbeddedLocomotionClips(gltf.animations);
+                this.createPlayer();
+                this.showToast(url.includes("RobotExpressive") ? "\u5df2\u8f7d\u5165 three.js \u5b98\u65b9\u63a2\u7d22\u89d2\u8272" : "\u5df2\u8f7d\u5165\u63a2\u7d22\u89d2\u8272\u6a21\u578b");
+                return;
+            }
+            catch (error) {
+                console.warn("[PlayerModel] failed to load", url, error);
+            }
+        }
+        this.showToast("\u9ed8\u8ba4\u89d2\u8272\u52a0\u8f7d\u5931\u8d25\uff0c\u5df2\u4f7f\u7528\u5907\u7528\u65b9\u5757\u6a21\u578b");
+    }
+    updateSaveSummary() {
+        this.saveSummaryElement.textContent = getSaveSummaryText();
+    }
+    async loadCustomModel(target, file) {
+        if (!file.name.match(/\.(glb|gltf|obj)$/i)) {
+            this.showToast("\u8bf7\u4e0a\u4f20 .glb\u3001.gltf \u6216 .obj \u6a21\u578b\u6587\u4ef6");
+            return;
+        }
+        try {
+            const loaded = await loadCustomModelAsset({ gltfLoader: this.gltfLoader, objLoader: this.objLoader }, file);
+            // If animations are embedded in the character file, use them as defaults
+            if (loaded.animations.length > 0) {
+                this.modelCustomization.ingestEmbeddedLocomotionClips(loaded.animations);
+            }
+            this.applyCustomModel(target, loaded.model);
+            try {
+                const uploadedUrl = await uploadPersistedModelFile(file, loaded.data);
+                if (uploadedUrl) {
+                    this.rememberModelUrl(target, uploadedUrl);
+                    this.saveGame(false);
+                }
+            }
+            catch {
+                this.showToast("\u6a21\u578b\u5df2\u5e94\u7528\uff0c\u4f46\u5f53\u524d\u670d\u52a1\u5668\u672a\u542f\u7528\u6301\u4e45\u5316 API");
+            }
+            this.showToast(this.modelTargetLabel(target));
+            this.updateUi();
+        }
+        catch (error) {
+            this.showToast(error instanceof Error ? error.message : "\u6a21\u578b\u52a0\u8f7d\u5931\u8d25");
+        }
+    }
+    async loadCustomAnimation(type, file) {
+        try {
+            const loaded = await loadAnimationAsset({ gltfLoader: this.gltfLoader, objLoader: this.objLoader }, file);
+            if (loaded.clip) {
+                this.modelCustomization.setAnimationClip(type, loaded.clip);
+                this.showToast(`\u5df2\u66ff\u6362\u52a8\u753b\uff1a${type}`);
+                try {
+                    const uploadedUrl = await uploadPersistedModelFile(file, loaded.data);
+                    if (uploadedUrl) {
+                        this.modelCustomization.rememberAnimationUrl(type, uploadedUrl);
+                        this.saveGame(false);
+                    }
+                }
+                catch {
+                    this.showToast("\u6a21\u578b\u5df2\u5e94\u7528\uff0c\u4f46\u5f53\u524d\u670d\u52a1\u5668\u672a\u542f\u7528\u6301\u4e45\u5316 API");
+                }
+                this.createPlayer(); // Refresh player to bind new animation
+            }
+            else {
+                this.showToast("\u8be5\u6587\u4ef6\u672a\u5305\u542b\u6709\u6548\u52a8\u753b");
+            }
+        }
+        catch {
+            this.showToast("\u52a8\u753b\u52a0\u8f7d\u5931\u8d25");
+        }
+    }
+    async parseModelData(name, data) {
+        return parsePersistedModelData({ gltfLoader: this.gltfLoader, objLoader: this.objLoader }, name, data);
+    }
+    async uploadModelFile(file, data) {
+        try {
+            return await uploadPersistedModelFile(file, data);
+        }
+        catch {
+            this.showToast("\u6a21\u578b\u5df2\u5e94\u7528\uff0c\u4f46\u5f53\u524d\u670d\u52a1\u5668\u672a\u542f\u7528\u6301\u4e45\u5316 API");
+            return null;
+        }
+    }
+    applyCustomModel(target, model) {
+        if (target === "moneyDrop") {
+            this.modelCustomization.customDropModel = model;
+            for (const drop of this.drops.filter((item) => item.source === "explore")) {
+                const position = drop.mesh.position.clone();
+                this.dropGroup.remove(drop.mesh);
+                drop.mesh = this.createMoneyDropMesh(drop.amount);
+                drop.mesh.position.copy(position);
+                this.dropGroup.add(drop.mesh);
+            }
+            this.updateDropVisibility();
+            return;
+        }
+        if (target === "player") {
+            const position = this.player.position.clone();
+            const rotation = this.player.rotation.y;
+            this.modelCustomization.customPlayerModel = model;
+            this.createPlayer();
+            this.player.position.copy(position);
+            this.player.rotation.y = rotation;
+            return;
+        }
+        this.modelCustomization.customModels[target] = model;
+        this.refreshPlacedModels(target);
+    }
+    rememberModelUrl(target, url) {
+        this.modelCustomization.rememberModelUrl(target, url);
+    }
+    setModelScale(target, value) {
+        const scale = clamp(Number.isFinite(value) ? value : 1, 0.1, 8);
+        this.modelCustomization.modelScales[target] = scale;
+        this.syncScaleInputs(target, scale);
+        if (target === "moneyDrop") {
+            for (const drop of this.drops.filter((item) => item.source === "explore")) {
+                const position = drop.mesh.position.clone();
+                this.dropGroup.remove(drop.mesh);
+                drop.mesh = this.createMoneyDropMesh(drop.amount);
+                drop.mesh.position.copy(position);
+                this.dropGroup.add(drop.mesh);
+            }
+            this.updateDropVisibility();
+        }
+        else if (target === "player") {
+            const position = this.player.position.clone();
+            const rotation = this.player.rotation.y;
+            this.createPlayer();
+            this.player.position.copy(position);
+            this.player.rotation.y = rotation;
+        }
+        else {
+            this.refreshPlacedModels(target);
+        }
+        this.saveGame(false);
+    }
+    syncScaleInputs(_target, _scale) { }
+    modelTargetLabel(target) {
+        return getModelTargetLabel(target, BUILD_SPECS);
+    }
+    prepareUploadedModel(scene) {
+        return normalizeUploadedModel(scene);
+    }
+    refreshPlacedModels(buildId) {
+        for (const building of this.buildings) {
+            if (building.spec.id !== buildId) {
+                continue;
+            }
+            const position = building.mesh.position.clone();
+            building.animationMixer?.stopAllAction();
+            building.animationMixer = undefined;
+            this.buildGroup.remove(building.mesh);
+            building.mesh = this.createBuildingMesh(building.spec);
+            this.bindBuildingEmbeddedAnimation(building);
+            this.buildingDefenseHud.attachToBuilding(building);
+            building.mesh.position.copy(position);
+            this.buildGroup.add(building.mesh);
+        }
+    }
+    pickEmbeddedAutoplayClip(clips, preferred) {
+        if (!clips.length) {
+            return null;
+        }
+        for (const token of preferred) {
+            const matched = clips.find((clip) => clip.name.toLowerCase().includes(token));
+            if (matched) {
+                return matched;
+            }
+        }
+        return clips[0] ?? null;
+    }
+    bindBuildingEmbeddedAnimation(building) {
+        building.animationMixer?.stopAllAction();
+        building.animationMixer = undefined;
+        const clips = getEmbeddedAnimationClips(building.mesh);
+        const clip = this.pickEmbeddedAutoplayClip(clips, ["idle", "default", "loop", "spin", "attack"]);
+        if (!clip) {
+            return;
+        }
+        const mixer = new THREE.AnimationMixer(building.mesh);
+        const action = mixer.clipAction(clip);
+        action.reset();
+        action.setLoop(THREE.LoopRepeat, Infinity);
+        action.play();
+        building.animationMixer = mixer;
+    }
+    updateDefenseEmbeddedAnimations(dt) {
+        for (const building of this.buildings) {
+            building.animationMixer?.update(dt);
+        }
+        for (const enemy of this.enemies) {
+            enemy.animationMixer?.update(dt);
+        }
+    }
+    configureRenderer() {
+        configureGameRenderer(this.renderer, this.sceneHost);
+    }
+    configureScene() {
+        this.hoverMesh = createHoverMesh();
+        configureGameScene({
+            scene: this.scene,
+            camera: this.camera,
+            groups: {
+                mapGroup: this.mapGroup,
+                buildGroup: this.buildGroup,
+                enemyGroup: this.enemyGroup,
+                dropGroup: this.dropGroup,
+                actorGroup: this.actorGroup,
+                fxGroup: this.fxGroup,
+            },
+            hoverMesh: this.hoverMesh,
+            onCreatePlayer: () => this.createPlayer(),
+            onResize: () => this.resize(),
+        });
+        this.geoGroup.name = "geo-backdrop";
+        /** Cesium Tiles 先于棋盘与特效遍历，否则会与 logarithmicDepthBuffer 组合错误遮挡弹道/粒子 */
+        const mapIdxForGeo = this.scene.children.indexOf(this.mapGroup);
+        if (mapIdxForGeo >= 0) {
+            this.scene.children.splice(mapIdxForGeo, 0, this.geoGroup);
+        }
+        else {
+            this.scene.add(this.geoGroup);
+        }
+        this.exploreEnemyGroup.name = "explore-enemies";
+        this.scene.add(this.exploreEnemyGroup);
+        this.exploreProjectileGroup.name = "explore-projectiles";
+        this.scene.add(this.exploreProjectileGroup);
+        this.exploreEnemyGroup.visible = false;
+        this.exploreProjectileGroup.visible = false;
+        this.exploreCombat = new ExploreCombatRuntime({
+            enemyGroup: this.exploreEnemyGroup,
+            projectileGroup: this.exploreProjectileGroup,
+            inventory: this.exploreInventory,
+            progress: this.exploreProgress,
+            host: this.createExploreCombatHost(),
+        });
+    }
+    createExploreCombatHost() {
+        return {
+            getPlayerPosition: () => this.player.position,
+            getExploreAttackForward: () => {
+                const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.player.quaternion);
+                forward.y = 0;
+                if (forward.lengthSq() < 0.001) {
+                    forward.set(0, 0, -1);
+                }
+                return forward.normalize();
+            },
+            worldCellToWorld: (cell) => cellToWorld(cell),
+            getObstacleCellKeys: () => this.obstacleCells,
+            getSafeZoneCellKeys: () => this.exploreSafeZoneCells,
+            getMapGridSize: () => {
+                const map = EXPLORE_MAPS[this.exploreMapIndex];
+                return { cols: map.cols ?? 28, rows: map.rows ?? 18 };
+            },
+            isInsideGrid: (cell) => this.isInsideGrid(cell),
+            allocateUid: () => {
+                const id = this.nextUid;
+                this.nextUid += 1;
+                return id;
+            },
+            showToast: (text, important) => this.showToast(text, important),
+            damageExplorePlayer: (amount) => this.applyExplorePlayerDamage(amount),
+            grantExploreMoney: (amount) => {
+                this.economy.addMoney(Math.round(amount));
+                this.showToast(`AI 回收奖励 +$${Math.round(amount)}`);
+            },
+            showExploreEnemyDamageFloat: (worldPos, dmg, opts) => this.effectsFacade.spawnDamageFloat(worldPos, dmg, opts),
+            onExploreBasicAttackFired: () => {
+                playExploreBasicAttack();
+                this.playerAnimator.playAction("attack");
+            },
+            onExploreSkillEUsed: () => {
+                this.playerAnimator.playAction("skillE");
+            },
+            onExploreSkillRUsed: () => {
+                this.playerAnimator.playAction("skillR");
+            },
+            onExploreEnemyKilled: () => playExploreEnemyKilled(),
+            loadExploreGltfScene: async (url) => {
+                const trimmed = url.trim();
+                if (!trimmed) {
+                    return null;
+                }
+                try {
+                    const gltf = await new Promise((resolve, reject) => {
+                        this.gltfLoader.load(trimmed, resolve, undefined, reject);
+                    });
+                    return gltf.scene.clone(true);
+                }
+                catch (e) {
+                    console.warn("[ExploreCombatHost] GLTF:", trimmed, e);
+                    return null;
+                }
+            },
+            onExploreBossDefeated: () => {
+                this.captureExploreBossProgress();
+                this.scheduleExploreBossVictoryCutscene();
+                this.maybePresentFinalVictory();
+            },
+            orientHudToCamera: (obj) => this.hudBillboardOrient.orient(this.camera, this.mode, this.cameraMode, obj),
+        };
+    }
+    applyExplorePlayerDamage(amount) {
+        if (amount > 0) {
+            playExplorePlayerHit();
+        }
+        this.exploreProgress.hp = Math.max(0, this.exploreProgress.hp - amount);
+        if (this.exploreProgress.hp <= 0) {
+            this.triggerGameOver("explore");
+        }
+    }
+    bindEvents() {
+        bindGameInputHandlers({
+            windowRef: window,
+            domElement: this.renderer.domElement,
+            themeStorageKey: UI_THEME_STORAGE_KEY,
+            onThemeStorageChanged: () => {
+                applyUiColorMode(getUiColorMode());
+                this.refreshUiThemeButtonLabels();
+            },
+            onResize: () => this.resize(),
+            onPointerMove: (event) => {
+                if (this.isCameraDragging) {
+                    this.rotateCameraFromPointer(event);
+                }
+                this.updatePointer(event);
+            },
+            onPointerLeave: () => {
+                this.hoverCell = null;
+                this.hoverMesh.visible = false;
+            },
+            onPointerDown: (event) => {
+                this.updatePointer(event);
+                if (this.shouldStartCameraDrag(event)) {
+                    this.beginCameraDrag(event);
+                    return;
+                }
+                if (event.button === 0) {
+                    if (this.mode === "explore") {
+                        this.exploreCombat.fireBasicAttack();
+                        return;
+                    }
+                    if (this.mode === "defense" && this.hoverCell) {
+                        const clickedBuilding = this.buildings.find((building) => sameCell(building.cell, this.hoverCell));
+                        if (clickedBuilding) {
+                            if (clickedBuilding === this.selectedBuilding && clickedBuilding.spec.activeSkill) {
+                                this.castActiveSkill();
+                                return;
+                            }
+                            this.selectedBuilding = clickedBuilding;
+                            this.updateUi();
+                            return;
+                        }
+                        this.selectedBuilding = null;
+                        this.updateUi();
+                    }
+                    this.tryBuild();
+                }
+            },
+            onPointerUp: (event) => {
+                if (!this.isCameraDragging) {
+                    return;
+                }
+                const wasRightClick = this.cameraDragButton === 2;
+                const moved = this.cameraDragMoved;
+                this.endCameraDrag(event);
+                if (this.mode === "defense" && wasRightClick && !moved) {
+                    this.updatePointer(event);
+                    this.tryDemolish();
+                }
+            },
+            onWheel: (direction) => {
+                const nextZoomState = applyCameraZoom({
+                    freeCameraDistance: this.freeCameraDistance,
+                    topdownDistance: this.topdownDistance,
+                    exploreCameraDistance: this.exploreCameraDistance,
+                }, this.mode, this.cameraMode, direction);
+                this.freeCameraDistance = nextZoomState.freeCameraDistance;
+                this.topdownDistance = nextZoomState.topdownDistance;
+                this.exploreCameraDistance = nextZoomState.exploreCameraDistance;
+            },
+            onEscape: () => {
+                if (this.gachaOpen) {
+                    this.closeGacha();
+                }
+                else if (this.homeOverlay.classList.contains("show")) {
+                    this.resumeGame();
+                }
+                else {
+                    this.togglePause();
+                }
+            },
+            onPauseToggle: () => this.togglePause(),
+            onGachaToggle: () => {
+                this.gachaOpen ? this.closeGacha() : this.openGacha();
+            },
+            isGachaOpen: () => this.gachaOpen,
+            onModeToggle: () => this.toggleMode(),
+            onCameraModeToggle: () => this.toggleCameraMode(),
+            resolveBuildHotkey: (code) => Object.values(BUILD_SPECS).find((spec) => `Key${spec.key}` === code)?.id ?? null,
+            onSelectBuild: (buildId) => this.selectBuild(buildId),
+            resolveMapHotkey: (key) => {
+                const mapNumber = Number(key);
+                if (mapNumber >= 1 && mapNumber <= this.currentMapList().length) {
+                    return mapNumber - 1;
+                }
+                return null;
+            },
+            onSelectMap: (index) => this.loadMap(index),
+            onActiveSkill: () => this.castActiveSkill(),
+            onKeyStateChange: (code, pressed, meta) => {
+                if (pressed &&
+                    meta?.repeat !== true &&
+                    (code === "ControlLeft" || code === "ControlRight") &&
+                    this.mode === "explore") {
+                    this.exploreWalkMode = !this.exploreWalkMode;
+                }
+                if (pressed && meta?.repeat !== true && this.mode === "defense") {
+                    if (code === "KeyB") {
+                        const hidden = this.safeZoneShopPanel.getAttribute("aria-hidden") !== "false";
+                        this.safeZoneShopPanel.setAttribute("aria-hidden", String(!hidden));
+                    }
+                    if (code === "KeyI")
+                        this.toggleInventory();
+                }
+                if (pressed && meta?.repeat !== true && this.mode === "explore") {
+                    if (code === "KeyB") {
+                        // B = open safe zone shop (only when in safe zone)
+                        if (this.inSafeZone) {
+                            const hidden = this.safeZoneShopPanel.getAttribute("aria-hidden") !== "false";
+                            this.safeZoneShopPanel.setAttribute("aria-hidden", String(!hidden));
+                        }
+                        else {
+                            this.showToast("\u8fdb\u5165\u5b89\u5168\u533a\u624d\u80fd\u8d2d\u4e70");
+                        }
+                    }
+                    if (code === "KeyI")
+                        this.toggleInventory();
+                    if (code === "KeyE")
+                        this.exploreCombat.castOrbSkill();
+                    if (code === "KeyR")
+                        this.exploreCombat.castRSkill();
+                    const elementHotkeys = {
+                        Digit1: "force",
+                        Digit2: "thermal",
+                        Digit3: "light",
+                        Digit4: "electric",
+                        Digit5: "sound",
+                    };
+                    const nextElement = elementHotkeys[code];
+                    if (nextElement)
+                        this.exploreCombat.setPlayerElement(nextElement);
+                }
+                if (pressed) {
+                    this.keys.add(code);
+                }
+                else {
+                    this.keys.delete(code);
+                }
+            },
+            onClearAllKeys: () => this.keys.clear(),
+        });
+    }
+    async loadEditorRuntimeMaps() {
+        try {
+            const importedCount = await this.pullEditorLevelsFromProjectFile();
+            if (importedCount > 0) {
+                this.renderMapButtons();
+                this.showToast(`\u5df2\u540c\u6b65 ${importedCount} \u4e2a\u7f16\u8f91\u5668\u5173\u5361`);
+            }
+        }
+        catch (error) {
+            console.warn("[LevelEditorRuntime] failed to load editor maps", error);
+            this.showToast("\u672a\u8bfb\u53d6\u5230\u7f16\u8f91\u5668\u5173\u5361\uff0c\u5df2\u4f7f\u7528\u5185\u7f6e\u5730\u56fe");
+        }
+    }
+    async pullEditorLevelsFromProjectFile() {
+        const result = await importEditorLevelsFromProjectFile({
+            bundledCityMapJson: this.bundledCityMapJson,
+            bundledBuildSpecsJson: this.bundledBuildSpecsJson,
+            towerOverrideCtx: {
+                bundledBuildSpecsJson: this.bundledBuildSpecsJson,
+                currentCity: this.currentCity,
+                currentCityLabel: this.currentCityLabel,
+                requestedRegionCode: this.requestedRegionCode,
+                requestedRegionName: this.requestedRegionName,
+            },
+            levelsPullCtx: { requestedLevelId: this.requestedLevelId },
+        });
+        this.requestedDefIdx = result.requestedDefIdx;
+        this.requestedExpIdx = result.requestedExpIdx;
+        return result.importedCount;
+    }
+    onDocumentVisibilityChange() {
+        if (document.visibilityState !== "visible") {
+            return;
+        }
+        if (this.skipNextVisibilityEditorReload) {
+            this.skipNextVisibilityEditorReload = false;
+            return;
+        }
+        if (this.editorProjectReloadTimer) {
+            window.clearTimeout(this.editorProjectReloadTimer);
+        }
+        this.editorProjectReloadTimer = window.setTimeout(() => {
+            this.editorProjectReloadTimer = 0;
+            void this.reloadEditorProjectAfterTabVisible();
+        }, 420);
+    }
+    /** 从编辑器页面保存返回游戏页时重新拉取 `level-editor-state.json` */
+    async reloadEditorProjectAfterTabVisible() {
+        try {
+            const importedCount = await this.pullEditorLevelsFromProjectFile();
+            await this.loadGameAssetConfig();
+            this.renderShopItems();
+            this.defenseMapIndex = Math.min(this.defenseMapIndex, MAPS.length - 1);
+            this.exploreMapIndex = Math.min(this.exploreMapIndex, EXPLORE_MAPS.length - 1);
+            this.renderMapButtons();
+            const inactiveSession = !this.gameStarted || this.paused || this.homeOverlay.classList.contains("show");
+            if (inactiveSession) {
+                if (this.mode === "defense") {
+                    this.loadDefenseMap(this.defenseMapIndex, true);
+                }
+                else {
+                    this.loadExploreMap(this.exploreMapIndex, true);
+                }
+            }
+            if (importedCount > 0) {
+                if (inactiveSession) {
+                    this.showToast(`已从项目重新同步 ${importedCount} 个关卡`);
+                }
+                else {
+                    this.showToast(`项目已更新 ${importedCount} 个关卡；进行中的对局请暂停或回主菜单后再开新局以载入新地图`);
+                }
+            }
+        }
+        catch (error) {
+            console.warn("[EditorProjectReload]", error);
+        }
+    }
+    loadInitialCityMap() {
+        // Direct levelId request takes priority
+        if (this.requestedLevelId && this.requestedDefIdx >= 0) {
+            this.defenseMapIndex = this.requestedDefIdx;
+            this.exploreMapIndex = this.requestedExpIdx >= 0 ? this.requestedExpIdx : this.requestedDefIdx;
+            // Sync currentCity based on which city owns this map index
+            if (!this.currentCity) {
+                const matchedCity = Object.entries(CITY_MAP).find(([, info]) => info.defenseIndex === this.defenseMapIndex);
+                if (matchedCity) {
+                    this.currentCity = matchedCity[0];
+                    this.currentCityLabel = CITY_MAP[this.currentCity].label;
+                }
+            }
+            this.loadDefenseMap(this.defenseMapIndex, true);
+            const cityLabel = document.getElementById("cityLabel");
+            if (cityLabel)
+                cityLabel.textContent = MAPS[this.defenseMapIndex]?.name || this.requestedLevelId;
+            return;
+        }
+        if (this.currentCity && CITY_MAP[this.currentCity]) {
+            const cityInfo = CITY_MAP[this.currentCity];
+            this.defenseMapIndex = cityInfo.defenseIndex;
+            this.exploreMapIndex = cityInfo.exploreIndex;
+            this.loadDefenseMap(this.defenseMapIndex, true);
+            const cityLabel = document.getElementById("cityLabel");
+            if (cityLabel)
+                cityLabel.textContent = `${cityInfo.label} \u00b7 ${MAPS[cityInfo.defenseIndex].name}`;
+            return;
+        }
+        this.loadDefenseMap(0, true);
+    }
+    shouldStartCameraDrag(event) {
+        return shouldStartInputCameraDrag(this.gachaOpen, this.mode, event.button);
+    }
+    beginCameraDrag(event) {
+        const nextDragState = beginInputCameraDrag({
+            isCameraDragging: this.isCameraDragging,
+            cameraDragButton: this.cameraDragButton,
+            cameraDragMoved: this.cameraDragMoved,
+            lastPointerX: this.lastPointerX,
+            lastPointerY: this.lastPointerY,
+        }, this.renderer.domElement, event);
+        this.isCameraDragging = nextDragState.isCameraDragging;
+        this.cameraDragButton = nextDragState.cameraDragButton;
+        this.cameraDragMoved = nextDragState.cameraDragMoved;
+        this.lastPointerX = nextDragState.lastPointerX;
+        this.lastPointerY = nextDragState.lastPointerY;
+    }
+    rotateCameraFromPointer(event) {
+        const nextState = rotateInputCameraFromPointer({
+            isCameraDragging: this.isCameraDragging,
+            cameraDragButton: this.cameraDragButton,
+            cameraDragMoved: this.cameraDragMoved,
+            lastPointerX: this.lastPointerX,
+            lastPointerY: this.lastPointerY,
+        }, {
+            freeCameraYaw: this.freeCameraYaw,
+            freeCameraPitch: this.freeCameraPitch,
+            exploreCameraYaw: this.exploreCameraYaw,
+            exploreCameraPitch: this.exploreCameraPitch,
+        }, this.mode, event);
+        this.isCameraDragging = nextState.dragState.isCameraDragging;
+        this.cameraDragButton = nextState.dragState.cameraDragButton;
+        this.cameraDragMoved = nextState.dragState.cameraDragMoved;
+        this.lastPointerX = nextState.dragState.lastPointerX;
+        this.lastPointerY = nextState.dragState.lastPointerY;
+        this.freeCameraYaw = nextState.orbitState.freeCameraYaw;
+        this.freeCameraPitch = nextState.orbitState.freeCameraPitch;
+        this.exploreCameraYaw = nextState.orbitState.exploreCameraYaw;
+        this.exploreCameraPitch = nextState.orbitState.exploreCameraPitch;
+    }
+    endCameraDrag(event) {
+        const nextDragState = endInputCameraDrag({
+            isCameraDragging: this.isCameraDragging,
+            cameraDragButton: this.cameraDragButton,
+            cameraDragMoved: this.cameraDragMoved,
+            lastPointerX: this.lastPointerX,
+            lastPointerY: this.lastPointerY,
+        }, this.renderer.domElement, event);
+        this.isCameraDragging = nextDragState.isCameraDragging;
+        this.cameraDragButton = nextDragState.cameraDragButton;
+        this.cameraDragMoved = nextDragState.cameraDragMoved;
+        this.lastPointerX = nextDragState.lastPointerX;
+        this.lastPointerY = nextDragState.lastPointerY;
+    }
+    resize() {
+        resizeViewport(this.camera, this.renderer, window.innerWidth, window.innerHeight);
+        if (window.innerWidth <= 1080 && this.gameRootEl.classList.contains("game-root--terminal-collapsed")) {
+            this.setTerminalPanelCollapsed(false);
+        }
+    }
+    syncLevelAudioFromMaps() {
+        const defMap = MAPS[this.defenseMapIndex];
+        const expMap = EXPLORE_MAPS[this.exploreMapIndex];
+        setLevelAudioMaps({ defense: defMap?.levelAudio, explore: expMap?.levelAudio });
+        refreshBgmForMode(this.mode);
+    }
+    loadMap(index) {
+        this.syncModePairForSelectedMap(index);
+        if (this.mode === "explore") {
+            this.loadExploreMap(this.exploreMapIndex, true);
+        }
+        else {
+            this.loadDefenseMap(this.defenseMapIndex, true);
+        }
+    }
+    loadDefenseMap(index, resetEncounter, options) {
+        this.defenseMapIndex = index;
+        this.baseHp = INITIAL_BASE_HP;
+        this.wave = 1;
+        this.nextWaveDelay = 3;
+        this.spawnRemaining = 0;
+        this.spawnCooldown = 0;
+        this.currentWaveSpawned = 0;
+        this.authoredSpawnStates = [];
+        this.waveActive = false;
+        this.cameraPan.set(0, 0, 0);
+        if (resetEncounter) {
+            this.defenseStandardVictoryCleared = false;
+            this.defenseEndless = false;
+            this.defenseVictoryAwaitingChoice = false;
+            this.gameVictoryActive = false;
+            this.defenseVictoryPromptPanel.setAttribute("aria-hidden", "true");
+            this.gameVictoryPanel.setAttribute("aria-hidden", "true");
+            this.clearGroup(this.buildGroup);
+            this.clearGroup(this.enemyGroup);
+            this.clearGroup(this.dropGroup);
+            this.clearGroup(this.fxGroup);
+            this.buildings = [];
+            this.enemies = [];
+            this.drops = [];
+            this.effects = [];
+        }
+        const map = MAPS[this.defenseMapIndex];
+        const runtimeState = buildRuntimeMapState(map);
+        this.defensePathCells = runtimeState.pathCells;
+        this.defenseObstacleCells = runtimeState.obstacleCells;
+        this.defensePathWorldPoints = runtimeState.pathWorldPoints;
+        if (!options?.skipTowerUrlMerge) {
+            void this.applyPerMapTowerModelOverrides(map);
+        }
+        if (this.mode === "defense") {
+            this.showDefenseView();
+        }
+        this.showToast(`\u5df2\u52a0\u8f7d\u5730\u56fe\uff1a${map.name}`);
+        this.updateUi();
+        this.syncLevelAudioFromMaps();
+    }
+    resolveCurrentExploreGameplay() {
+        return resolveExploreGameplay(EXPLORE_MAPS[this.exploreMapIndex]?.exploreGameplay);
+    }
+    loadExploreMap(index, resetExploration, options) {
+        this.exploreMapIndex = index;
+        this.exploreMapInitialized = true;
+        const map = EXPLORE_MAPS[this.exploreMapIndex];
+        this.exploreCombat.syncGameplay(map.exploreGameplay);
+        this.exploreCombat.syncMapContent({
+            bosses: map.exploreBosses,
+            spawners: map.exploreSpawners,
+            waveRules: map.exploreWaveRules,
+        });
+        this.exploreCombat.restoreDefeatedBossIds(this.defeatedExploreBossIds);
+        const runtimeState = buildRuntimeMapState(map);
+        this.explorePathCells = runtimeState.pathCells;
+        this.exploreObstacleCells = runtimeState.obstacleCells;
+        if (!options?.skipViewRefresh) {
+            this.pathCells = this.explorePathCells;
+            this.obstacleCells = this.exploreObstacleCells;
+        }
+        this.exploreSafeZoneCells = new Set((map.safeZones ?? []).map((c) => cellKey(c)));
+        if (resetExploration) {
+            const gp = this.resolveCurrentExploreGameplay();
+            this.exploreWalkMode = false;
+            this.dropTimer = gp.moneyDropRespawnIntervalSec;
+            for (const drop of this.drops.filter((item) => item.source === "explore")) {
+                this.dropGroup.remove(drop.mesh);
+            }
+            this.drops = this.drops.filter((item) => item.source !== "explore");
+            this.positionPlayerAtStart();
+            // Clear explore enemies and projectiles
+            this.exploreCombat.resetEncounter();
+            this.exploreProgress.hp = this.exploreProgress.maxHp;
+            this.spawnPlacedExplorePickups(map);
+        }
+        this.captureExploreBossProgress();
+        if (options?.skipViewRefresh) {
+            return;
+        }
+        this.showExploreView();
+        if (!options?.silent) {
+            this.showToast(`\u5df2\u8fdb\u5165\u63a2\u7d22\u5730\u56fe\uff1a${map.name}`);
+        }
+        this.updateUi();
+        this.syncLevelAudioFromMaps();
+    }
+    showDefenseView() {
+        // Clear stuck keys so the camera/player can't drift after mode switch
+        this.keys.clear();
+        // Purge any in-flight defense effects so they don't ghost at the wrong
+        // scale after applyPlayfieldVisualScale rescales fxGroup
+        this.clearGroup(this.fxGroup);
+        this.effects = [];
+        // Expire all explore skill/projectile rings immediately – they don't tick
+        // when in defense mode and would otherwise accumulate indefinitely
+        this.exploreCombat.clearEphemeralProjectiles();
+        const map = MAPS[this.defenseMapIndex];
+        const hasGeoBackdrop = this.mapGeoBackdropActive(map.geo);
+        setActiveRuntimeGrid(map);
+        this.pathCells = this.defensePathCells;
+        this.obstacleCells = this.defenseObstacleCells;
+        this.pathWorldPoints = this.defensePathWorldPoints;
+        this.applyPlayfieldVisualScale(hasGeoBackdrop ? GEO_PLAYFIELD_SCALE : 1, hasGeoBackdrop ? this.geoBoardHeight(map) : 0);
+        if (this.playfieldVisualScale > 1) {
+            this.freeCameraDistance = Math.max(this.freeCameraDistance, 760);
+            this.topdownDistance = Math.max(this.topdownDistance, 1100);
+        }
+        else if (this.freeCameraDistance >= 500) {
+            // Geo mapping was just turned off: scale returned to 1 but camera is still at
+            // the geo-enlarged distance (760+).  Reset to normal defaults so the map is visible.
+            this.freeCameraDistance = 86;
+            this.topdownDistance = 120;
+        }
+        this.geoTilesRuntime.dispose();
+        this.clearGroup(this.mapGroup);
+        renderRuntimeMapScene({
+            scene: this.scene,
+            mapGroup: this.mapGroup,
+            hoverMesh: this.hoverMesh,
+            map,
+            pathCells: this.pathCells,
+            obstacleCells: this.obstacleCells,
+            currentCity: this.currentCity,
+            mode: this.mode,
+            useGeoBackdrop: hasGeoBackdrop,
+            mapGroupWorldXzScale: this.playfieldVisualScale,
+        });
+        this.geoTilesRuntime.load(hasGeoBackdrop ? map.geo : undefined);
+        const defActorGen = ++this.mapActorGen;
+        const defYOffset = hasGeoBackdrop ? this.geoBoardHeight(map) : 0;
+        loadMapActors({
+            group: this.mapGroup,
+            map,
+            gltfLoader: this.gltfLoader,
+            objLoader: this.objLoader,
+            fbxLoader: this.fbxLoader,
+            globalModelPathScales: this.modelCustomization.globalModelPathScales,
+            isStale: () => this.mapActorGen !== defActorGen,
+            playfieldScale: this.playfieldVisualScale,
+            yOffset: defYOffset,
+        }).catch((e) => console.warn("[MapActors]", e));
+        this.buildGroup.visible = true;
+        this.enemyGroup.visible = true;
+        this.fxGroup.visible = true;
+        this.actorGroup.visible = false;
+        this.exploreEnemyGroup.visible = false;
+        this.exploreProjectileGroup.visible = false;
+        // 恢复塔防 groups 到正常 Y；将探索 groups 沉到地下避免串台
+        this.sinkGroupsForModeIsolation("defense");
+        this.exploreHud.setAttribute("aria-hidden", "true");
+        this.safeZoneShopPanel.setAttribute("aria-hidden", "true");
+        this.inSafeZone = false;
+        this.gameRootEl.classList.remove("game-root--explore");
+        if (this.inventoryOpen) {
+            this.inventoryOpen = false;
+            this.inventoryPanel.setAttribute("aria-hidden", "true");
+        }
+        this.updateDropVisibility();
+    }
+    showExploreView() {
+        // Clear stuck keys so the player can't auto-walk after mode switch
+        this.keys.clear();
+        /** fxGroup 在探索里也用于飘字：切视图时倒掉塔防侧残留弹道/粒子，避免误判为「探索特效」 */
+        this.clearGroup(this.fxGroup);
+        this.effects = [];
+        if (!this.exploreMapInitialized) {
+            this.loadExploreMap(this.exploreMapIndex, true);
+            return;
+        }
+        const map = EXPLORE_MAPS[this.exploreMapIndex];
+        const exploreGeoOn = this.mapGeoBackdropActive(map.geo);
+        setActiveRuntimeGrid(map);
+        this.pathCells = this.explorePathCells;
+        this.obstacleCells = this.exploreObstacleCells;
+        this.pathWorldPoints = expandPathToOrderedCells(map.path).map((cell) => cellToWorld(cell));
+        this.applyPlayfieldVisualScale(1);
+        this.geoTilesRuntime.dispose();
+        this.clearGroup(this.mapGroup);
+        renderRuntimeMapScene({
+            scene: this.scene,
+            mapGroup: this.mapGroup,
+            hoverMesh: this.hoverMesh,
+            map,
+            pathCells: this.pathCells,
+            obstacleCells: this.obstacleCells,
+            currentCity: this.currentCity,
+            mode: this.mode,
+            useGeoBackdrop: exploreGeoOn,
+            safeZoneCells: this.exploreSafeZoneCells,
+            mapGroupWorldXzScale: this.playfieldVisualScale,
+        });
+        this.geoTilesRuntime.load(exploreGeoOn ? map.geo : undefined);
+        const expActorGen = ++this.mapActorGen;
+        loadMapActors({
+            group: this.mapGroup,
+            map,
+            gltfLoader: this.gltfLoader,
+            objLoader: this.objLoader,
+            fbxLoader: this.fbxLoader,
+            globalModelPathScales: this.modelCustomization.globalModelPathScales,
+            isStale: () => this.mapActorGen !== expActorGen,
+        }).catch((e) => console.warn("[MapActors]", e));
+        this.buildGroup.visible = false;
+        this.enemyGroup.visible = false;
+        /** Sprite 飘字等在 fxGroup；须可见才能在探索里也显示（弹道仍在 exploreProjectileGroup） */
+        this.fxGroup.visible = true;
+        this.actorGroup.visible = true;
+        this.exploreEnemyGroup.visible = true;
+        this.exploreProjectileGroup.visible = true;
+        // 将塔防 groups 沉到地下，探索 groups 恢复正常 Y，防止视觉串台
+        this.sinkGroupsForModeIsolation("explore");
+        this.exploreHud.setAttribute("aria-hidden", "false");
+        this.gameRootEl.classList.add("game-root--explore");
+        // Close gacha panel if it was open
+        this.gachaPanel.classList.remove("show");
+        this.gachaPanel.setAttribute("aria-hidden", "true");
+        this.updateDropVisibility();
+        this.syncExploreFollowCameraSmoothing();
+    }
+    applyPlayfieldVisualScale(scale, yOffset = 0) {
+        this.playfieldVisualScale = scale;
+        this.playfieldYOffset = yOffset;
+        this.groundPlane.constant = -yOffset;
+        for (const group of [this.mapGroup, this.buildGroup, this.enemyGroup, this.dropGroup, this.fxGroup]) {
+            group.scale.set(scale, 1, scale);
+            group.position.y = yOffset;
+        }
+        this.buildingDefenseHud.syncSkillHudScaleCorrection(this.buildings);
+        this.buildingDefenseHud.layoutAll(this.buildings);
+        this.syncGeoSquashCompensationAcrossAttachedMeshes();
+    }
+    /**
+     * 模式隔离：将非当前模式的 3D groups 沉到 Y=-500 以下，
+     * 避免塔防模式的防御塔攻击特效、敌人等在探索模式可见（反之亦然）。
+     */
+    sinkGroupsForModeIsolation(activeMode) {
+        const SINK_Y = -500;
+        if (activeMode === "defense") {
+            // 塔防正常；探索沉底
+            this.exploreEnemyGroup.position.y = SINK_Y;
+            this.exploreProjectileGroup.position.y = SINK_Y;
+        }
+        else {
+            // 探索正常；塔防沉底（buildGroup/enemyGroup/dropGroup 已被 applyPlayfieldVisualScale 管理，
+            // 这里额外把它们偏移到不可见区域）
+            for (const group of [this.buildGroup, this.enemyGroup, this.dropGroup]) {
+                group.position.y = SINK_Y;
+            }
+            this.exploreEnemyGroup.position.y = 0;
+            this.exploreProjectileGroup.position.y = 0;
+        }
+    }
+    /** GEO 棋盘用 (sx,1,sz) 放大 XZ；子网格需同步还原/施加 Y 向补偿以免「拍扁」或模式切换残留错误倍数 */
+    syncGeoSquashCompensationAcrossAttachedMeshes() {
+        for (const enemy of this.enemies) {
+            this.applyGeoPlayfieldSquashCompensation(enemy.mesh);
+        }
+        for (const building of this.buildings) {
+            const visual = building.mesh.children[0];
+            if (visual) {
+                this.applyGeoPlayfieldSquashCompensation(visual);
+            }
+        }
+        for (const drop of this.drops) {
+            this.applyGeoPlayfieldSquashCompensation(drop.mesh);
+        }
+    }
+    applyGeoPlayfieldSquashCompensation(mesh) {
+        const target = this.playfieldVisualScale;
+        const storedRaw = mesh.userData.geoSquashCompensatedScale;
+        const previous = typeof storedRaw === "number" && storedRaw > 0 && Number.isFinite(storedRaw) ? storedRaw : 1;
+        mesh.scale.y /= previous;
+        if (target !== 1 && Number.isFinite(target)) {
+            mesh.scale.y *= target;
+            mesh.userData.geoSquashCompensatedScale = target;
+        }
+        else {
+            delete mesh.userData.geoSquashCompensatedScale;
+        }
+    }
+    mapGeoBackdropActive(geo) {
+        return getGameGeoMappingEnabled() && canUseGeoTiles(geo);
+    }
+    onGameGeoMappingUserChange(enabled) {
+        setGameGeoMappingEnabled(enabled);
+        this.gameGeoMappingToggle.checked = enabled;
+        this.topGeoMappingToggle.checked = enabled;
+        this.updateGameGeoMappingStateLabel();
+        this.refreshDefenseOrExploreSceneForGeoPref();
+    }
+    syncGeoMappingTogglesFromStorage() {
+        const on = getGameGeoMappingEnabled();
+        this.gameGeoMappingToggle.checked = on;
+        this.topGeoMappingToggle.checked = on;
+        this.updateGameGeoMappingStateLabel();
+    }
+    /** 进行中切换地理底板时重建当前模式场景，避免缩放与特效残留 */
+    refreshDefenseOrExploreSceneForGeoPref() {
+        // 未开始游戏或主页遮罩显示时：只需重建主页预览底板，无需完整重置
+        if (!this.gameStarted || this.homeOverlay.classList.contains("show")) {
+            const map = MAPS[this.defenseMapIndex];
+            if (map && this.mode === "defense") {
+                const runtimeState = buildRuntimeMapState(map);
+                this.defensePathCells = runtimeState.pathCells;
+                this.defenseObstacleCells = runtimeState.obstacleCells;
+                this.defensePathWorldPoints = runtimeState.pathWorldPoints;
+                this.showDefenseView();
+            }
+            return;
+        }
+        this.clearGroup(this.fxGroup);
+        this.effects = [];
+        if (this.mode === "defense") {
+            this.showDefenseView();
+        }
+        else {
+            this.loadExploreMap(this.exploreMapIndex, false, { silent: true });
+        }
+    }
+    updateGameGeoMappingStateLabel() {
+        const el = document.querySelector("#gameGeoMappingState");
+        if (!el) {
+            return;
+        }
+        const on = this.gameGeoMappingToggle.checked;
+        el.textContent = on ? (el.dataset.stateOn ?? "已开启") : (el.dataset.stateOff ?? "已关闭");
+    }
+    geoBoardHeight(map) {
+        const configured = Number(map.geo?.boardHeightMeters);
+        return Number.isFinite(configured) && configured > 0 ? configured : GEO_PLAYFIELD_LIFT_METERS;
+    }
+    createPlayer() {
+        // Preserve the player's current position/rotation so async model-reloads
+        // (e.g. loadDefaultPlayer completing while in explore mode) don't teleport
+        // the character back to world origin.
+        const savedPos = this.player ? this.player.position.clone() : null;
+        const savedRotY = this.player ? this.player.rotation.y : 0;
+        const shouldRestorePos = !!savedPos && this.mode === "explore" && this.exploreMapInitialized;
+        if (this.player) {
+            this.actorGroup.remove(this.player);
+            this.playerAnimator.clear();
+        }
+        this.player = new THREE.Group();
+        this.player.rotation.order = "YXZ";
+        if (this.modelCustomization.customPlayerModel) {
+            const model = skeletonClone(this.modelCustomization.customPlayerModel);
+            const scale = this.modelCustomization.getClampedScale("player");
+            model.scale.set(scale, scale, scale);
+            model.position.y = 0;
+            this.player.add(model);
+        }
+        else {
+            this.player.add(createFallbackPlayerMesh());
+        }
+        this.player.traverse((child) => {
+            if (child instanceof THREE.Mesh) {
+                child.castShadow = true;
+                child.receiveShadow = true;
+            }
+        });
+        this.playerAnimator.attachTo(this.player, this.modelCustomization.customAnimations);
+        this.actorGroup.add(this.player);
+        // Restore position after adding so the player doesn't snap to origin
+        if (shouldRestorePos && savedPos) {
+            this.player.position.copy(savedPos);
+            this.player.rotation.y = savedRotY;
+        }
+    }
+    positionPlayerAtStart() {
+        const map = this.currentMap();
+        const start = this.mode === "explore" ? map.exploreStart ?? map.path[0] : map.path[0];
+        if (!start) {
+            return;
+        }
+        const fallback = { col: Math.min(start.col + 2, getActiveGridCols() - 1), row: start.row };
+        const cell = this.mode === "explore" ? start : this.isBuildBlocked(fallback) ? start : fallback;
+        const position = cellToWorld(cell);
+        const t = this.playerExploreTransform;
+        this.player.position.set(position.x + t.offsetMeters.x, position.y + t.offsetMeters.y, position.z + t.offsetMeters.z);
+        this.player.rotation.set(THREE.MathUtils.degToRad(t.rotationDeg.x), THREE.MathUtils.degToRad(t.rotationDeg.y), THREE.MathUtils.degToRad(t.rotationDeg.z));
+    }
+    updatePointer(event) {
+        const rectBounds = this.renderer.domElement.getBoundingClientRect();
+        this.pointer.x = ((event.clientX - rectBounds.left) / rectBounds.width) * 2 - 1;
+        this.pointer.y = -(((event.clientY - rectBounds.top) / rectBounds.height) * 2 - 1);
+        this.raycaster.setFromCamera(this.pointer, this.camera);
+        const hit = new THREE.Vector3();
+        if (this.raycaster.ray.intersectPlane(this.groundPlane, hit)) {
+            const localHit = hit.clone();
+            if (this.playfieldVisualScale !== 1) {
+                localHit.x /= this.playfieldVisualScale;
+                localHit.z /= this.playfieldVisualScale;
+            }
+            const cell = worldToCell(localHit);
+            this.hoverCell = this.isInsideGrid(cell) ? cell : null;
+            this.updateHover();
+        }
+    }
+    updateHover() {
+        if (this.mode === "explore") {
+            this.hoverMesh.visible = false;
+            return;
+        }
+        if (!this.hoverCell) {
+            this.hoverMesh.visible = false;
+            return;
+        }
+        const position = cellToWorld(this.hoverCell);
+        this.hoverMesh.position.set(position.x, 0.12, position.z);
+        this.hoverMesh.visible = true;
+        const material = this.hoverMesh.material;
+        const validation = this.validateBuild(this.hoverCell, false);
+        const map = this.currentMap();
+        const th = map.theme;
+        material.opacity = th.hoverCellOpacity ?? 0.42;
+        material.color.set(validation.ok ? (th.hoverColorOk ?? 0x8be9ff) : (th.hoverColorBad ?? 0xff5e73));
+    }
+    selectBuild(id) {
+        const spec = BUILD_SPECS[id];
+        if (spec.requiresUnlock && !this.economy.sTowerUnlocked) {
+            this.showToast("S \u7ea7\u9632\u5fa1\u5854\u5c1a\u672a\u89e3\u9501\uff0c\u8bf7\u5148\u6253\u5f00\u8865\u7ed9\u62bd\u5361");
+            this.openGacha();
+            return;
+        }
+        this.selectedBuild = id;
+        this.updateUi();
+    }
+    toggleMode() {
+        const previousMode = this.mode;
+        const previousIndex = previousMode === "defense" ? this.defenseMapIndex : this.exploreMapIndex;
+        this.syncModePairForSelectedMap(previousIndex);
+        this.mode = previousMode === "defense" ? "explore" : "defense";
+        this.renderMapButtons();
+        if (this.mode === "explore") {
+            this.exploreWalkMode = false;
+            // 不重置探索进度（波次、HP、敌人），保留当前肉鸽状态
+            this.loadExploreMap(this.exploreMapIndex, false, { silent: true });
+        }
+        else {
+            this.showDefenseView();
+        }
+        this.showToast(this.mode === "explore" ? "\u81ea\u7531\u63a2\u7d22\uff1a\u6218\u7ebf\u5728\u540e\u53f0\u7ee7\u7eed\u63a8\u8fdb" : "\u5854\u9632\u6a21\u5f0f\uff1a\u56de\u5230\u5b9e\u65f6\u6218\u7ebf");
+        refreshBgmForMode(this.mode);
+        this.syncDefenseVictoryPromptVisibility();
+    }
+    toggleCameraMode() {
+        if (this.mode === "explore") {
+            this.showToast("\u63a2\u7d22\u6a21\u5f0f\u56fa\u5b9a\u7b2c\u4e09\u4eba\u79f0\u89c6\u89d2\uff0c\u53ef\u4f7f\u7528\u6eda\u8f6e\u7f29\u653e");
+            return;
+        }
+        this.cameraMode = this.cameraMode === "topdown" ? "free" : "topdown";
+        this.showToast(this.cameraMode === "topdown" ? "\u955c\u5934\uff1a\u6218\u672f\u4fef\u89c6" : "\u955c\u5934\uff1a\u659c\u89c6\u5de1\u822a");
+        this.updateUi();
+    }
+    tryBuild() {
+        if (this.mode !== "defense") {
+            this.showToast("\u8bf7\u5207\u56de\u5854\u9632\u6a21\u5f0f\u540e\u518d\u90e8\u7f72\u9632\u5fa1\u5854");
+            return;
+        }
+        if (!this.hoverCell) {
+            return;
+        }
+        const validation = this.validateBuild(this.hoverCell, true);
+        if (!validation.ok) {
+            this.showToast(validation.reason);
+            return;
+        }
+        const spec = BUILD_SPECS[this.selectedBuild];
+        if (!this.economy.trySpend(spec.cost)) {
+            this.showToast(`\u8d44\u91d1\u4e0d\u8db3\uff0c\u8fd8\u9700 $${this.economy.insufficientFundsGap(spec.cost)}`);
+            return;
+        }
+        const building = {
+            uid: this.nextUid,
+            spec,
+            cell: { ...this.hoverCell },
+            mesh: this.createBuildingMesh(spec),
+            cooldown: 0,
+            armed: true,
+            hp: spec.maxHp ?? 1,
+            blockingEnemies: [],
+            skillCooldownTimer: 0,
+        };
+        this.bindBuildingEmbeddedAnimation(building);
+        this.buildingDefenseHud.attachToBuilding(building);
+        this.nextUid += 1;
+        const position = cellToWorld(building.cell);
+        building.mesh.position.set(position.x, 0, position.z);
+        this.buildings.push(building);
+        this.buildGroup.add(building.mesh);
+        playTowerBuild();
+        this.showToast(`\u5efa\u9020\u5b8c\u6210\uff1a${spec.name}`);
+        this.updateHover();
+    }
+    tryDemolish() {
+        if (!this.hoverCell) {
+            return;
+        }
+        const building = this.buildings.find((item) => sameCell(item.cell, this.hoverCell));
+        if (!building) {
+            return;
+        }
+        const refundRatio = THREE.MathUtils.clamp(building.spec.refundRatio ?? 0.5, 0, 1);
+        this.economy.addMoney(Math.floor(building.spec.cost * refundRatio));
+        this.buildGroup.remove(building.mesh);
+        this.buildings = this.buildings.filter((item) => item !== building);
+        this.showToast(`\u5df2\u62c6\u9664\uff1a${building.spec.name}`);
+        this.updateHover();
+    }
+    validateBuild(cell, includeMoney) {
+        const spec = BUILD_SPECS[this.selectedBuild];
+        const key = cellKey(cell);
+        const pathCells = this.defensePathCells;
+        const obstacleCells = this.defenseObstacleCells;
+        const mustPlaceOnPath = spec.id === "mine" || spec.id === "qinqiong";
+        if (!this.isInsideGrid(cell)) {
+            return { ok: false, reason: "\u8d85\u51fa\u5730\u56fe\u8fb9\u754c" };
+        }
+        if (obstacleCells.has(key)) {
+            return { ok: false, reason: "\u65e0\u6cd5\u5728\u969c\u788d\u7269\u4e0a\u5efa\u9020" };
+        }
+        if (spec.requiresUnlock && !this.economy.sTowerUnlocked) {
+            return { ok: false, reason: "S \u7ea7\u9632\u5fa1\u5854\u5c1a\u672a\u89e3\u9501" };
+        }
+        if (this.buildings.some((building) => sameCell(building.cell, cell))) {
+            return { ok: false, reason: "\u8be5\u683c\u5df2\u6709\u5efa\u7b51" };
+        }
+        if (spec.rank === "S" && this.buildings.some((building) => building.spec.id === spec.id)) {
+            return { ok: false, reason: `${spec.name} \u662f S \u7ea7\u9650\u5b9a\u5361\uff0c\u6bcf\u5f20\u5730\u56fe\u53ea\u80fd\u90e8\u7f72 1 \u6b21` };
+        }
+        if (mustPlaceOnPath) {
+            if (!pathCells.has(key)) {
+                return {
+                    ok: false,
+                    reason: spec.id === "qinqiong" ? "\u79e6\u743c\u00b7\u95e8\u795e\u53ea\u80fd\u90e8\u7f72\u5728\u9053\u8def\u4e0a\u963b\u6321\u654c\u4eba" : "\u5730\u96f7\u53ea\u80fd\u94fa\u5728\u9053\u8def\u4e0a",
+                };
+            }
+        }
+        else if (pathCells.has(key)) {
+            return { ok: false, reason: "\u9053\u8def\u4f9b\u654c\u519b\u884c\u8fdb\uff0c\u4ec5\u80fd\u653e\u7f6e\u5730\u96f7\u6216\u79e6\u743c\u00b7\u95e8\u795e" };
+        }
+        if (includeMoney && this.economy.balance < spec.cost) {
+            return { ok: false, reason: `\u8d44\u91d1\u4e0d\u8db3\uff0c\u8fd8\u9700 $${this.economy.insufficientFundsGap(spec.cost)}` };
+        }
+        return { ok: true };
+    }
+    createBuildingMesh(spec) {
+        const visual = createRenderedBuildingMesh({
+            spec,
+            customModel: this.modelCustomization.customModels[spec.id],
+            getClampedUserScale: (target) => this.modelCustomization.getClampedScale(target),
+            isBeijing: this.currentCity === "beijing" || this.currentMap().id.startsWith("beijing"),
+        });
+        const root = new THREE.Group();
+        this.applyGeoPlayfieldSquashCompensation(visual);
+        root.add(visual);
+        attachEmbeddedAnimationClips(root, getEmbeddedAnimationClips(visual));
+        return root;
+    }
+    animate() {
+        requestAnimationFrame(() => this.animate());
+        const now = performance.now();
+        const dt = Math.min((now - this.lastFrameTime) / 1000, 0.05);
+        this.lastFrameTime = now;
+        this.elapsed += dt;
+        if (this.gameStarted &&
+            !this.paused &&
+            !this.gameOverActive &&
+            !this.gameVictoryActive &&
+            !this.cutsceneActive &&
+            !this.homeOverlay.classList.contains("show")) {
+            if (!this.defenseVictoryAwaitingChoice) {
+                this.updateDefense(dt);
+            }
+            /** 对战进行中探索与塔防并行模拟（切视图也不断探索侧计时/战斗） */
+            this.updateExplore(dt);
+            this.updateDrops(dt);
+            this.updateDefenseEmbeddedAnimations(dt);
+        }
+        this.updateCamera(dt);
+        this.geoTilesRuntime.update();
+        // 暂停时仍递减特效 TTL；否则命中描边/弹道等会永远卡在暂停那一帧（看起来像“永不消失”）。
+        if (!this.homeOverlay.classList.contains("show")) {
+            this.updateEffects(dt);
+        }
+        /** 暂停/弹窗时也递减顶栏提示计时，否则会卡到「继续游戏」才消失 */
+        if (!this.homeOverlay.classList.contains("show")) {
+            this.updateToast(dt);
+        }
+        this.enemyDefenseVisuals.tickEnemyHuds(this.enemies);
+        this.buildingDefenseHud.updatePerFrame(this.buildings);
+        this.updateUi();
+        this.renderer.render(this.scene, this.camera);
+    }
+    updateDefense(dt) {
+        const exploreSnap = EXPLORE_MAPS[this.exploreMapIndex];
+        setActiveRuntimeGrid(MAPS[this.defenseMapIndex]);
+        try {
+            this.defenseSession.tick(dt);
+        }
+        finally {
+            if (this.mode === "explore") {
+                setActiveRuntimeGrid(exploreSnap);
+            }
+        }
+    }
+    moveDefenseCamera(dt) {
+        const host = this;
+        const panState = {
+            keys: host.keys,
+            get freeCameraYaw() {
+                return host.freeCameraYaw;
+            },
+            set freeCameraYaw(v) {
+                host.freeCameraYaw = v;
+            },
+            cameraPan: host.cameraPan,
+        };
+        tickDefenseKeyboardCameraPan(dt, panState);
+    }
+    updateSpawner(dt) {
+        const out = advanceDefenseSpawnState({
+            dt,
+            timers: {
+                wave: this.wave,
+                waveActive: this.waveActive,
+                nextWaveDelay: this.nextWaveDelay,
+                spawnRemaining: this.spawnRemaining,
+                spawnCooldown: this.spawnCooldown,
+                currentWaveSpawned: this.currentWaveSpawned,
+                authoredSpawnStates: this.authoredSpawnStates,
+            },
+            enemiesLength: this.enemies.length,
+            defenseEndless: this.defenseEndless,
+            defenseDifficulty: this.defenseDifficulty,
+            waveRules: MAPS[this.defenseMapIndex].waveRules,
+            defenseVictoryAwaitingChoice: this.defenseVictoryAwaitingChoice,
+        });
+        this.wave = out.timers.wave;
+        this.waveActive = out.timers.waveActive;
+        this.nextWaveDelay = out.timers.nextWaveDelay;
+        this.spawnRemaining = out.timers.spawnRemaining;
+        this.spawnCooldown = out.timers.spawnCooldown;
+        this.currentWaveSpawned = out.timers.currentWaveSpawned ?? 0;
+        this.authoredSpawnStates = out.timers.authoredSpawnStates?.map((lane) => ({ ...lane })) ?? [];
+        for (const fx of out.effects) {
+            if (fx.kind === "economyGrant") {
+                this.economy.addMoney(fx.amount);
+            }
+            else if (fx.kind === "toastWaveClearReward") {
+                this.showToast(`\u6ce2\u6b21\u6e05\u7406\u5b8c\u6bd5\uff0c\u5956\u52b1 $${fx.reward}`);
+                this.scheduleWaveCutscene(fx.completedWave);
+            }
+            else if (fx.kind === "toastWaveBegins") {
+                this.showToast(`\u7b2c ${fx.wave} \u6ce2\u5df2\u5f00\u59cb`, true);
+            }
+            else if (fx.kind === "defenseStandardVictoryAwaitChoice") {
+                this.defenseVictoryAwaitingChoice = true;
+                this.syncDefenseVictoryPromptVisibility();
+                this.maybePresentFinalVictory();
+                this.saveGame(false);
+            }
+            else if (fx.kind === "spawnEnemy") {
+                this.spawnEnemy(fx.spawnOrdinal, fx.waveRuleId);
+            }
+        }
+    }
+    /** 播放关卡开场视频（如已配置），期间 cutsceneActive=true 冻结游戏逻辑 */
+    async playIntroVideoCutsceneIfPresent() {
+        const cutscene = this.currentMap().cutscenes?.introVideo;
+        if (!cutscene?.url)
+            return;
+        this.cutsceneActive = true;
+        try {
+            await playCutsceneIfPresent(cutscene);
+        }
+        finally {
+            this.cutsceneActive = false;
+        }
+    }
+    /** 检查并播放指定波次结束后的过场视频 */
+    scheduleWaveCutscene(completedWave) {
+        if (this.cutsceneActive)
+            return;
+        const waveVideos = this.currentMap().cutscenes?.waveVideos;
+        if (!waveVideos?.length)
+            return;
+        const entry = waveVideos.find((wv) => wv.afterWave === completedWave);
+        if (!entry?.url)
+            return;
+        this.cutsceneActive = true;
+        void playCutsceneIfPresent(entry).then(() => {
+            this.cutsceneActive = false;
+        });
+    }
+    /** 探索地图：击倒 AI Boss 后播放配置的胜利过场视频 */
+    scheduleExploreBossVictoryCutscene() {
+        if (this.cutsceneActive)
+            return;
+        const map = EXPLORE_MAPS[this.exploreMapIndex];
+        const cut = map?.cutscenes?.exploreBossVictoryVideo;
+        if (!cut?.url)
+            return;
+        this.cutsceneActive = true;
+        void playCutsceneIfPresent(cut).finally(() => {
+            this.cutsceneActive = false;
+        });
+    }
+    spawnEnemy(spawnOrdinal, waveRuleId) {
+        spawnDefenseWaveEnemy({
+            defenseMapIndex: this.defenseMapIndex,
+            wave: this.wave,
+            spawnOrdinal,
+            waveRuleId,
+            defenseEndless: this.defenseEndless,
+            defenseDifficulty: this.defenseDifficulty,
+            enemies: this.enemies,
+            enemyGroup: this.enemyGroup,
+            allocateUid: () => {
+                const uid = this.nextUid;
+                this.nextUid += 1;
+                return uid;
+            },
+            applyGeoSquash: (mesh) => this.applyGeoPlayfieldSquashCompensation(mesh),
+            syncEnemyHealthBars: (enemy) => this.enemyDefenseVisuals.syncHealthBarVertical(enemy),
+            replaceEnemyVisualMaybe: (enemy) => {
+                void this.enemyDefenseVisuals.replaceBodyWithDefaultGltf(enemy);
+            },
+        });
+    }
+    updateEnemies(dt) {
+        tickDefenseEnemyStatuses({
+            dt,
+            elapsed: this.elapsed,
+            enemies: this.enemies,
+            damageEnemy: (enemy, damage) => this.damageEnemy(enemy, damage),
+        });
+        tickDefenseEnemyWave({
+            dt,
+            elapsed: this.elapsed,
+            enemies: this.enemies,
+            buildings: this.buildings,
+            defensePathWorldPoints: this.defensePathWorldPoints,
+            enemyGroup: this.enemyGroup,
+            buildGroup: this.buildGroup,
+            getBaseHp: () => this.baseHp,
+            setBaseHp: (next) => {
+                this.baseHp = next;
+            },
+            triggerGameOverDefense: () => this.triggerGameOver("defense"),
+            showToast: (m, c) => this.showToast(m, c),
+            spawnSiegeStrikeFx: (e, b) => this.trySiegeStrikeFx(e, b),
+        });
+    }
+    /** 敌人攻城 / 远程 hacker 等 DPS 命中塔顶时的打击射线（宿主侧节流） */
+    trySiegeStrikeFx(enemy, building) {
+        const ud = enemy.mesh.userData;
+        if (this.elapsed - (ud.siegeFxBeamT ?? -999) < 0.125) {
+            return;
+        }
+        ud.siegeFxBeamT = this.elapsed;
+        const from = this.enemyDefenseVisuals.aimWorldCenter(enemy).clone();
+        from.y += 0.06;
+        this.addBeam(from, this.defenseBuildingSiegeRoofWorld(building), 0xff6622);
+    }
+    defenseBuildingSiegeRoofWorld(building) {
+        const visual = building.mesh.children.find(ch => ch !== building.healthBarGroup &&
+            ch !== building.skillHudAnchor &&
+            !ch.userData?.isRangeRing) ?? building.mesh.children[0];
+        building.mesh.updateWorldMatrix(true, true);
+        if (!visual) {
+            const o = new THREE.Vector3();
+            building.mesh.getWorldPosition(o);
+            o.y += 2.35;
+            return o;
+        }
+        const box = new THREE.Box3().setFromObject(visual);
+        if (box.isEmpty()) {
+            const o = new THREE.Vector3();
+            building.mesh.getWorldPosition(o);
+            o.y += 2.35;
+            return o;
+        }
+        return new THREE.Vector3((box.min.x + box.max.x) * 0.5, box.max.y + 0.14, (box.min.z + box.max.z) * 0.5);
+    }
+    updateTowers(dt) {
+        tickTowerDefenseCombat(dt, {
+            buildings: this.buildings,
+            enemies: this.enemies,
+            effects: this.effects,
+            fxGroup: this.fxGroup,
+            elapsed: this.elapsed,
+            aimWorldCenter: (e) => this.enemyDefenseVisuals.aimWorldCenter(e),
+            damageEnemy: (e, d, source, meta) => this.damageEnemy(e, d, source, meta),
+            addBeam: (from, to, color) => this.addBeam(from, to, color),
+            onTowerFired: (b) => playTowerFire(b.spec.id, "defense"),
+        });
+    }
+    updateMines() {
+        tickDefenseMines({
+            buildings: this.buildings,
+            enemies: this.enemies,
+            buildGroup: this.buildGroup,
+            addExplosion: (c, r, col) => this.addExplosion(c, r, col),
+            damageEnemy: (e, d, source, meta) => this.damageEnemy(e, d, source, meta),
+            onMineExploded: (m) => playTowerFire(m.spec.id, "defense"),
+        });
+    }
+    castActiveSkill() {
+        tryCastDefenseActiveSkill({
+            getSelectedBuilding: () => this.selectedBuilding,
+            getElapsed: () => this.elapsed,
+            getEnemies: () => this.enemies,
+            getBuildings: () => this.buildings,
+            addExplosion: (center, radius, color) => this.addExplosion(center, radius, color),
+            addBeam: (from, to, color) => this.addBeam(from, to, color),
+            damageEnemy: (enemy, damage, source, meta) => this.damageEnemy(enemy, damage, source, meta),
+            showToast: (message, critical) => this.showToast(message, critical),
+            refreshUi: () => this.updateUi(),
+        });
+    }
+    damageEnemy(enemy, damage, source, meta) {
+        const finalDamage = resolveDefenseDamage(enemy, damage, source);
+        if (finalDamage > 0 && enemy.hp > 0 && this.mode === "defense") {
+            const w = new THREE.Vector3();
+            enemy.mesh.getWorldPosition(w);
+            this.effectsFacade.spawnDamageFloat(w, finalDamage, { critical: meta?.critical });
+        }
+        applyDefenseEnemyDamage({
+            buildings: this.buildings,
+            enemies: this.enemies,
+            enemyGroup: this.enemyGroup,
+            elapsed: this.elapsed,
+            allocateEnemyUid: () => {
+                const uid = this.nextUid;
+                this.nextUid += 1;
+                return uid;
+            },
+            spawnMoneyDropAt: (position, amount, autoCollect) => this.spawnMoneyDropAt(position, amount, autoCollect),
+            addExplosion: (center, radius, color) => this.addExplosion(center, radius, color),
+            showToast: (message, critical) => this.showToast(message, critical),
+            visuals: this.enemyDefenseVisuals,
+            onEnemyKilled: () => playDefenseEnemyKilled(),
+        }, enemy, finalDamage);
+    }
+    updateExplore(dt) {
+        tickExploreSession({
+            dt,
+            movePlayer: (d) => this.movePlayer(d),
+            drops: this.drops,
+            setDrops: (next) => {
+                this.drops = next;
+            },
+            playerPosition: this.player.position,
+            dropGroup: this.dropGroup,
+            onExploreDropCollect: (drop) => {
+                this.collectAuthoredExplorePickup(drop);
+            },
+            exploreCombatTick: (d) => this.exploreCombat.tick(d),
+            updateExploreHud: () => this.updateExploreHud(),
+            exploreSafeZoneCells: this.exploreSafeZoneCells,
+            wasInSafeZone: this.inSafeZone,
+            setInSafeZone: (v) => {
+                this.inSafeZone = v;
+            },
+            safeZoneShopPanel: this.safeZoneShopPanel,
+            showToast: (message, critical) => this.showToast(message, critical),
+        });
+        this.captureExploreBossProgress();
+        this.maybePresentFinalVictory();
+    }
+    captureExploreBossProgress() {
+        this.defeatedExploreBossIds = this.exploreCombat.getDefeatedBossIds();
+    }
+    hasDefenseVictoryObjectiveCompleted() {
+        return this.defenseStandardVictoryCleared;
+    }
+    hasExploreVictoryObjectiveCompleted() {
+        return this.exploreCombat.allPermanentBossesCleared();
+    }
+    maybePresentFinalVictory() {
+        if (!this.gameStarted || this.paused || this.cutsceneActive)
+            return false;
+        if (this.gameOverActive || this.gameVictoryActive)
+            return false;
+        if (this.homeOverlay.classList.contains("show"))
+            return false;
+        if (!this.hasDefenseVictoryObjectiveCompleted())
+            return false;
+        if (!this.hasExploreVictoryObjectiveCompleted())
+            return false;
+        this.defenseStandardVictoryCleared = true;
+        if (this.defenseVictoryAwaitingChoice) {
+            this.defenseVictoryAwaitingChoice = false;
+            this.syncDefenseVictoryPromptVisibility();
+        }
+        presentVictoryScreen({
+            getVictoryActive: () => this.gameVictoryActive,
+            setVictoryActive: (v) => {
+                this.gameVictoryActive = v;
+            },
+            victoryReasonElement: this.gameVictoryReason,
+            victoryPanel: this.gameVictoryPanel,
+            victoryTitleElement: this.gameVictoryTitle,
+        }, "已守住全部塔防攻势，并击败本图全部 Boss");
+        this.saveGame(false);
+        return true;
+    }
+    syncDefenseVictoryPromptVisibility() {
+        const show = this.defenseVictoryAwaitingChoice && this.mode === "defense";
+        this.defenseVictoryPromptPanel.setAttribute("aria-hidden", show ? "false" : "true");
+    }
+    confirmDefenseEndlessMode() {
+        if (!this.defenseVictoryAwaitingChoice)
+            return;
+        this.defenseVictoryAwaitingChoice = false;
+        this.defenseEndless = true;
+        this.syncDefenseVictoryPromptVisibility();
+        this.wave = DEFENSE_STANDARD_WAVE_COUNT + 1;
+        this.nextWaveDelay = 5;
+        this.waveActive = false;
+        this.spawnRemaining = 0;
+        this.spawnCooldown = 0;
+        this.currentWaveSpawned = 0;
+        this.authoredSpawnStates = [];
+        this.saveGame(false);
+        this.showToast("\u65e0\u5c3d\u6a21\u5f0f\u5df2\u5f00\u542f\uff0c\u6bcf\u6ce2\u589e\u5f3a", true);
+        this.updateUi();
+    }
+    completeDefenseStandardVictory() {
+        if (!this.defenseVictoryAwaitingChoice)
+            return;
+        this.defenseVictoryAwaitingChoice = false;
+        this.defenseStandardVictoryCleared = true;
+        this.syncDefenseVictoryPromptVisibility();
+        if (!this.maybePresentFinalVictory()) {
+            this.showToast("塔防目标已完成，还需击败本图全部 Boss 才能最终胜利", true);
+        }
+        this.saveGame(false);
+    }
+    restartAfterVictory() {
+        this.gameVictoryActive = false;
+        this.gameVictoryPanel.setAttribute("aria-hidden", "true");
+        this.defenseVictoryAwaitingChoice = false;
+        this.syncDefenseVictoryPromptVisibility();
+        this.resetSharedRunStateAfterFailure();
+        this.defenseEndless = false;
+        this.mode = "defense";
+        this.loadDefenseMap(this.defenseMapIndex, true);
+        this.loadExploreMap(this.exploreMapIndex, true, { skipViewRefresh: true });
+        this.saveGame(false);
+        this.showToast("\u5df2\u4ece\u5934\u5f00\u59cb\uff1a\u8d44\u91d1\u3001\u8865\u7ed9\u4e0e\u5854\u9632/\u63a2\u7d22\u8fdb\u5ea6\u5747\u5df2\u91cd\u7f6e", true);
+        this.updateUi();
+    }
+    returnHomeFromVictory() {
+        this.gameVictoryActive = false;
+        this.gameVictoryPanel.setAttribute("aria-hidden", "true");
+        this.defenseVictoryAwaitingChoice = false;
+        this.syncDefenseVictoryPromptVisibility();
+        this.backToSelection();
+    }
+    triggerGameOver(mode) {
+        if (this.gameVictoryActive) {
+            return;
+        }
+        presentGameOverScreen({
+            getGameOverActive: () => this.gameOverActive,
+            setGameOverActive: (v) => {
+                this.gameOverActive = v;
+            },
+            gameOverReasonElement: this.requiredElement("#gameOverReason"),
+            gameOverPanel: this.gameOverPanel,
+            mode,
+        });
+    }
+    /** 塔防与探索共享一局进度；任意模式失败后「重新开始」会重置资金、补给、抽卡与双模式战场状态。 */
+    resetSharedRunStateAfterFailure() {
+        applySharedRunFailureCleanup({
+            getGachaOpen: () => this.gachaOpen,
+            closeGacha: () => this.closeGacha(),
+            economyResetForNewRun: () => this.economy.resetForNewRun(),
+            exploreProgressReset: () => this.exploreProgress.reset(),
+            exploreInventoryReset: () => this.exploreInventory.reset(),
+            exploreCombatResetAfterRunFailure: () => this.exploreCombat.resetAfterRunFailure(),
+            setInventoryOpen: (open) => {
+                this.inventoryOpen = open;
+            },
+            inventoryPanelHide: () => this.inventoryPanel.setAttribute("aria-hidden", "true"),
+            setExploreWalkMode: (walking) => {
+                this.exploreWalkMode = walking;
+            },
+            setElapsedZero: () => {
+                this.elapsed = 0;
+            },
+            resetUid: () => {
+                this.nextUid = 1;
+            },
+            clearSelectedBuilding: () => {
+                this.selectedBuilding = null;
+            },
+            setDropTimerInitial: () => {
+                this.dropTimer = this.resolveCurrentExploreGameplay().moneyDropRespawnIntervalSec;
+            },
+            setSafeZoneFalse: () => {
+                this.inSafeZone = false;
+            },
+            safeZoneShopHide: () => this.safeZoneShopPanel.setAttribute("aria-hidden", "true"),
+            renderInventoryGrid: () => this.renderInventoryGrid(),
+        });
+        this.defenseStandardVictoryCleared = false;
+        this.defeatedExploreBossIds = [];
+    }
+    restartAfterGameOver() {
+        this.gameOverActive = false;
+        this.gameOverPanel.setAttribute("aria-hidden", "true");
+        this.gameVictoryActive = false;
+        this.gameVictoryPanel.setAttribute("aria-hidden", "true");
+        this.defenseVictoryAwaitingChoice = false;
+        this.syncDefenseVictoryPromptVisibility();
+        this.resetSharedRunStateAfterFailure();
+        this.mode = "defense";
+        this.loadDefenseMap(this.defenseMapIndex, true);
+        this.loadExploreMap(this.exploreMapIndex, true, { skipViewRefresh: true });
+        this.saveGame(false);
+        this.showToast("\u5df2\u4ece\u5934\u5f00\u59cb\uff1a\u8d44\u91d1\u3001\u8865\u7ed9\u4e0e\u5854\u9632/\u63a2\u7d22\u8fdb\u5ea6\u5747\u5df2\u91cd\u7f6e", true);
+        this.updateUi();
+    }
+    returnToHomeFromGameOver() {
+        this.gameOverActive = false;
+        this.gameOverPanel.setAttribute("aria-hidden", "true");
+        this.gameVictoryActive = false;
+        this.gameVictoryPanel.setAttribute("aria-hidden", "true");
+        this.defenseVictoryAwaitingChoice = false;
+        this.syncDefenseVictoryPromptVisibility();
+        this.backToSelection();
+    }
+    closeSafeZoneShop() {
+        this.safeZoneShopPanel.setAttribute("aria-hidden", "true");
+    }
+    renderShopItems() {
+        const shop = this.requiredElement("#shopItems");
+        const escapeHtml = (value) => value.replace(/[&<>"']/g, (ch) => ({
+            "&": "&amp;",
+            "<": "&lt;",
+            ">": "&gt;",
+            "\"": "&quot;",
+            "'": "&#39;",
+        }[ch] ?? ch));
+        const healingItems = [
+            { id: "hp-small", icon: "HP", name: "HP 恢复药水", desc: "恢复 50 点生命", cost: 30 },
+            { id: "hp-large", icon: "HP+", name: "HP 强效药水", desc: "恢复 150 点生命", cost: 60 },
+            { id: "max-hp", icon: "MAX", name: "生命强化", desc: "最大 HP +50 并完全回复", cost: 100 },
+            { id: "full-heal", icon: "FULL", name: "完全恢复", desc: "HP 恢复至最大值", cost: 80 },
+        ];
+        const defenseItems = getDefenseConsumables().map((item) => ({
+            id: item.id,
+            icon: item.icon,
+            name: item.name,
+            desc: item.description,
+            cost: item.cost,
+        }));
+        shop.innerHTML = healingItems.concat(defenseItems).map((item) => `
+      <div class="shop-item">
+        <span class="shop-item-icon">${escapeHtml(item.icon)}</span>
+        <div class="shop-item-info">
+          <span class="shop-item-name">${escapeHtml(item.name)}</span>
+          <span class="shop-item-desc">${escapeHtml(item.desc)}</span>
+        </div>
+        <button class="shop-item-buy" data-item="${escapeHtml(item.id)}">$${item.cost}</button>
+      </div>
+    `).join("");
+    }
+    buySafeZoneItem(item) {
+        const costs = {
+            "hp-small": 30,
+            "hp-large": 60,
+            "max-hp": 100,
+            "full-heal": 80,
+        };
+        const defenseItem = getDefenseConsumableById(item);
+        const cost = defenseItem?.cost ?? costs[item] ?? 0;
+        if (!this.economy.trySpend(cost)) {
+            this.showToast("\u8d44\u91d1\u4e0d\u8db3\uff01");
+            return;
+        }
+        if (defenseItem) {
+            this.addInventoryItem({
+                id: `defense-${defenseItem.id}-${Date.now()}`,
+                name: defenseItem.name,
+                quantity: 1,
+                type: "consumable",
+                icon: defenseItem.icon,
+                collectedAt: Date.now(),
+                cleanseStatuses: defenseItem.cleanseStatuses,
+                defenseConsumableId: defenseItem.id,
+            });
+            this.showToast(`已购买 ${defenseItem.name}，可按 I 打开背包使用`);
+            return;
+        }
+        switch (item) {
+            case "hp-small":
+                this.exploreProgress.clampHeal(50);
+                this.showToast("HP +50 \ud83d\udc8a");
+                break;
+            case "hp-large":
+                this.exploreProgress.clampHeal(150);
+                this.showToast("HP +150 \ud83d\udc89");
+                break;
+            case "max-hp":
+                this.exploreProgress.maxHp += 50;
+                this.exploreProgress.hp = this.exploreProgress.maxHp;
+                this.showToast("\u6700\u5927 HP +50\uff0c\u5b8c\u5168\u6062\u590d \u2764\ufe0f");
+                break;
+            case "full-heal":
+                this.exploreProgress.hp = this.exploreProgress.maxHp;
+                this.showToast("\u5b8c\u5168\u6062\u590d \u2728");
+                break;
+        }
+    }
+    addInventoryItem(item) {
+        this.exploreInventory.mergeAdd(item);
+        if (this.inventoryOpen)
+            this.renderInventoryGrid();
+    }
+    toggleInventory() {
+        this.inventoryOpen = !this.inventoryOpen;
+        this.inventoryPanel.setAttribute("aria-hidden", String(!this.inventoryOpen));
+        if (this.inventoryOpen)
+            this.renderInventoryGrid();
+    }
+    renderInventoryGrid() {
+        if (!this.inventoryGrid)
+            return;
+        this.inventoryGrid.innerHTML = buildExploreInventoryGridHtml(this.exploreInventory.getItemsSnapshot());
+        this.inventoryGrid.querySelectorAll(".inventory-item-use").forEach((btn) => {
+            btn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                const idx = Number(btn.dataset.idx);
+                this.useInventoryItem(idx);
+            });
+        });
+    }
+    useInventoryItem(idx) {
+        const result = this.exploreInventory.tryUseItem(idx, this.mode === "defense"
+            ? {
+                defenseCleanse: {
+                    cleanse: (statuses) => cleanseDefenseStatuses({
+                        enemies: this.enemies,
+                        buildings: this.buildings,
+                        statuses,
+                        elapsed: this.elapsed,
+                    }),
+                },
+            }
+            : { healProgress: this.exploreProgress });
+        if (!result.message) {
+            return;
+        }
+        this.showToast(result.message);
+        if (result.consumed) {
+            this.renderInventoryGrid();
+        }
+    }
+    updateExploreHud() {
+        const p = this.exploreProgress;
+        const c = this.exploreCombat;
+        const hpPct = p.maxHp > 0 ? (p.hp / p.maxHp) * 100 : 100;
+        this.exploreHpBar.style.width = `${hpPct}%`;
+        this.exploreHpText.textContent = `${Math.ceil(p.hp)} / ${p.maxHp}`;
+        this.exploreLevelBadge.textContent = String(p.level);
+        const xpPct = p.xpToNext > 0 ? (p.xp / p.xpToNext) * 100 : 0;
+        this.exploreXpBar.style.width = `${xpPct}%`;
+        const atkMax = c.getAttackMaxCooldown();
+        const eMax = c.getSkillEMaxCooldown();
+        const rMax = c.getSkillRMaxCooldown();
+        this.exploreSkillAttackCd.style.height =
+            c.getAttackCooldown() > 0 ? `${(c.getAttackCooldown() / atkMax) * 100}%` : "0%";
+        this.exploreSkillECd.style.height =
+            c.getSkillECooldown() > 0 ? `${(c.getSkillECooldown() / eMax) * 100}%` : "0%";
+        this.exploreSkillRCd.style.height =
+            c.getSkillRCooldown() > 0 ? `${(c.getSkillRCooldown() / rMax) * 100}%` : "0%";
+        this.selectedElement.textContent = `探索属性：${c.getPlayerElementLabel()}（1-5 切换）`;
+    }
+    movePlayer(dt) {
+        const gp = this.resolveCurrentExploreGameplay();
+        const moveIntent = getExploreMoveIntent(this.keys, this.exploreCameraYaw, this.exploreWalkMode, {
+            walk: gp.moveSpeedWalk,
+            run: gp.moveSpeedRun,
+        });
+        if (!moveIntent.isMoving) {
+            this.playerAnimator.fadeTo("idle");
+        }
+        else {
+            this.playerAnimator.fadeTo(moveIntent.isRunning ? "run" : "walk");
+        }
+        this.playerAnimator.update(dt);
+        if (!moveIntent.isMoving) {
+            return;
+        }
+        const next = this.player.position.clone().addScaledVector(moveIntent.worldDirection, -moveIntent.speed * dt);
+        const cell = worldToCell(next);
+        if (!this.isInsideGrid(cell) || this.obstacleCells.has(cellKey(cell))) {
+            return;
+        }
+        this.player.position.copy(next);
+        orientPlayerToMovement(this.player, moveIntent.worldDirection, this.playerExploreTransform);
+    }
+    syncExploreFollowCameraSmoothing() {
+        const s = this.playfieldVisualScale;
+        this.exploreFollowPivotSmoothed.set(this.player.position.x * s, 1.35, this.player.position.z * s);
+        this.exploreCameraYawSmoothed = this.exploreCameraYaw;
+        this.exploreCameraPitchSmoothed = this.exploreCameraPitch;
+    }
+    dampAngleRad(current, target, lambda, dt) {
+        const delta = THREE.MathUtils.euclideanModulo(target - current + Math.PI, Math.PI * 2) - Math.PI;
+        return current + delta * (1 - Math.exp(-lambda * dt));
+    }
+    updateCamera(dt) {
+        if (this.mode === "explore") {
+            this.exploreCameraYawSmoothed = this.dampAngleRad(this.exploreCameraYawSmoothed, this.exploreCameraYaw, 18, dt);
+            const pitchGap = this.exploreCameraPitch - this.exploreCameraPitchSmoothed;
+            this.exploreCameraPitchSmoothed += pitchGap * (1 - Math.exp(-16 * dt));
+            tickExploreFollowCamera({
+                camera: this.camera,
+                playerPosition: this.player.position,
+                playfieldVisualScale: this.playfieldVisualScale,
+                exploreCameraYaw: this.exploreCameraYawSmoothed,
+                exploreCameraPitch: this.exploreCameraPitchSmoothed,
+                exploreCameraDistance: this.exploreCameraDistance,
+                smoothedPivot: this.exploreFollowPivotSmoothed,
+            }, dt);
+            return;
+        }
+        tickDefenseSceneCamera({
+            camera: this.camera,
+            mode: this.mode,
+            cameraMode: this.cameraMode,
+            cameraPan: this.cameraPan,
+            playfieldVisualScale: this.playfieldVisualScale,
+            playfieldYOffset: this.playfieldYOffset,
+            topdownDistance: this.topdownDistance,
+            freeCameraYaw: this.freeCameraYaw,
+            freeCameraPitch: this.freeCameraPitch,
+            freeCameraDistance: this.freeCameraDistance,
+        }, dt);
+    }
+    allocateNextDropUid() {
+        const uid = this.nextUid;
+        this.nextUid += 1;
+        return uid;
+    }
+    spawnPlacedExplorePickups(map) {
+        for (const pickup of map.explorePickups ?? []) {
+            spawnPlacedExplorePickup({
+                drops: this.drops,
+                dropGroup: this.dropGroup,
+                allocateUid: () => this.allocateNextDropUid(),
+                createMesh: (p) => this.createExplorePickupMesh(p),
+            }, pickup);
+        }
+        this.updateDropVisibility();
+    }
+    createExplorePickupMesh(pickup) {
+        if (pickup.type === "money") {
+            const mesh = this.createMoneyDropMesh(Math.round(pickup.moneyAmount ?? 0));
+            mesh.scale.multiplyScalar(pickup.modelScale ?? 1);
+            return mesh;
+        }
+        const group = new THREE.Group();
+        const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.38, 0), new THREE.MeshStandardMaterial({ color: 0x66d7ff, emissive: 0x1d6c99, emissiveIntensity: 0.45, roughness: 0.36 }));
+        core.position.y = 0.38;
+        group.add(core);
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(0.46, 0.035, 8, 20), new THREE.MeshBasicMaterial({ color: 0x9be7ff, transparent: true, opacity: 0.75 }));
+        ring.position.y = 0.38;
+        ring.rotation.x = Math.PI / 2;
+        group.add(ring);
+        group.scale.setScalar(pickup.modelScale ?? 1);
+        this.applyGeoPlayfieldSquashCompensation(group);
+        return group;
+    }
+    collectAuthoredExplorePickup(drop) {
+        const pickup = drop.pickup;
+        if (!pickup || pickup.type === "money") {
+            const amount = Math.round(pickup?.moneyAmount ?? drop.amount);
+            this.economy.grantExploreResourcePickup(amount, 0);
+            this.showToast(`拾取城市算力资金 +$${amount}`);
+            return;
+        }
+        const item = {
+            id: pickup.itemId || `pickup-${pickup.id}-${Date.now()}`,
+            name: pickup.itemName || pickup.name || "AI 记忆碎片",
+            quantity: pickup.quantity ?? 1,
+            type: pickup.itemType ?? "material",
+            icon: pickup.itemIcon || "AI",
+            collectedAt: Date.now(),
+        };
+        this.addInventoryItem(item);
+        this.showToast(`拾取 ${item.icon}${item.name} ×${item.quantity}`);
+    }
+    spawnMoneyDropAt(position, amount, autoCollect) {
+        spawnDefenseMoneyDropAtWorld({
+            drops: this.drops,
+            dropGroup: this.dropGroup,
+            allocateUid: () => this.allocateNextDropUid(),
+            createMesh: (amt) => this.createMoneyDropMesh(amt),
+        }, position, amount, autoCollect);
+        this.updateDropVisibility();
+    }
+    createMoneyDropMesh(amount) {
+        const mesh = createRenderedMoneyDropMesh({
+            amount,
+            customDropModel: this.modelCustomization.customDropModel,
+            getClampedUserScale: (target) => this.modelCustomization.getClampedScale(target),
+        });
+        this.applyGeoPlayfieldSquashCompensation(mesh);
+        return mesh;
+    }
+    updateDrops(dt) {
+        this.drops = updateAutoCollectDrops({
+            drops: this.drops,
+            mode: this.mode,
+            elapsed: this.elapsed,
+            dt,
+            dropGroup: this.dropGroup,
+            onCollect: (amount) => {
+                this.economy.addMoney(Math.round(amount));
+                this.showToast(`\u51fb\u6740\u6389\u843d +$${amount}`);
+            },
+        });
+    }
+    updateDropVisibility() {
+        updateMoneyDropVisibility(this.drops, this.mode);
+    }
+    addBeam(from, to, color) {
+        if (this.mode !== "defense")
+            return;
+        this.effectsFacade.addBeam(from, to, color);
+    }
+    addAuroraLaser(from, to) {
+        if (this.mode !== "defense")
+            return;
+        this.effectsFacade.addAuroraLaser(from, to);
+    }
+    addExplosion(center, radius, color) {
+        if (this.mode !== "defense")
+            return;
+        this.effectsFacade.addExplosion(center, radius, color);
+    }
+    updateEffects(dt) {
+        this.effectsFacade.tick(dt);
+    }
+    updateToast(dt) {
+        this.toasts.tick(dt);
+    }
+    togglePause() {
+        if (this.homeOverlay.classList.contains("show") || this.gachaOpen) {
+            return;
+        }
+        this.paused = !this.paused;
+        this.pausePanel.classList.toggle("show", this.paused);
+        if (this.paused) {
+            this.reflectDefenseDifficultySliders(this.defenseDifficulty);
+            this.showToast("\u6e38\u620f\u5df2\u6682\u505c");
+        }
+    }
+    openGacha() {
+        this.gachaPresenter.open();
+    }
+    closeGacha() {
+        this.gachaPresenter.close();
+    }
+    drawGacha(requestedCount) {
+        this.gachaPresenter.draw(requestedCount);
+    }
+    showToast(message, critical = false, topBarHoldSeconds) {
+        this.toasts.show(message, critical, topBarHoldSeconds);
+    }
+    wireDefenseDifficultyControls() {
+        const slide = (event) => {
+            this.applyDefenseDifficultyFromSliders(event.target);
+        };
+        this.defenseDifficultyHome.addEventListener("input", slide);
+        this.defenseDifficultyPause.addEventListener("input", slide);
+        this.reflectDefenseDifficultySliders(this.defenseDifficulty);
+    }
+    reflectDefenseDifficultySliders(tier) {
+        const s = String(tier);
+        if (this.defenseDifficultyHome.value !== s) {
+            this.defenseDifficultyHome.value = s;
+        }
+        if (this.defenseDifficultyPause.value !== s) {
+            this.defenseDifficultyPause.value = s;
+        }
+        this.defenseDifficultyHome.setAttribute("aria-valuenow", s);
+        this.defenseDifficultyPause.setAttribute("aria-valuenow", s);
+        const hud = formatDefenseDifficultyHud(tier);
+        this.defenseDifficultyHomeHint.textContent = hud;
+        this.defenseDifficultyPauseHint.textContent = hud;
+    }
+    /**
+     * 仅更新运行时数值与 UI，不重载棋盘/场景；
+     * 已存在于场上的敌人沿用生成时的血量与攻城参数。
+     */
+    applyDefenseDifficultyFromSliders(source) {
+        const tier = clampDefenseDifficulty(Number(source.value));
+        const changed = tier !== this.defenseDifficulty;
+        this.defenseDifficulty = tier;
+        this.reflectDefenseDifficultySliders(tier);
+        /** 仅在玩家拉动难度条且档位变化时弹出；与其它流程（开局/暂停文案等）区分开 */
+        if (changed && this.gameStarted) {
+            this.showToast(`\u5854\u9632\u96be\u5ea6 ${formatDefenseDifficultyHud(tier)}\uff1a\u5df2\u51fa\u573a\u654c\u4eba\u4e0d\u53d8\uff1b\u4ece\u6b64\u523b\u8d77\u5237\u65b0\u7684\u5c0f\u602a\u4e0e\u5c1a\u672a\u5f00\u59cb\u7684\u65b0\u6ce2\u968f\u4e4b\u589e\u5f31\u3002`, true, 3);
+            this.saveGame(false);
+        }
+        this.updateUi();
+    }
+    updateUi() {
+        const map = this.currentMap();
+        refreshGameplayHud({
+            modeElement: this.modeElement,
+            moneyElement: this.moneyElement,
+            cameraModeElement: this.cameraElement,
+            baseHpElement: this.baseElement,
+            waveElement: this.waveElement,
+            exploreWaveElement: this.exploreWaveElement,
+            mapNameElement: this.mapElement,
+            dropHudElement: this.dropElement,
+            selectedBuildSummaryElement: this.selectedElement,
+            gachaPullsElement: this.gachaPullsElement,
+            gachaPityElement: this.gachaPityElement,
+            gachaUnlockElement: this.gachaUnlockElement,
+            selectedUnitPanel: this.selectedUnitPanel,
+            selectedUnitName: this.selectedUnitName,
+            selectedUnitStats: this.selectedUnitStats,
+            activeSkillMeta: this.activeSkillMeta,
+            activeSkillButton: this.activeSkillButton,
+        }, {
+            mode: this.mode,
+            cameraMode: this.cameraMode,
+            economy: this.economy,
+            baseHp: this.baseHp,
+            wave: this.wave,
+            waveActive: this.waveActive,
+            nextWaveDelay: this.nextWaveDelay,
+            spawnRemaining: this.spawnRemaining,
+            enemiesAlive: this.enemies.length,
+            exploreWaveMode: this.exploreCombat.isWaveMode(),
+            exploreWave: this.exploreCombat.getWaveNumber(),
+            exploreWaveActive: this.exploreCombat.getWaveTimers().waveActive,
+            exploreNextWaveDelay: this.exploreCombat.getWaveTimers().nextWaveDelay,
+            exploreSpawnRemaining: this.exploreCombat.getWaveTimers().spawnRemaining,
+            exploreEnemiesAlive: this.exploreCombat.getAliveEnemyCount(),
+            exploreAllWavesCleared: this.exploreCombat.isAllWavesCleared(),
+            activeMapLabel: map.name,
+            dropTimerRemaining: this.dropTimer,
+            selectedBuild: this.selectedBuild,
+            selectedGachaPool: this.selectedGachaPool,
+            selectedBuilding: this.selectedBuilding,
+            currentCityCode: this.currentCity,
+            currentMapId: map.id,
+            buildings: this.buildings,
+            defenseTowerNameOverrides: this.mode === "defense" ? map.defenseFlavor?.towerNames : undefined,
+            defenseVictoryAwaitingChoice: this.defenseVictoryAwaitingChoice,
+            defenseEndless: this.defenseEndless,
+            defenseDifficultyTier: this.defenseDifficulty,
+        });
+        if (this.gachaOpen) {
+            this.gachaPresenter.updatePoolDisplay();
+        }
+        refreshMapButtonsActiveState(this.activeMapIndex());
+        refreshBuildCardModelFlags(this.modelCustomization.customModels);
+    }
+    activeMapIndex() {
+        return this.mode === "explore" ? this.exploreMapIndex : this.defenseMapIndex;
+    }
+    currentMapList() {
+        return this.mode === "explore" ? EXPLORE_MAPS : MAPS;
+    }
+    currentMap() {
+        return this.currentMapList()[this.activeMapIndex()];
+    }
+    isInsideGrid(cell) {
+        return cell.col >= 0 && cell.col < getActiveGridCols() && cell.row >= 0 && cell.row < getActiveGridRows();
+    }
+    isBuildBlocked(cell) {
+        const key = cellKey(cell);
+        return this.obstacleCells.has(key) || this.pathCells.has(key);
+    }
+    clearGroup(group) {
+        clearSceneGroup(group);
+    }
+}

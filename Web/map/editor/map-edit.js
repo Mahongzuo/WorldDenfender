@@ -327,32 +327,42 @@ export function moveMarker(env, kind, id, col, row) {
 export function eraseCellAt(env, col, row) {
     var level = env.getLevel();
     if (!level) return;
-    var layout = ensureExplorationLayout(level.map);
     var c = Number(col);
     var r = Number(row);
-    removeCell(layout.path, c, r);
-    removeCell(layout.obstacles, c, r);
-    if (Array.isArray(layout.safeZones)) removeCell(layout.safeZones, c, r);
-    if (layout.startPoint && Number(layout.startPoint.col) === c && Number(layout.startPoint.row) === r) layout.startPoint = null;
-    if (layout.exitPoint && Number(layout.exitPoint.col) === c && Number(layout.exitPoint.row) === r) layout.exitPoint = null;
+    var mode = env.getActiveEditorMode();
 
-    removeCell(level.map.roads, c, r);
-    removeCell(level.map.obstacles, c, r);
-    removeCell(level.map.buildSlots, c, r);
-    if (!Array.isArray(level.map.enemyPaths)) level.map.enemyPaths = [];
-    level.map.enemyPaths.forEach(function (path) {
-        removeCell(path.cells, c, r);
-    });
-    level.map.spawnPoints = level.map.spawnPoints.filter(notAtCell(c, r));
-    if (level.map.objectivePoint && Number(level.map.objectivePoint.col) === c && Number(level.map.objectivePoint.row) === r) {
-        level.map.objectivePoint = null;
+    if (mode === 'explore') {
+        // 仅擦除探索模式数据
+        var layout = ensureExplorationLayout(level.map);
+        removeCell(layout.path, c, r);
+        removeCell(layout.obstacles, c, r);
+        if (Array.isArray(layout.safeZones)) removeCell(layout.safeZones, c, r);
+        if (layout.startPoint && Number(layout.startPoint.col) === c && Number(layout.startPoint.row) === r) layout.startPoint = null;
+        if (layout.exitPoint && Number(layout.exitPoint.col) === c && Number(layout.exitPoint.row) === r) layout.exitPoint = null;
+        level.map.explorationPoints = level.map.explorationPoints.filter(notAtCell(c, r));
+        if (Array.isArray(level.map.exploreBosses)) level.map.exploreBosses = level.map.exploreBosses.filter(notAtCell(c, r));
+        if (Array.isArray(level.map.exploreSpawners)) level.map.exploreSpawners = level.map.exploreSpawners.filter(notAtCell(c, r));
+        if (Array.isArray(level.map.explorePickups)) level.map.explorePickups = level.map.explorePickups.filter(notAtCell(c, r));
+    } else {
+        // 仅擦除塔防模式数据
+        removeCell(level.map.roads, c, r);
+        removeCell(level.map.obstacles, c, r);
+        removeCell(level.map.buildSlots, c, r);
+        if (!Array.isArray(level.map.enemyPaths)) level.map.enemyPaths = [];
+        level.map.enemyPaths.forEach(function (path) {
+            removeCell(path.cells, c, r);
+        });
+        var spawnsBefore = level.map.spawnPoints.length;
+        level.map.spawnPoints = level.map.spawnPoints.filter(notAtCell(c, r));
+        var objectiveErased = !!(level.map.objectivePoint && Number(level.map.objectivePoint.col) === c && Number(level.map.objectivePoint.row) === r);
+        if (objectiveErased) level.map.objectivePoint = null;
+        if (spawnsBefore !== level.map.spawnPoints.length || objectiveErased) {
+            rebuildAutoDefensePaths(level);
+        }
     }
 
-    level.map.explorationPoints = level.map.explorationPoints.filter(notAtCell(c, r));
+    // 共享层（actors、terrain）：两种模式都擦除
     level.map.actors = level.map.actors.filter(notAtCell(c, r));
-    if (Array.isArray(level.map.exploreBosses)) level.map.exploreBosses = level.map.exploreBosses.filter(notAtCell(c, r));
-    if (Array.isArray(level.map.exploreSpawners)) level.map.exploreSpawners = level.map.exploreSpawners.filter(notAtCell(c, r));
-    if (Array.isArray(level.map.explorePickups)) level.map.explorePickups = level.map.explorePickups.filter(notAtCell(c, r));
     if (Array.isArray(level.map.terrain)) removeCell(level.map.terrain, c, r);
 }
 

@@ -284,18 +284,26 @@ function orderedPathWorldPoints(
   return chain.map((c) => cellToWorld(c));
 }
 
-function resolveEnemyPath(map: MapDefinition, rule: DefenseWaveRule | undefined): {
+function resolveEnemyPath(
+  map: MapDefinition,
+  rule: DefenseWaveRule | undefined,
+  spawnOrdinal?: number,
+): {
   enemyType?: EnemyType;
   enemyTypeId?: string;
   worldPoints: THREE.Vector3[];
 } {
+  const fallbackSpawn = map.spawnPoints?.length
+    ? map.spawnPoints[Math.abs(Math.round(Number(spawnOrdinal) || 0)) % map.spawnPoints.length]
+    : undefined;
   const spawnById = rule?.spawnPointId
     ? map.spawnPoints?.find((point) => point.id === rule.spawnPointId)
     : undefined;
-  const pathId = rule?.pathId || spawnById?.pathId;
   const spawn = spawnById
-    ?? (pathId ? map.spawnPoints?.find((point) => point.pathId === pathId) : undefined)
+    ?? (rule?.pathId ? map.spawnPoints?.find((point) => point.pathId === rule.pathId) : undefined)
+    ?? fallbackSpawn
     ?? map.spawnPoints?.[0];
+  const pathId = rule?.pathId || spawn?.pathId;
   const path = pathId
     ? map.enemyPaths?.find((candidate: DefenseEnemyPath) => candidate.id === pathId && candidate.cells.length)
     : undefined;
@@ -351,7 +359,7 @@ export function spawnDefenseWaveEnemy(deps: SpawnDefenseEnemyDeps): void {
   const activeRule = deps.waveRuleId
     ? rules.find((rule) => rule.id === deps.waveRuleId)
     : selectDefenseWaveRuleForOrdinal(rules, deps.spawnOrdinal ?? 0);
-  const resolvedPath = resolveEnemyPath(map, activeRule);
+  const resolvedPath = resolveEnemyPath(map, activeRule, deps.spawnOrdinal);
   const authoredEnemyConfig = findDefenseEnemyConfig(map, resolvedPath.enemyTypeId);
   const resolvedEnemyType =
     resolvedPath.enemyType || sanitizeEnemyTypeId(authoredEnemyConfig?.id) || sanitizeEnemyTypeId(authoredEnemyConfig?.name) || "basic";

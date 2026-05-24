@@ -1,0 +1,93 @@
+import { cellToWorld, sameCell, worldToCell } from "../core/runtime-grid";
+import { applyEnemySiegeAgainstBuildings } from "./defense-enemy-siege";
+function defenseBuildingBlockLimit(building, elapsed) {
+    const base = building.spec.maxBlockCount ?? 1;
+    return (building.bonusBlockUntil ?? 0) > elapsed ? base + 1 : base;
+}
+function defenseDemolishBuilding(building, enemies, buildGroup, buildings) {
+    buildGroup.remove(building.mesh);
+    const idx = buildings.indexOf(building);
+    if (idx >= 0)
+        buildings.splice(idx, 1);
+    for (const enemy of enemies) {
+        if (enemy.blockedBy === building) {
+            enemy.blockedBy = null;
+        }
+    }
+}
+/** 近战阻挡寻路、沿路推进、Leak 基地血量 */
+export function tickDefenseEnemyWave(deps) {
+    const { dt, elapsed, enemies, buildings, defensePathWorldPoints, enemyGroup, buildGroup, getBaseHp, setBaseHp, triggerGameOverDefense, showToast, spawnSiegeStrikeFx, } = deps;
+    const runDemolish = (b) => defenseDemolishBuilding(b, enemies, buildGroup, buildings);
+    const tryBlockEnemy = (enemy) => {
+        if (enemy.blockedBy) {
+            return true;
+        }
+        const currentCell = worldToCell(enemy.mesh.position);
+        const blocker = buildings.find((building) => building.spec.role === "melee" &&
+            sameCell(building.cell, currentCell) &&
+            building.blockingEnemies.length < defenseBuildingBlockLimit(building, elapsed));
+        if (!blocker) {
+            return false;
+        }
+        enemy.blockedBy = blocker;
+        blocker.blockingEnemies.push(enemy);
+        enemy.mesh.position.copy(cellToWorld(blocker.cell));
+        showToast(`${blocker.spec.name} \u963b\u6321\u4e86\u654c\u4eba`);
+        return true;
+    };
+    for (const enemy of [...enemies]) {
+        const pathWorldPoints = enemy.pathWorldPoints?.length ? enemy.pathWorldPoints : defensePathWorldPoints;
+        if (enemy.stunUntil > elapsed) {
+            continue;
+        }
+        const speed = enemy.speed * (elapsed < enemy.slowUntil ? enemy.slowFactor : 1);
+        let distance = speed * dt;
+        if (enemy.blockedBy) {
+            if (enemy.blockedBy.hp <= 0) {
+                enemy.blockedBy = null;
+            }
+            else {
+                applyEnemySiegeAgainstBuildings(enemy, buildings, dt, elapsed, runDemolish, spawnSiegeStrikeFx);
+                continue;
+            }
+        }
+        if (tryBlockEnemy(enemy)) {
+            continue;
+        }
+        while (distance > 0 && enemy.segment < pathWorldPoints.length - 1) {
+            const target = pathWorldPoints[enemy.segment + 1];
+            const current = enemy.mesh.position;
+            const dx = target.x - current.x;
+            const dz = target.z - current.z;
+            const segmentDistance = Math.hypot(dx, dz);
+            if (segmentDistance <= distance) {
+                enemy.mesh.rotation.y = Math.atan2(dx, dz);
+                current.set(target.x, 0, target.z);
+                enemy.segment += 1;
+                distance -= segmentDistance;
+            }
+            else {
+                enemy.mesh.rotation.y = Math.atan2(dx, dz);
+                current.x += (dx / segmentDistance) * distance;
+                current.z += (dz / segmentDistance) * distance;
+                distance = 0;
+            }
+        }
+        tryBlockEnemy(enemy);
+        if (enemy.segment >= pathWorldPoints.length - 1) {
+            enemyGroup.remove(enemy.mesh);
+            const idxLeak = enemies.indexOf(enemy);
+            if (idxLeak >= 0)
+                enemies.splice(idxLeak, 1);
+            setBaseHp(getBaseHp() - 1);
+            showToast("\u654c\u4eba\u7a81\u7834\u9632\u7ebf\uff0c\u57fa\u5730\u751f\u547d -1");
+            if (getBaseHp() <= 0) {
+                triggerGameOverDefense();
+                return;
+            }
+            continue;
+        }
+        applyEnemySiegeAgainstBuildings(enemy, buildings, dt, elapsed, runDemolish, spawnSiegeStrikeFx);
+    }
+}

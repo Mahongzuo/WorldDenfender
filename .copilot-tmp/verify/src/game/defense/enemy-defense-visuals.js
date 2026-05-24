@@ -1,0 +1,192 @@
+import * as THREE from "three";
+import { clone as skeletonClone } from "three/examples/jsm/utils/SkeletonUtils.js";
+import { getDefaultEnemyGlbUrl, getEnemyTargetBodyDiameter, resolveEnemyModelUserScale, } from "../assets/enemy-default-models";
+import { clamp } from "../core/runtime-grid";
+export class EnemyDefenseVisuals {
+    constructor(deps) {
+        Object.defineProperty(this, "deps", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: deps
+        });
+    }
+    pickAutoplayClip(clips) {
+        if (!clips.length) {
+            return null;
+        }
+        const preferred = ["move", "walk", "run", "idle", "attack"];
+        for (const token of preferred) {
+            const matched = clips.find((clip) => clip.name.toLowerCase().includes(token));
+            if (matched) {
+                return matched;
+            }
+        }
+        return clips[0] ?? null;
+    }
+    bindAutoplayAnimation(enemy, root, clips) {
+        enemy.animationMixer?.stopAllAction();
+        enemy.animationMixer = undefined;
+        const clip = this.pickAutoplayClip(clips);
+        if (!clip) {
+            return;
+        }
+        const mixer = new THREE.AnimationMixer(root);
+        const action = mixer.clipAction(clip);
+        action.reset();
+        action.setLoop(THREE.LoopRepeat, Infinity);
+        action.play();
+        enemy.animationMixer = mixer;
+    }
+    healthBarHalfWidth(enemy) {
+        enemy.healthBar.geometry.computeBoundingBox();
+        const box = enemy.healthBar.geometry.boundingBox;
+        return box ? Math.max(0.01, (box.max.x - box.min.x) * 0.5) : 0.59;
+    }
+    applyHealthBarScale(enemy) {
+        const scale = this.deps.hudScale();
+        const ratio = clamp(enemy.hp / enemy.maxHp, 0, 1);
+        const halfWidth = this.healthBarHalfWidth(enemy);
+        const barRoot = enemy.mesh.children.find((ch) => ch.userData.isEnemyHealthBarRoot);
+        const healthBarBack = barRoot?.children.find((ch) => ch !== enemy.healthBar && ch.userData.isEnemyHealthBar) ??
+            enemy.mesh.children.find((ch) => ch !== enemy.healthBar && ch.userData.isEnemyHealthBar && !ch.userData.isEnemyHealthBarRoot);
+        healthBarBack?.scale.set(scale, scale, 1);
+        enemy.healthBar.scale.set(scale * Math.max(0.02, ratio), scale, 1);
+        enemy.healthBar.position.x = -(1 - ratio) * halfWidth * scale;
+        enemy.healthBar.position.z = 0.02;
+    }
+    /** 根据除血条外的子物体包围盒，将血条移到模型顶缘上方 */
+    syncHealthBarVertical(enemy) {
+        enemy.mesh.updateMatrixWorld(true);
+        const bar = enemy.healthBar;
+        const box = new THREE.Box3();
+        for (const ch of enemy.mesh.children) {
+            if (!ch.userData.isEnemyHealthBar) {
+                box.expandByObject(ch);
+            }
+        }
+        if (box.isEmpty()) {
+            return;
+        }
+        const cx = (box.min.x + box.max.x) * 0.5;
+        const cz = (box.min.z + box.max.z) * 0.5;
+        const worldTop = new THREE.Vector3(cx, box.max.y + 0.24 * this.deps.hudScale(), cz);
+        const localTop = enemy.mesh.worldToLocal(worldTop.clone());
+        const barRoot = enemy.mesh.children.find((ch) => ch.userData.isEnemyHealthBarRoot);
+        if (barRoot) {
+            barRoot.position.set(0, localTop.y, 0);
+            bar.position.y = 0;
+        }
+        else {
+            bar.position.y = localTop.y;
+        }
+        for (const ch of enemy.mesh.children) {
+            if (ch.userData.isEnemyHealthBar && ch !== bar && !ch.userData.isEnemyHealthBarRoot) {
+                ch.position.set(0, localTop.y, 0);
+            }
+        }
+        this.applyHealthBarScale(enemy);
+    }
+    /** 塔开火瞄准：敌人包围盒中心 */
+    aimWorldCenter(enemy) {
+        enemy.mesh.updateMatrixWorld(true);
+        const box = new THREE.Box3();
+        for (const ch of enemy.mesh.children) {
+            if (!ch.userData.isEnemyHealthBar) {
+                box.expandByObject(ch);
+            }
+        }
+        if (box.isEmpty()) {
+            const p = enemy.mesh.position.clone();
+            p.y += 0.72;
+            return p;
+        }
+        return new THREE.Vector3((box.min.x + box.max.x) * 0.5, (box.min.y + box.max.y) * 0.52, (box.min.z + box.max.z) * 0.5);
+    }
+    async replaceBodyWithDefaultGltf(enemy) {
+        const url = enemy.modelPath?.trim() || getDefaultEnemyGlbUrl(enemy.type);
+        if (!url) {
+            return;
+        }
+        try {
+            let template = this.deps.templateByUrl.get(url);
+            if (!template) {
+                const gltf = await new Promise((resolve, reject) => {
+                    this.deps.gltfLoader.load(url, resolve, undefined, reject);
+                });
+                template = {
+                    scene: gltf.scene,
+                    animations: gltf.animations ?? [],
+                };
+                this.deps.templateByUrl.set(url, template);
+            }
+            if (!this.deps.enemies().includes(enemy)) {
+                return;
+            }
+            const root = skeletonClone(template.scene);
+            root.traverse((obj) => {
+                if (obj instanceof THREE.Mesh) {
+                    obj.castShadow = true;
+                    obj.receiveShadow = true;
+                }
+            });
+            for (const ch of [...enemy.mesh.children]) {
+                if (!ch.userData.isEnemyHealthBar) {
+                    enemy.mesh.remove(ch);
+                }
+            }
+            root.position.set(0, 0, 0);
+            root.rotation.set(0, 0, 0);
+            root.scale.set(1, 1, 1);
+            root.updateMatrixWorld(true);
+            const boxBefore = new THREE.Box3().setFromObject(root, true);
+            const targetDiameter = getEnemyTargetBodyDiameter(enemy);
+            const sizeBefore = boxBefore.getSize(new THREE.Vector3());
+            const horizontal = Math.max(sizeBefore.x, sizeBefore.z, 0.001);
+            let uniform = targetDiameter / horizontal;
+            if (!Number.isFinite(uniform) || uniform <= 0) {
+                uniform = 1;
+            }
+            else if (uniform > 10) {
+                console.warn("[EnemyModel] uniform scale 异常:", uniform.toFixed(2), "size=", sizeBefore.x.toFixed(2), sizeBefore.y.toFixed(2), sizeBefore.z.toFixed(2));
+                uniform = 1;
+            }
+            const userScale = resolveEnemyModelUserScale(enemy);
+            root.scale.setScalar(uniform * userScale);
+            root.updateMatrixWorld(true);
+            const boxAfter = new THREE.Box3().setFromObject(root, true);
+            root.position.y = -boxAfter.min.y;
+            enemy.mesh.add(root);
+            this.bindAutoplayAnimation(enemy, root, template.animations);
+            this.deps.applyGeoPlayfieldSquashCompensation(enemy.mesh);
+            this.syncHealthBarVertical(enemy);
+        }
+        catch (error) {
+            console.warn("[EnemyModel] failed to load default GLB:", url, error);
+            if (this.deps.enemies().includes(enemy)) {
+                this.deps.applyGeoPlayfieldSquashCompensation(enemy.mesh);
+                this.syncHealthBarVertical(enemy);
+            }
+        }
+    }
+    tickEnemyHuds(enemies) {
+        const orient = this.deps.orientHudToCamera;
+        for (const enemy of enemies) {
+            this.applyHealthBarScale(enemy);
+            let rotatedRoot = false;
+            for (const child of enemy.mesh.children) {
+                if (child.userData.isEnemyHealthBarRoot) {
+                    orient(child);
+                    rotatedRoot = true;
+                }
+            }
+            if (!rotatedRoot) {
+                for (const child of enemy.mesh.children) {
+                    if (child.userData.isEnemyHealthBar) {
+                        orient(child);
+                    }
+                }
+            }
+        }
+    }
+}
