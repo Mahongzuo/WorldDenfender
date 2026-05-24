@@ -327,11 +327,67 @@ button { color: inherit; font: inherit; }
 .top-panel {
   top: 14px;
   left: 14px;
-  min-width: 720px;
+  right: 14px;
+  max-width: 1200px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 18px;
+}
+
+.top-row {
   display: flex;
   align-items: center;
-  gap: 28px;
-  padding: 14px 28px;
+  flex-wrap: wrap;
+  gap: 16px;
+  min-width: 0;
+}
+
+.top-row--info {
+  gap: 20px;
+  row-gap: 6px;
+}
+
+.top-row--waves {
+  gap: 0;
+  border-top: 1px solid rgba(0,0,0,0.06);
+  padding-top: 6px;
+}
+
+.wave-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 160px;
+}
+
+.wave-status__label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
+.wave-status strong {
+  font-size: 13px;
+  color: var(--ink);
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wave-status--defense .wave-status__label { color: #c44; }
+.wave-status--explore .wave-status__label { color: #358; }
+
+.wave-status-divider {
+  width: 1px;
+  height: 28px;
+  background: rgba(0,0,0,0.12);
+  flex-shrink: 0;
+  margin: 0 16px;
 }
 
 .top-panel-spacer {
@@ -1895,7 +1951,7 @@ button { color: inherit; font: inherit; }
     --hud-right-inset: 14px;
   }
   .right-panel { display: none; }
-  .top-panel { grid-template-columns: repeat(2, auto); min-width: auto; }
+  .top-panel { right: 14px; max-width: none; }
   .toolbar { left: 88px; bottom: 14px; }
   .phone-dock { left: 12px; }
   .terminal-help-tab,
@@ -2007,6 +2063,17 @@ html[data-theme="dark"] .home-geo-mapping-panel__thumb {
   background: linear-gradient(180deg, #3a414a, #252a32);
   border-color: rgba(160, 168, 180, 0.35);
 }
+
+html[data-theme="dark"] .top-row--waves {
+  border-top-color: rgba(255, 255, 255, 0.08);
+}
+
+html[data-theme="dark"] .wave-status-divider {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+html[data-theme="dark"] .wave-status--defense .wave-status__label { color: #f88; }
+html[data-theme="dark"] .wave-status--explore .wave-status__label { color: #7af; }
 
 html[data-theme="dark"] .top-panel-geo-pill {
   border-color: rgba(196, 160, 96, 0.5);

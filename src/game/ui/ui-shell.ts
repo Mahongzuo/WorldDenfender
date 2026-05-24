@@ -9,6 +9,7 @@ export interface GameUiShellRefs {
   moneyElement: HTMLElement;
   baseElement: HTMLElement;
   waveElement: HTMLElement;
+  exploreWaveElement: HTMLElement;
   mapElement: HTMLElement;
   dropElement: HTMLElement;
   selectedElement: HTMLElement;
@@ -106,23 +107,37 @@ export function renderGameUiShell(app: HTMLElement, requiredElement: RequiredEle
           </div>
         </section>
         <section class="panel top-panel">
-          <div class="stat"><span>模式 / TAB</span><strong id="modeValue" class="mode-badge">塔防模式</strong></div>
-          <div class="stat"><span>金钱</span><strong id="moneyValue">$0</strong></div>
-          <div class="stat"><span>镜头 / Z</span><strong id="cameraValue">战术俯视</strong></div>
-          <div class="stat"><span>基地生命</span><strong id="baseValue">0</strong></div>
-          <div class="stat"><span>波次</span><strong id="waveValue">1</strong></div>
-          <div class="stat"><span>地图</span><strong id="mapValue">-</strong></div>
-          <div class="stat"><span>探索掉落</span><strong id="dropValue">切到探索</strong></div>
-          <div class="top-panel-spacer" aria-hidden="true"></div>
-          <label class="top-panel-geo-pill" title="开启后加载 Cesium 实景底板（需 token）；关闭为本地棋盘">
-            <span class="top-panel-geo-pill__label">地理映射</span>
-            <span class="top-panel-geo-pill__switch">
-              <input type="checkbox" id="topGeoMappingToggle" />
-              <span class="top-panel-geo-pill__track" aria-hidden="true"><span class="top-panel-geo-pill__thumb"></span></span>
-            </span>
-          </label>
-          <button type="button" class="theme-chip" id="levelEditorButton">编辑关卡</button>
-          <button type="button" class="theme-chip" id="uiThemeToggleTop">深色模式</button>
+          <!-- 第一排：基本信息 -->
+          <div class="top-row top-row--info">
+            <div class="stat"><span>模式 / TAB</span><strong id="modeValue" class="mode-badge">塔防模式</strong></div>
+            <div class="stat"><span>金钱</span><strong id="moneyValue">$0</strong></div>
+            <div class="stat"><span>基地生命</span><strong id="baseValue">0</strong></div>
+            <div class="stat"><span>镜头 / Z</span><strong id="cameraValue">战术俯视</strong></div>
+            <div class="stat"><span>地图</span><strong id="mapValue">-</strong></div>
+            <div class="stat"><span>探索掉落</span><strong id="dropValue">切到探索</strong></div>
+            <div class="top-panel-spacer" aria-hidden="true"></div>
+            <label class="top-panel-geo-pill" title="开启后加载 Cesium 实景底板（需 token）；关闭为本地棋盘">
+              <span class="top-panel-geo-pill__label">地理映射</span>
+              <span class="top-panel-geo-pill__switch">
+                <input type="checkbox" id="topGeoMappingToggle" />
+                <span class="top-panel-geo-pill__track" aria-hidden="true"><span class="top-panel-geo-pill__thumb"></span></span>
+              </span>
+            </label>
+            <button type="button" class="theme-chip" id="levelEditorButton">编辑关卡</button>
+            <button type="button" class="theme-chip" id="uiThemeToggleTop">浅色模式</button>
+          </div>
+          <!-- 第二排：双模式波次状态 -->
+          <div class="top-row top-row--waves">
+            <div class="wave-status wave-status--defense">
+              <span class="wave-status__label">🏰 塔防战线</span>
+              <strong id="waveValue">第 1 波</strong>
+            </div>
+            <div class="wave-status-divider" aria-hidden="true"></div>
+            <div class="wave-status wave-status--explore">
+              <span class="wave-status__label">⚔️ 探索肉鸽</span>
+              <strong id="exploreWaveValue">准备中</strong>
+            </div>
+          </div>
         </section>
         <nav class="phone-dock">
           <button class="dock-button" id="homeButton">首页<br />菜单</button>
@@ -305,6 +320,7 @@ export function renderGameUiShell(app: HTMLElement, requiredElement: RequiredEle
     moneyElement: requiredElement("#moneyValue"),
     baseElement: requiredElement("#baseValue"),
     waveElement: requiredElement("#waveValue"),
+    exploreWaveElement: requiredElement("#exploreWaveValue"),
     mapElement: requiredElement("#mapValue"),
     dropElement: requiredElement("#dropValue"),
     selectedElement: requiredElement("#selectedValue"),

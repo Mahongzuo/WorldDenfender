@@ -16,6 +16,7 @@ export interface GameplayHudDom {
   cameraModeElement: HTMLElement;
   baseHpElement: HTMLElement;
   waveElement: HTMLElement;
+  exploreWaveElement: HTMLElement;
   mapNameElement: HTMLElement;
   dropHudElement: HTMLElement;
   selectedBuildSummaryElement: HTMLElement;
@@ -39,6 +40,14 @@ export interface GameplayHudModels {
   nextWaveDelay: number;
   spawnRemaining: number;
   enemiesAlive: number;
+  /* ── 探索肉鸽波次 ── */
+  exploreWaveMode: boolean;
+  exploreWave: number;
+  exploreWaveActive: boolean;
+  exploreNextWaveDelay: number;
+  exploreSpawnRemaining: number;
+  exploreEnemiesAlive: number;
+  exploreAllWavesCleared: boolean;
   activeMapLabel: MapDefinition["name"];
   dropTimerRemaining: number;
   selectedBuild: BuildId;
@@ -82,8 +91,23 @@ export function refreshGameplayHud(dom: GameplayHudDom, m: GameplayHudModels): v
   }
   const diffHud =
     m.defenseDifficultyTier != null ? ` \u00b7 ${formatDefenseDifficultyHud(m.defenseDifficultyTier)}` : "";
-  dom.waveElement.textContent =
-    m.mode === "defense" ? `${waveText}${diffHud}` : `\u540e\u53f0 ${waveText}${diffHud}`;
+  dom.waveElement.textContent = `${waveText}${diffHud}`;
+
+  // 探索肉鸽波次状态
+  let exploreWaveText: string;
+  if (!m.exploreWaveMode) {
+    exploreWaveText = "\u81ea\u7531\u5c0f\u600e";
+  } else if (m.exploreAllWavesCleared) {
+    exploreWaveText = "\u5168\u6ce2\u5df2\u6e05 \u00b7 Boss \u6218";
+  } else if (m.exploreWave === 0) {
+    exploreWaveText = `\u5f85\u673a ${Math.ceil(m.exploreNextWaveDelay)}s`;
+  } else if (m.exploreWaveActive) {
+    exploreWaveText = `\u7b2c ${m.exploreWave} \u6ce2 \u00b7 \u5269\u4f59 ${m.exploreSpawnRemaining + m.exploreEnemiesAlive}`;
+  } else {
+    exploreWaveText = `\u7b2c ${m.exploreWave} \u6ce2\u5df2\u6e05 \u00b7 ${Math.ceil(m.exploreNextWaveDelay)}s`;
+  }
+  dom.exploreWaveElement.textContent = exploreWaveText;
+
   dom.mapNameElement.textContent = m.activeMapLabel;
   dom.dropHudElement.textContent =
     m.mode === "explore"

@@ -119,11 +119,9 @@ export class ExploreCombatRuntime {
     this.host = options.host;
   }
 
-  /** 载入或切换地图时由宿主调用 */
+  /** 载入或切换地图时由宿主调用；仅更新玩法参数，不重置波次（波次重置由 resetEncounter 负责） */
   syncGameplay(settings?: ExploreGameplaySettings | undefined): void {
     this.gameplay = resolveExploreGameplay(settings ?? undefined);
-    this.waveTimers = createInitialExploreWaveTimers(this.gameplay.firstWaveDelaySec);
-    this.bossPhaseActive = false;
   }
 
   /**
@@ -170,6 +168,7 @@ export class ExploreCombatRuntime {
   isUpgradePending(): boolean { return this.waveTimers.upgradePending; }
   isBossPhaseActive(): boolean { return this.bossPhaseActive; }
   isAllWavesCleared(): boolean { return this.waveTimers.allWavesCleared; }
+  getAliveEnemyCount(): number { return this.enemies.filter(e => !e.dead).length; }
 
   /** 玩家在 UI 中选择升级后调用 */
   confirmUpgradeChoice(moduleId: string): void {

@@ -207,6 +207,7 @@ export class TowerDefenseGame {
   private moneyElement!: HTMLElement;
   private baseElement!: HTMLElement;
   private waveElement!: HTMLElement;
+  private exploreWaveElement!: HTMLElement;
   private mapElement!: HTMLElement;
   private dropElement!: HTMLElement;
   private selectedElement!: HTMLElement;
@@ -2211,7 +2212,8 @@ export class TowerDefenseGame {
     this.renderMapButtons();
     if (this.mode === "explore") {
       this.exploreWalkMode = false;
-      this.loadExploreMap(this.exploreMapIndex, true, { silent: true });
+      // 不重置探索进度（波次、HP、敌人），保留当前肉鸽状态
+      this.loadExploreMap(this.exploreMapIndex, false, { silent: true });
     } else {
       this.showDefenseView();
     }
@@ -2626,7 +2628,7 @@ export class TowerDefenseGame {
 
   private damageEnemy(enemy: Enemy, damage: number, source?: DefenseDamageSource, meta?: { critical?: boolean }): void {
     const finalDamage = resolveDefenseDamage(enemy, damage, source);
-    if (finalDamage > 0 && enemy.hp > 0) {
+    if (finalDamage > 0 && enemy.hp > 0 && this.mode === "defense") {
       const w = new THREE.Vector3();
       enemy.mesh.getWorldPosition(w);
       this.effectsFacade.spawnDamageFloat(w, finalDamage, { critical: meta?.critical });
@@ -3210,14 +3212,17 @@ export class TowerDefenseGame {
   }
 
   private addBeam(from: THREE.Vector3, to: THREE.Vector3, color: number): void {
+    if (this.mode !== "defense") return;
     this.effectsFacade.addBeam(from, to, color);
   }
 
   private addAuroraLaser(from: THREE.Vector3, to: THREE.Vector3): void {
+    if (this.mode !== "defense") return;
     this.effectsFacade.addAuroraLaser(from, to);
   }
 
   private addExplosion(center: THREE.Vector3, radius: number, color: number): void {
+    if (this.mode !== "defense") return;
     this.effectsFacade.addExplosion(center, radius, color);
   }
 
@@ -3311,6 +3316,7 @@ export class TowerDefenseGame {
         cameraModeElement: this.cameraElement,
         baseHpElement: this.baseElement,
         waveElement: this.waveElement,
+        exploreWaveElement: this.exploreWaveElement,
         mapNameElement: this.mapElement,
         dropHudElement: this.dropElement,
         selectedBuildSummaryElement: this.selectedElement,
@@ -3333,6 +3339,13 @@ export class TowerDefenseGame {
         nextWaveDelay: this.nextWaveDelay,
         spawnRemaining: this.spawnRemaining,
         enemiesAlive: this.enemies.length,
+        exploreWaveMode: this.exploreCombat.isWaveMode(),
+        exploreWave: this.exploreCombat.getWaveNumber(),
+        exploreWaveActive: this.exploreCombat.getWaveTimers().waveActive,
+        exploreNextWaveDelay: this.exploreCombat.getWaveTimers().nextWaveDelay,
+        exploreSpawnRemaining: this.exploreCombat.getWaveTimers().spawnRemaining,
+        exploreEnemiesAlive: this.exploreCombat.getAliveEnemyCount(),
+        exploreAllWavesCleared: this.exploreCombat.isAllWavesCleared(),
         activeMapLabel: map.name,
         dropTimerRemaining: this.dropTimer,
         selectedBuild: this.selectedBuild,

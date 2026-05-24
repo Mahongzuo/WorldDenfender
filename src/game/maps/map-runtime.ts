@@ -134,7 +134,8 @@ export function renderRuntimeMapScene(options: {
 
   const tileGeometry = new THREE.BoxGeometry(TILE_SIZE * 0.96, 0.18, TILE_SIZE * 0.96);
   const pathGeometry = new THREE.BoxGeometry(TILE_SIZE * 0.98, 0.22, TILE_SIZE * 0.98);
-  const obstacleGeometry = new THREE.CylinderGeometry(TILE_SIZE * 0.46, TILE_SIZE * 0.54, 1.35, 6);
+  const obstacleGeometry = new THREE.BoxGeometry(TILE_SIZE * 0.85, 1.2, TILE_SIZE * 0.85);
+  const obstacleCapGeometry = new THREE.BoxGeometry(TILE_SIZE * 0.82, 0.1, TILE_SIZE * 0.82);
 
   const groundMaterial = new THREE.MeshStandardMaterial({
     color: map.theme.ground,
@@ -188,12 +189,7 @@ export function renderRuntimeMapScene(options: {
     roughness: 0.94,
     metalness: 0,
   });
-  const obstacleBottomMat = new THREE.MeshStandardMaterial({
-    color: new THREE.Color(map.theme.obstacle).multiplyScalar(0.86),
-    roughness: 0.94,
-    metalness: 0,
-  });
-  const obstacleMaterials: THREE.MeshStandardMaterial[] = [obstacleSideMat, obstacleTopMat, obstacleBottomMat];
+  const obstacleMaterials: THREE.Material | THREE.Material[] = obstacleSideMat;
 
   groundMaterial.map = boardTexture;
   groundMaterial.color.copy(new THREE.Color(map.theme.ground)).multiplyScalar(1.02);
@@ -214,7 +210,6 @@ export function renderRuntimeMapScene(options: {
       pathMaterial,
       obstacleSideMat,
       obstacleTopMat,
-      obstacleBottomMat,
     ]);
     /** 地理底板开启时也不再半透棋盘：与关闭映射一致（opaque + depthWrite），否则血条/弹道易与远景底板穿插 */
     for (const m of [groundMaterial, groundAltMaterial, pathMaterial]) {
@@ -290,14 +285,21 @@ export function renderRuntimeMapScene(options: {
       } else if (obstacleCells.has(key)) {
         if (usesGeoBackdrop && !surfaceBoardPresentation) {
           const mesh = new THREE.Mesh(obstacleGeometry, obstacleMaterials);
-          mesh.rotation.y = ((col * 17 + row * 11) % 6) * (Math.PI / 6);
-          mesh.position.set(position.x, 0.72, position.z);
+          mesh.position.set(position.x, 0.6, position.z);
           mesh.castShadow = true;
           mesh.receiveShadow = true;
           if (geoVerticalStretch > 1) {
             mesh.scale.set(1, geoVerticalStretch, 1);
           }
           mapGroup.add(mesh);
+          const cap = new THREE.Mesh(obstacleCapGeometry, obstacleTopMat);
+          cap.position.set(position.x, 1.25, position.z);
+          cap.castShadow = true;
+          cap.receiveShadow = true;
+          if (geoVerticalStretch > 1) {
+            cap.scale.set(1, geoVerticalStretch, 1);
+          }
+          mapGroup.add(cap);
         } else if (isBeijing && !surfaceBoardPresentation) {
           const buildingHeight = 1.0 + (Math.sin(col * 0.5) + Math.cos(row * 0.5)) * 0.5;
           const mesh = new THREE.Mesh(
@@ -313,12 +315,16 @@ export function renderRuntimeMapScene(options: {
           mapGroup.add(mesh);
         } else {
           const mesh = new THREE.Mesh(obstacleGeometry, obstacleMaterials);
-          mesh.rotation.y = ((col * 17 + row * 11) % 6) * (Math.PI / 6);
-          mesh.position.set(position.x, 0.72, position.z);
+          mesh.position.set(position.x, 0.6, position.z);
           mesh.castShadow = true;
           mesh.receiveShadow = true;
           if (!jinanRegionalFlatPreset) {
             mapGroup.add(mesh);
+            const cap = new THREE.Mesh(obstacleCapGeometry, obstacleTopMat);
+            cap.position.set(position.x, 1.25, position.z);
+            cap.castShadow = true;
+            cap.receiveShadow = true;
+            mapGroup.add(cap);
           }
         }
       } else {
@@ -661,22 +667,22 @@ function createObstacleTexture(base: number, accent: number): THREE.Texture {
   const ctx = canvas.getContext("2d")!;
   const baseColor = new THREE.Color(base);
   const accentColor = new THREE.Color(accent);
-  ctx.fillStyle = `#${baseColor.clone().multiplyScalar(0.78).getHexString()}`;
+  ctx.fillStyle = `#${baseColor.clone().multiplyScalar(0.82).getHexString()}`;
   ctx.fillRect(0, 0, 128, 128);
-  ctx.fillStyle = `#${baseColor.clone().multiplyScalar(0.96).getHexString()}`;
-  ctx.beginPath();
-  ctx.moveTo(64, 8);
-  ctx.lineTo(118, 38);
-  ctx.lineTo(118, 92);
-  ctx.lineTo(64, 120);
-  ctx.lineTo(10, 92);
-  ctx.lineTo(10, 38);
-  ctx.closePath();
-  ctx.fill();
-  ctx.strokeStyle = `#${accentColor.getHexString()}`;
-  ctx.globalAlpha = 0.45;
-  ctx.lineWidth = 5;
-  ctx.stroke();
+  ctx.fillStyle = `#${baseColor.clone().multiplyScalar(0.94).getHexString()}`;
+  ctx.fillRect(12, 10, 104, 108);
+  ctx.fillStyle = `#${baseColor.clone().lerp(accentColor, 0.16).multiplyScalar(1.03).getHexString()}`;
+  ctx.fillRect(18, 18, 92, 14);
+  ctx.globalAlpha = 0.16;
+  ctx.fillStyle = `#${accentColor.getHexString()}`;
+  for (let x = 22; x <= 94; x += 24) {
+    ctx.fillRect(x, 42, 8, 58);
+  }
+  ctx.globalAlpha = 0.28;
+  ctx.strokeStyle = `#${accentColor.clone().multiplyScalar(0.88).getHexString()}`;
+  ctx.lineWidth = 3;
+  ctx.strokeRect(18, 18, 92, 92);
+  ctx.globalAlpha = 1;
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   return texture;

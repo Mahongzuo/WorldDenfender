@@ -640,14 +640,14 @@ export function normalizeTheme(theme) {
         if (!Number.isFinite(n)) return def;
         return Math.max(0, Math.min(1, n));
     }
-    var ground = normalizeEditorThemeColorHex(source.ground, '#5a7d82');
+    var ground = normalizeEditorThemeColorHex(source.ground, '#73857f');
     var groundAlt = normalizeEditorThemeColorHex(
         source.groundAlt != null ? source.groundAlt : source.ground,
-        '#4f7178'
+        '#697a75'
     );
     var pathCol = normalizeEditorThemeColorHex(
         source.path != null ? source.path : source.road,
-        '#6f9288'
+        '#92a39a'
     );
     return {
         ground: ground,
@@ -657,11 +657,11 @@ export function normalizeTheme(theme) {
             pathCol
         ),
         path: pathCol,
-        obstacle: normalizeEditorThemeColorHex(source.obstacle, '#5d6870'),
-        accent: normalizeEditorThemeColorHex(source.accent, '#8fb8ae'),
+        obstacle: normalizeEditorThemeColorHex(source.obstacle, '#8a8077'),
+        accent: normalizeEditorThemeColorHex(source.accent, '#aab6a3'),
         fog: normalizeEditorThemeColorHex(
             source.fog != null ? source.fog : source.groundAlt != null ? source.groundAlt : source.ground,
-            '#445c60'
+            '#56645f'
         ),
         boardTextureUrl: String(source.boardTextureUrl || '').trim(),
         geoTileOpacity: clamp01(source.geoTileOpacity, 0.48),
@@ -672,8 +672,8 @@ export function normalizeTheme(theme) {
         pathGlowOpacity: clamp01(source.pathGlowOpacity, 0.46),
         pathDetailOpacity: clamp01(source.pathDetailOpacity, 0.82),
         hoverCellOpacity: clamp01(source.hoverCellOpacity, 0.42),
-        hoverColorOk: normalizeEditorThemeColorHex(source.hoverColorOk, '#6a988c'),
-        hoverColorBad: normalizeEditorThemeColorHex(source.hoverColorBad, '#d87880')
+        hoverColorOk: normalizeEditorThemeColorHex(source.hoverColorOk, '#7ea08f'),
+        hoverColorBad: normalizeEditorThemeColorHex(source.hoverColorBad, '#c28e89')
     };
 }
 
@@ -1727,12 +1727,12 @@ export function createDefaultMap() {
     return {
         grid: { cols: DEFAULT_GRID_COLS, rows: DEFAULT_GRID_ROWS, tileSize: DEFAULT_TILE_SIZE },
         theme: {
-            ground: '#5a7d82',
-            groundAlt: '#4f7178',
-            road: '#6f9288',
-            obstacle: '#5d6870',
-            accent: '#8fb8ae',
-            fog: '#445c60'
+            ground: '#73857f',
+            groundAlt: '#697a75',
+            road: '#92a39a',
+            obstacle: '#8a8077',
+            accent: '#aab6a3',
+            fog: '#56645f'
         },
         terrain: [],
         roads: [],
@@ -1746,12 +1746,12 @@ export function createDefaultMap() {
         explorationLayout: {
             grid: { cols: DEFAULT_GRID_COLS, rows: DEFAULT_GRID_ROWS, tileSize: DEFAULT_TILE_SIZE },
             theme: {
-                ground: '#5a7d82',
-                groundAlt: '#4f7178',
-                road: '#6f9288',
-                obstacle: '#5d6870',
-                accent: '#8fb8ae',
-                fog: '#445c60'
+                ground: '#73857f',
+                groundAlt: '#697a75',
+                road: '#92a39a',
+                obstacle: '#8a8077',
+                accent: '#aab6a3',
+                fog: '#56645f'
             },
             path: [],
             obstacles: [],

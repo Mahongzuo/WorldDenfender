@@ -337,11 +337,11 @@ export function createPreview(options) {
       Object.assign(raw, map.explorationLayout.theme);
     var fogFallback = raw.fog || raw.groundAlt || raw.ground || '#334455';
     return {
-      ground: parseCssColor(raw.ground, 0x5a7d82),
-      groundAlt: parseCssColor(raw.groundAlt || raw.ground, 0x4f7178),
-      path: parseCssColor(raw.path || raw.road, 0x6f9288),
-      obstacle: parseCssColor(raw.obstacle, 0x5d6870),
-      accent: parseCssColor(raw.accent, 0x8fb8ae),
+      ground: parseCssColor(raw.ground, 0x73857f),
+      groundAlt: parseCssColor(raw.groundAlt || raw.ground, 0x697a75),
+      path: parseCssColor(raw.path || raw.road, 0x92a39a),
+      obstacle: parseCssColor(raw.obstacle, 0x8a8077),
+      accent: parseCssColor(raw.accent, 0xaab6a3),
       fogHex: fogFallback,
     };
   }
