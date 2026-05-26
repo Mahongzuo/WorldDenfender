@@ -753,6 +753,26 @@ interface BuiltEditorDefensePathResult {
   pathIdBySpawnId: ReadonlyMap<string, string>;
 }
 
+function expandEditorDefensePolyline(cells: readonly GridCell[], sourceCols: number, sourceRows: number): GridCell[] {
+  if (!cells.length) return [];
+  const expanded: GridCell[] = [{ col: cells[0].col, row: cells[0].row }];
+  for (let index = 1; index < cells.length; index += 1) {
+    let currentCol = Number(cells[index - 1].col) || 0;
+    let currentRow = Number(cells[index - 1].row) || 0;
+    const targetCol = Number(cells[index].col) || 0;
+    const targetRow = Number(cells[index].row) || 0;
+    while (currentCol !== targetCol) {
+      currentCol += currentCol < targetCol ? 1 : -1;
+      expanded.push({ col: currentCol, row: currentRow });
+    }
+    while (currentRow !== targetRow) {
+      currentRow += currentRow < targetRow ? 1 : -1;
+      expanded.push({ col: currentCol, row: currentRow });
+    }
+  }
+  return uniqueCells(expanded, sourceCols, sourceRows);
+}
+
 function buildEditorDefensePaths(
   editorMap: EditorLevelMap,
   spawnPoints: readonly DefenseSpawnPoint[],
@@ -894,9 +914,9 @@ export function editorLevelToRuntimeMap(
         : fallbackPath;
   const obstacleSource = mode === "explore" ? exploreLayout?.obstacles ?? editorMap.obstacles ?? [] : editorMap.obstacles ?? [];
   const reservedCells = mode === "explore"
-    ? uniqueCells(path.concat([exploreStart, objective]), sourceCols, sourceRows)
+    ? expandEditorDefensePolyline(path.concat([objective]), sourceCols, sourceRows).concat([exploreStart])
     : uniqueCells(
-      defenseEnemyPaths.flatMap((enemyPath) => enemyPath.cells ?? []).concat(defenseSpawnPoints, [objective]),
+      defenseEnemyPaths.flatMap((enemyPath) => expandEditorDefensePolyline(enemyPath.cells ?? [], sourceCols, sourceRows)).concat(defenseSpawnPoints, [objective]),
       sourceCols,
       sourceRows,
     );

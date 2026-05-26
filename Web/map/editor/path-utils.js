@@ -206,19 +206,43 @@ export function buildDefenseFallbackVertexList(spawn, objective, cols, rows) {
     return uniqueDefenseCells([spawn, midA, midB, objective], cols, rows);
 }
 
-/**
- * 塔防棋盘行军带：与 editorLevelToRuntimeMap → expandPath 完全一致。
- * 路格排序 + Manhattan 铺开，返回 Set<"col,row">。
- * @param {object} level
- * @returns {Set<string>}
- */
-export function getDefenseEditorPathKeys(level) {
+function orientDefenseEditorPathPoints(points, start, end) {
+    var list = uniqueDefenseCells(points, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER);
+    if (list.length < 2) return list;
+    var forwardScore = manhattanDefense(list[0], start) + manhattanDefense(list[list.length - 1], end);
+    var reverseScore = manhattanDefense(list[list.length - 1], start) + manhattanDefense(list[0], end);
+    return reverseScore < forwardScore ? list.slice().reverse() : list;
+}
+
+function expandedDefenseEditorPathKeySet(points, start, end, cols, rows) {
+    var projected = uniqueDefenseCells(
+        (Array.isArray(points) ? points : []).map(function (cell) {
+            return projectGridCellDefense(cell, cols, rows);
+        }),
+        cols,
+        rows,
+    );
+    var out = new Set();
+    if (!projected.length) return out;
+    var ordered = orientDefenseEditorPathPoints(projected, start, end);
+    var needsExpansion = ordered.some(function (cell, index) {
+        return index > 0 && manhattanDefense(ordered[index - 1], cell) !== 1;
+    });
+    if (!needsExpansion) {
+        ordered.forEach(function (cell) {
+            out.add(String(cell.col) + ',' + String(cell.row));
+        });
+        return out;
+    }
+    expandPathWaypointPolyline(ordered).forEach(function (key) { out.add(key); });
+    return out;
+}
+
+export function getDefenseEditorPathOverlay(level) {
     var map = level.map;
-    if (!map || !map.grid)
-        /** @type {Set<string>} */ return new Set();
+    if (!map || !map.grid) return {};
     var cols = clamp(Math.floor(Number(map.grid.cols) || DEFAULT_GRID_COLS), 4, 80);
     var rows = clamp(Math.floor(Number(map.grid.rows) || DEFAULT_GRID_ROWS), 4, 80);
-
     var objectiveDefault = { col: cols - 1, row: Math.floor(rows / 2) };
     var objective = map.objectivePoint
         ? projectGridCellDefense(map.objectivePoint, cols, rows)
@@ -226,7 +250,7 @@ export function getDefenseEditorPathKeys(level) {
     var spawnPoints = Array.isArray(map.spawnPoints) && map.spawnPoints.length
         ? map.spawnPoints.map(function (point) { return projectGridCellDefense(point, cols, rows); })
         : [{ col: 0, row: objective.row }];
-    var out = new Set();
+    var overlay = {};
     var paths = Array.isArray(map.enemyPaths) && map.enemyPaths.length ? map.enemyPaths : [{ id: 'path-main', cells: defensePathSourceCells(map) }];
     paths.forEach(function (path, index) {
         var spawnSource = Array.isArray(map.spawnPoints)
@@ -234,23 +258,33 @@ export function getDefenseEditorPathKeys(level) {
             : null;
         var spawn = spawnSource ? projectGridCellDefense(spawnSource, cols, rows) : spawnPoints[index] || spawnPoints[0];
         var raw = path && path.cells && path.cells.length ? path.cells : null;
+        var keySet;
         if (raw && raw.length) {
-            uniqueDefenseCells(
-                raw.map(function (c) {
-                    return projectGridCellDefense(c, cols, rows);
-                }),
-                cols,
-                rows
-            ).forEach(function (c) {
-                out.add(String(c.col) + ',' + String(c.row));
-            });
-            return;
+            keySet = expandedDefenseEditorPathKeySet(raw, spawn, objective, cols, rows);
+        } else {
+            var projected = [];
+            var orderedPath = orderEditorPathCellsDefense(projected, spawn, objective, cols, rows);
+            var fallbackPath = buildDefenseFallbackVertexList(spawn, objective, cols, rows);
+            var pathVerts = orderedPath.length >= 2 ? orderedPath : fallbackPath;
+            keySet = expandedDefenseEditorPathKeySet(pathVerts, spawn, objective, cols, rows);
         }
-        var projected = [];
-        var orderedPath = orderEditorPathCellsDefense(projected, spawn, objective, cols, rows);
-        var fallbackPath = buildDefenseFallbackVertexList(spawn, objective, cols, rows);
-        var pathVerts = orderedPath.length >= 2 ? orderedPath : fallbackPath;
-        expandPathWaypointPolyline(pathVerts).forEach(function (key) { out.add(key); });
+        keySet.forEach(function (key) {
+            if (!overlay[key]) {
+                overlay[key] = { routeIndexes: [], pathIds: [] };
+            }
+            if (overlay[key].routeIndexes.indexOf(index + 1) < 0) overlay[key].routeIndexes.push(index + 1);
+            if (path && path.id && overlay[key].pathIds.indexOf(path.id) < 0) overlay[key].pathIds.push(path.id);
+        });
     });
-    return out;
+    return overlay;
+}
+
+/**
+ * 塔防棋盘行军带：与 editorLevelToRuntimeMap → expandPath 完全一致。
+ * 路格排序 + Manhattan 铺开，返回 Set<"col,row">。
+ * @param {object} level
+ * @returns {Set<string>}
+ */
+export function getDefenseEditorPathKeys(level) {
+    return new Set(Object.keys(getDefenseEditorPathOverlay(level)));
 }

@@ -2268,12 +2268,70 @@ input[type="range"].audio-volume-slider {
         inset 0 0 0 3px rgba(122, 167, 255, 0.35);
 }
 
+.map-cell.path.path-route-1 {
+    background: rgba(223, 194, 126, 0.5);
+    box-shadow:
+        inset 0 0 0 1px rgba(158, 128, 70, 0.68),
+        inset 0 0 0 3px rgba(255, 208, 122, 0.26);
+}
+
+.map-cell.path.path-route-2 {
+    background: rgba(107, 211, 203, 0.34);
+    box-shadow:
+        inset 0 0 0 1px rgba(88, 180, 173, 0.74),
+        inset 0 0 0 3px rgba(88, 180, 173, 0.24);
+}
+
+.map-cell.path.path-route-3 {
+    background: rgba(255, 146, 112, 0.32);
+    box-shadow:
+        inset 0 0 0 1px rgba(214, 108, 77, 0.72),
+        inset 0 0 0 3px rgba(255, 146, 112, 0.2);
+}
+
+.map-cell.path.path-route-4,
+.map-cell.path.path-shared {
+    background: rgba(206, 197, 242, 0.34);
+    box-shadow:
+        inset 0 0 0 1px rgba(165, 149, 220, 0.78),
+        inset 0 0 0 3px rgba(206, 197, 242, 0.2);
+}
+
 .map-grid--jinan-texture .map-cell.path {
     background: rgba(0, 212, 255, 0.34);
     box-shadow:
         inset 0 0 0 1px rgba(255, 255, 255, 0.78),
         inset 0 0 0 4px rgba(0, 212, 255, 0.36),
         0 0 14px rgba(0, 212, 255, 0.28);
+}
+
+.map-grid--jinan-texture .map-cell.path.path-route-1 {
+    background: rgba(0, 212, 255, 0.34);
+}
+
+.map-grid--jinan-texture .map-cell.path.path-route-2 {
+    background: rgba(61, 230, 179, 0.34);
+    box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.72),
+        inset 0 0 0 4px rgba(61, 230, 179, 0.26),
+        0 0 14px rgba(61, 230, 179, 0.22);
+}
+
+.map-grid--jinan-texture .map-cell.path.path-route-3 {
+    background: rgba(255, 176, 97, 0.32);
+    box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.72),
+        inset 0 0 0 4px rgba(255, 176, 97, 0.24),
+        0 0 14px rgba(255, 176, 97, 0.2);
+}
+
+.map-grid--jinan-texture .map-cell.path.path-route-4,
+.map-grid--jinan-texture .map-cell.path.path-shared {
+    background: rgba(212, 188, 255, 0.32);
+    box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.72),
+        inset 0 0 0 4px rgba(212, 188, 255, 0.24),
+        0 0 14px rgba(212, 188, 255, 0.18);
 }
 
 .map-cell.obstacle {

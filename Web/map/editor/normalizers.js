@@ -260,6 +260,52 @@ function expandDefenseWaypointPath(points) {
     return uniquePathCells(ordered);
 }
 
+function expandDefensePolylineCells(points) {
+    return expandDefenseWaypointPath(points);
+}
+
+function simplifyDefensePathPolyline(cells) {
+    var list = uniquePathCells(cells);
+    if (list.length < 3) return list;
+    if (!isContiguousDefensePath(list)) {
+        if (isAxisAlignedWaypointPath(list)) return list;
+        list = expandDefensePolylineCells(list);
+    }
+    if (list.length < 3) return list;
+    var simplified = [cloneCellPoint(list[0])];
+    for (var index = 1; index < list.length - 1; index += 1) {
+        var prev = list[index - 1];
+        var current = list[index];
+        var next = list[index + 1];
+        var prevColStep = Math.sign(current.col - prev.col);
+        var prevRowStep = Math.sign(current.row - prev.row);
+        var nextColStep = Math.sign(next.col - current.col);
+        var nextRowStep = Math.sign(next.row - current.row);
+        if (prevColStep !== nextColStep || prevRowStep !== nextRowStep) {
+            simplified.push(cloneCellPoint(current));
+        }
+    }
+    simplified.push(cloneCellPoint(list[list.length - 1]));
+    return uniquePathCells(simplified);
+}
+
+function hasVerboseDefensePathStorage(cells) {
+    var list = uniquePathCells(cells);
+    if (list.length < 4) return false;
+    return simplifyDefensePathPolyline(list).length + 2 < list.length;
+}
+
+function hasDefenseLayoutData(level) {
+    var map = level && level.map;
+    if (!map) return false;
+    return !!(
+        (Array.isArray(map.enemyPaths) && map.enemyPaths.some(function (path) { return path && Array.isArray(path.cells) && path.cells.length > 1; })) ||
+        (Array.isArray(map.roads) && map.roads.length) ||
+        (Array.isArray(map.spawnPoints) && map.spawnPoints.length) ||
+        map.objectivePoint
+    );
+}
+
 function splitContiguousPathSegments(points) {
     var list = uniquePathCells(points);
     if (!list.length) return [];
@@ -523,7 +569,7 @@ function preferredBranchOffsets(baseCells, grid, count) {
 }
 
 function buildBranchDefensePath(baseCells, grid, offsetRows) {
-    var points = uniquePathCells(baseCells);
+    var points = simplifyDefensePathPolyline(baseCells);
     if (!grid || points.length < 4 || !offsetRows) return [];
     var splitIndex = Math.max(1, Math.floor(points.length * 0.26));
     var mergeIndex = Math.max(splitIndex + 2, Math.floor(points.length * 0.72));
@@ -534,8 +580,7 @@ function buildBranchDefensePath(baseCells, grid, offsetRows) {
         };
     });
     if (shifted.every(function (cell, index) { return sameCellPoint(cell, points[index]); })) return [];
-    var bridgeToMain = buildManhattanBridge(shifted[shifted.length - 1], points[mergeIndex]).slice(1);
-    return uniquePathCells(shifted.concat(bridgeToMain, points.slice(mergeIndex + 1)));
+    return uniquePathCells(shifted.concat([cloneCellPoint(points[mergeIndex])], points.slice(mergeIndex + 1)));
 }
 
 function normalizeDefensePathList(paths, map) {
@@ -611,22 +656,27 @@ function buildDesignedDefensePaths(level) {
             };
         }
     }
-    if (mainPath && Array.isArray(mainPath.cells) && mainPath.cells.length > 1) active.push(mainPath);
+    if (mainPath && Array.isArray(mainPath.cells) && mainPath.cells.length > 1) {
+        active.push({
+            id: mainPath.id,
+            name: mainPath.name,
+            cells: simplifyDefensePathPolyline(mainPath.cells)
+        });
+    }
     existing.forEach(function (path) {
         if (active.length >= desiredCount) return;
         if (active.some(function (item) { return item.id === path.id; })) return;
-        active.push(path);
+        active.push({
+            id: path.id,
+            name: path.name,
+            cells: simplifyDefensePathPolyline(path.cells)
+        });
     });
     if (!active.length || !Array.isArray(active[0].cells) || active[0].cells.length < 2) return existing.slice(0, desiredCount);
     var offsets = preferredBranchOffsets(active[0].cells, map.grid, desiredCount - active.length);
     offsets.forEach(function (offset, index) {
         if (active.length >= desiredCount) return;
-        var branchCells = reorderDefensePathCellsTowardObjective(
-            buildBranchDefensePath(active[0].cells, map.grid, offset),
-            { col: active[0].cells[0].col, row: clamp(active[0].cells[0].row + offset, 0, Math.max(0, Number(map.grid.rows || 1) - 1)) },
-            map.objectivePoint,
-            map.grid
-        );
+        var branchCells = buildBranchDefensePath(active[0].cells, map.grid, offset);
         if (branchCells.length < 2) return;
         active.push({
             id: 'path-route-' + String(active.length + 1),
@@ -643,7 +693,7 @@ function buildDesignedDefensePaths(level) {
         return {
             id: path.id,
             name: path.name,
-            cells: sanitizeDesignedDefensePath(path, map, preferredStart)
+            cells: simplifyDefensePathPolyline(sanitizeDesignedDefensePath(path, map, preferredStart))
         };
     });
 }
@@ -717,7 +767,7 @@ function buildDesignedWaveRules(level, spawnPoints) {
 function buildDefenseReservedCellKeys(paths, spawnPoints, objective, roads) {
     var reserved = {};
     (Array.isArray(paths) ? paths : []).forEach(function (path) {
-        (Array.isArray(path && path.cells) ? path.cells : []).forEach(function (cell) {
+        expandDefensePolylineCells(Array.isArray(path && path.cells) ? path.cells : []).forEach(function (cell) {
             reserved[cellKey(cell)] = true;
         });
     });
@@ -748,7 +798,7 @@ function sanitizeDefenseObstacles(obstacles, paths, spawnPoints, objective, road
 function shouldUpgradeDesignedTowerDefense(level) {
     if (!level || level.status !== 'designed') return false;
     var towerDefense = level.modeProfiles && level.modeProfiles.towerDefense;
-    if (!towerDefense || towerDefense.enabled === false) return false;
+    if ((!towerDefense || towerDefense.enabled === false) && !hasDefenseLayoutData(level)) return false;
     var rawPaths = level.map && Array.isArray(level.map.enemyPaths)
         ? level.map.enemyPaths.filter(function (path) {
             return path && Array.isArray(path.cells) && path.cells.length > 1;
@@ -771,6 +821,10 @@ function shouldUpgradeDesignedTowerDefense(level) {
         spawnPoints.length !== paths.length ||
         rawPaths.length !== paths.length ||
         rawPaths.some(function (path) {
+            return hasVerboseDefensePathStorage(path && Array.isArray(path.cells) ? path.cells : []);
+        }) ||
+        hasVerboseDefensePathStorage(level.map && level.map.roads) ||
+        rawPaths.some(function (path) {
             return hasNonAxisDefenseStep(path && Array.isArray(path.cells) ? path.cells : []);
         }) ||
         hasDuplicateSpawn ||
@@ -784,18 +838,22 @@ function shouldUpgradeDesignedTowerDefense(level) {
 
 function upgradeDesignedTowerDefenseLevel(level) {
     if (!shouldUpgradeDesignedTowerDefense(level)) return;
-    var activePaths = buildDesignedDefensePaths(level);
+    var activePaths = buildDesignedDefensePaths(level).map(function (path) {
+        return {
+            id: path.id,
+            name: path.name,
+            cells: simplifyDefensePathPolyline(path.cells)
+        };
+    });
     if (!activePaths.length) return;
     var spawnPoints = buildDesignedSpawnPoints(activePaths);
     level.map.enemyPaths = activePaths;
     level.map.spawnPoints = spawnPoints;
     level.map.enemyExits = spawnPoints;
     var roadByKey = {};
-    level.map.roads = uniquePathCells((Array.isArray(level.map.roads) ? level.map.roads : []).concat(
-        activePaths.flatMap(function (path) {
-            return Array.isArray(path.cells) ? path.cells : [];
-        })
-    )).filter(function (cell) {
+    level.map.roads = uniquePathCells(activePaths.flatMap(function (path) {
+        return Array.isArray(path.cells) ? path.cells : [];
+    })).filter(function (cell) {
         var key = String(cell.col) + ',' + String(cell.row);
         if (roadByKey[key]) return false;
         roadByKey[key] = true;
@@ -804,7 +862,7 @@ function upgradeDesignedTowerDefenseLevel(level) {
     level.map.obstacles = sanitizeDefenseObstacles(level.map.obstacles, activePaths, spawnPoints, level.map.objectivePoint, level.map.roads);
     level.waveRules = buildDesignedWaveRules(level, spawnPoints);
     var towerDefense = level.modeProfiles && level.modeProfiles.towerDefense ? level.modeProfiles.towerDefense : { enabled: true };
-    towerDefense.enabled = towerDefense.enabled !== false;
+    towerDefense.enabled = true;
     towerDefense.spawnRoutes = activePaths.map(function (path, index) {
         return {
             id: 'route-' + String(index + 1),

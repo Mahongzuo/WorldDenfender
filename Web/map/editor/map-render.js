@@ -1,7 +1,7 @@
 import { JINAN_MAP_TEXTURE_URL } from './city-geo-configs.js';
 import { clamp, escapeAttr, hasCell, atCell } from './utils.js';
 import { markerHtml } from './html-builders.js';
-import { getDefenseEditorPathKeys } from './path-utils.js';
+import { getDefenseEditorPathOverlay } from './path-utils.js';
 import { ensureExplorationLayout } from './layout-presets.js';
 import { isJinanLevel } from './display-utils.js';
 
@@ -154,16 +154,28 @@ function renderPlateCell(env, level, col, row) {
     return '<div class="' + classes.join(' ') + '" data-col="' + col + '" data-row="' + row + '"></div>';
 }
 
-function renderPathOverlayCell(env, level, col, row, defensePathKeys) {
+function renderPathOverlayCell(env, level, col, row, defensePathOverlay) {
     var exploreLayout = ensureExplorationLayout(level.map);
     var isPath = false;
+    var overlayInfo = null;
     if (env.getActiveEditorMode() === 'explore') {
         if (hasCell(exploreLayout.path, col, row)) isPath = true;
-    } else if (!hasCell(level.map.obstacles, col, row) && defensePathKeys && defensePathKeys.has(String(col) + ',' + String(row))) {
-        isPath = true;
+    } else if (!hasCell(level.map.obstacles, col, row) && defensePathOverlay) {
+        overlayInfo = defensePathOverlay[String(col) + ',' + String(row)] || null;
+        if (overlayInfo) {
+            isPath = true;
+        }
     }
     var classes = ['map-cell', 'map-cell--path-overlay'];
-    if (isPath) classes.push('path');
+    if (isPath) {
+        isPath = true;
+        classes.push('path');
+        if (overlayInfo && Array.isArray(overlayInfo.routeIndexes) && overlayInfo.routeIndexes.length > 1) {
+            classes.push('path-shared');
+        } else if (overlayInfo && Array.isArray(overlayInfo.routeIndexes) && overlayInfo.routeIndexes.length === 1) {
+            classes.push('path-route-' + String(Math.min(4, Math.max(1, Number(overlayInfo.routeIndexes[0]) || 1))));
+        }
+    }
     return '<div class="' + classes.join(' ') + '" data-col="' + col + '" data-row="' + row + '"></div>';
 }
 
@@ -208,11 +220,11 @@ export function renderMap(refs, env) {
     var floorHtml = [];
     var pathOverlayHtml = [];
     var markersHtml = [];
-    var defensePathKeys = env.getActiveEditorMode() === 'defense' ? getDefenseEditorPathKeys(level) : null;
+    var defensePathOverlay = env.getActiveEditorMode() === 'defense' ? getDefenseEditorPathOverlay(level) : null;
     for (var row = 0; row < grid.rows; row += 1) {
         for (var col = 0; col < grid.cols; col += 1) {
             floorHtml.push(renderPlateCell(env, level, col, row));
-            pathOverlayHtml.push(renderPathOverlayCell(env, level, col, row, defensePathKeys));
+            pathOverlayHtml.push(renderPathOverlayCell(env, level, col, row, defensePathOverlay));
             markersHtml.push(renderMarkersOverlayCell(env, level, col, row));
         }
     }
