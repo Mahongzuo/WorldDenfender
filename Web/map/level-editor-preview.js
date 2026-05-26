@@ -859,6 +859,13 @@ export function createPreview(options) {
     });
   }
 
+  function hasLegacyBaseBoardImageLayer(map) {
+    var layers = map && Array.isArray(map.boardImageLayers) ? map.boardImageLayers : [];
+    return layers.some(function (layer) {
+      return layer && layer.legacyBoardBase === true;
+    });
+  }
+
   /** 与 TowerDefenseGame.drawTerrain / renderVisibleMap 一致 */
   function buildTerrainFromGameLogic(level) {
     clearTerrain();
@@ -1022,7 +1029,8 @@ export function createPreview(options) {
 
     var trimmedBoard = String((map.theme && map.theme.boardTextureUrl) || '').trim();
     var hasCustomBoardImage = trimmedBoard.length > 0;
-    var jinanPresetBoard = isJinan && !hasCustomBoardImage;
+    var hasLegacyBaseBoardLayer = hasLegacyBaseBoardImageLayer(map);
+    var jinanPresetBoard = isJinan && !hasCustomBoardImage && !hasLegacyBaseBoardLayer;
     var flatBoardMode = !usesGeoBackdrop && (jinanPresetBoard || hasCustomBoardImage);
     var decorYPreview = usesGeoBackdrop ? 0.048 : flatBoardMode ? 0.063 : 0.098;
     addBoardDecorImageLayersPreview(map, cols, rows, ts, decorYPreview);

@@ -893,7 +893,16 @@ export function editorLevelToRuntimeMap(
         ? projectedPath
         : fallbackPath;
   const obstacleSource = mode === "explore" ? exploreLayout?.obstacles ?? editorMap.obstacles ?? [] : editorMap.obstacles ?? [];
-  const obstacles = uniqueCells(obstacleSource.map(project), sourceCols, sourceRows).filter((cell) => !path.some((pathCell) => sameCell(pathCell, cell)));
+  const reservedCells = mode === "explore"
+    ? uniqueCells(path.concat([exploreStart, objective]), sourceCols, sourceRows)
+    : uniqueCells(
+      defenseEnemyPaths.flatMap((enemyPath) => enemyPath.cells ?? []).concat(defenseSpawnPoints, [objective]),
+      sourceCols,
+      sourceRows,
+    );
+  const obstacles = uniqueCells(obstacleSource.map(project), sourceCols, sourceRows).filter(
+    (cell) => !reservedCells.some((reservedCell) => sameCell(reservedCell, cell)),
+  );
   const theme = exploreLayout?.theme ?? editorMap.theme ?? {};
   const boardImageLayers = sanitizeBoardImageLayers(editorMap.boardImageLayers);
   const levelAudio = sanitizeLevelMapAudioFromEditor(editorMap.levelAudio);

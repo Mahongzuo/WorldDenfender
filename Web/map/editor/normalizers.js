@@ -3,7 +3,7 @@
  * 不依赖 DOM 与浏览器 editor 运行时状态（仅依赖 content.js 中的默认常量）。
  * 被 level-editor.js 以及未来的 storage.js 等模块 import。
  */
-import { DEFAULT_CESIUM_ION_3D_TILES_ASSET_ID } from './city-geo-configs.js';
+import { DEFAULT_CESIUM_ION_3D_TILES_ASSET_ID, JINAN_MAP_TEXTURE_URL } from './city-geo-configs.js';
 import { uid, slugify, clamp, clone, editorVol01, inBounds } from './utils.js';
 import {
     TOWER_MODEL_SPECS, DEFAULT_TOWER_GAMEPLAY_STATS, DEFAULT_ACTOR_TEMPLATES,
@@ -13,6 +13,7 @@ import {
 
 import { splitRegion, buildRegionLabel, inferCountryCode } from './normalize-region.js';
 import { canonicalModelPathScaleKey as normGlobalScaleKey, clampGlobalPathModelScale } from './model-path-scale.js';
+import { orderEditorPathCellsDefense } from './path-utils.js';
 export { splitRegion, buildRegionLabel, inferCountryCode };
 
 // ---------------------------------------------------------------------------
@@ -124,6 +125,7 @@ export function normalizeBoardImageLayers(raw) {
             order: ord
         };
         if (L.editorHidden === true) bilEntry.editorHidden = true;
+        if (L.legacyBoardBase === true) bilEntry.legacyBoardBase = true;
         var ar = Number(L.aspect);
         if (Number.isFinite(ar) && ar > 0) bilEntry.aspect = Math.min(24, Math.max(0.04, ar));
         list.push(bilEntry);
@@ -132,6 +134,688 @@ export function normalizeBoardImageLayers(raw) {
         return a.order - b.order;
     });
     return list;
+}
+
+function levelLooksLikeJinan(level) {
+    var haystack = [
+        level && level.id,
+        level && level.name,
+        level && level.location && level.location.cityName,
+        level && level.location && level.location.regionLabel,
+        level && level.location && level.location.cityCode
+    ]
+        .filter(Boolean)
+        .join(' ')
+        .replace(/\s+/g, '');
+    return /济南|泉城|370100|shandong|cn-370100|shandong_370100/i.test(haystack);
+}
+
+function hasFullCoverBoardImageLayer(layers) {
+    return Array.isArray(layers) && layers.some(function (layer) {
+        return layer && Number(layer.widthPct) >= 100;
+    });
+}
+
+function hasLegacyBaseBoardImageLayer(layers) {
+    return Array.isArray(layers) && layers.some(function (layer) {
+        return layer && layer.legacyBoardBase === true;
+    });
+}
+
+function createFullCoverBoardImageLayer(id, src, order) {
+    return {
+        id: id,
+        src: String(src || '').trim(),
+        centerX: 0,
+        centerY: 0,
+        widthPct: 100,
+        opacity: 1,
+        order: Number.isFinite(Number(order)) ? Number(order) : -100,
+        aspect: 0.75,
+        legacyBoardBase: true
+    };
+}
+
+function maybePromoteLegacyBoardImage(level, map) {
+    if (!level || !map) return;
+    var theme = map.theme && typeof map.theme === 'object' ? map.theme : null;
+    var legacyBoardTextureUrl = theme ? String(theme.boardTextureUrl || '').trim() : '';
+    var promotedUrl = legacyBoardTextureUrl;
+    if (!promotedUrl && level.status === 'designed' && levelLooksLikeJinan(level)) {
+        promotedUrl = JINAN_MAP_TEXTURE_URL;
+    }
+    if (promotedUrl && !hasLegacyBaseBoardImageLayer(map.boardImageLayers) && Array.isArray(map.boardImageLayers)) {
+        var existingPromotedLayer = map.boardImageLayers.find(function (layer) {
+            return layer && String(layer.src || '').trim() === promotedUrl;
+        });
+        if (existingPromotedLayer) {
+            existingPromotedLayer.legacyBoardBase = true;
+            if (theme && legacyBoardTextureUrl && theme.boardTextureUrl === legacyBoardTextureUrl) {
+                theme.boardTextureUrl = '';
+            }
+            return;
+        }
+    }
+    if (hasLegacyBaseBoardImageLayer(map.boardImageLayers) || hasFullCoverBoardImageLayer(map.boardImageLayers)) return;
+    if (!promotedUrl) return;
+    map.boardImageLayers = normalizeBoardImageLayers(
+        (Array.isArray(map.boardImageLayers) ? map.boardImageLayers : []).concat([
+            createFullCoverBoardImageLayer('board-img-base', promotedUrl, -100)
+        ])
+    );
+    if (theme && legacyBoardTextureUrl && theme.boardTextureUrl === legacyBoardTextureUrl) {
+        theme.boardTextureUrl = '';
+    }
+}
+
+function cloneCellPoint(cell) {
+    return { col: Number(cell && cell.col) || 0, row: Number(cell && cell.row) || 0 };
+}
+
+function sameCellPoint(left, right) {
+    return !!left && !!right && Number(left.col) === Number(right.col) && Number(left.row) === Number(right.row);
+}
+
+function uniquePathCells(cells) {
+    var out = [];
+    (Array.isArray(cells) ? cells : []).forEach(function (cell) {
+        var point = cloneCellPoint(cell);
+        if (!out.length || !sameCellPoint(out[out.length - 1], point)) out.push(point);
+    });
+    return out;
+}
+
+function cellKey(cell) {
+    return String(Number(cell && cell.col) || 0) + ',' + String(Number(cell && cell.row) || 0);
+}
+
+function manhattanDefenseDistance(left, right) {
+    return Math.abs((Number(left && left.col) || 0) - (Number(right && right.col) || 0)) +
+        Math.abs((Number(left && left.row) || 0) - (Number(right && right.row) || 0));
+}
+
+function buildManhattanBridge(from, to) {
+    if (!from || !to) return [];
+    var current = cloneCellPoint(from);
+    var bridge = [cloneCellPoint(current)];
+    while (current.col !== Number(to.col)) {
+        current.col += current.col < Number(to.col) ? 1 : -1;
+        bridge.push(cloneCellPoint(current));
+    }
+    while (current.row !== Number(to.row)) {
+        current.row += current.row < Number(to.row) ? 1 : -1;
+        bridge.push(cloneCellPoint(current));
+    }
+    return bridge;
+}
+
+function expandDefenseWaypointPath(points) {
+    var ordered = [];
+    var list = uniquePathCells(points);
+    if (!list.length) return ordered;
+    ordered.push(cloneCellPoint(list[0]));
+    for (var index = 1; index < list.length; index += 1) {
+        ordered = ordered.concat(buildManhattanBridge(list[index - 1], list[index]).slice(1));
+    }
+    return uniquePathCells(ordered);
+}
+
+function splitContiguousPathSegments(points) {
+    var list = uniquePathCells(points);
+    if (!list.length) return [];
+    var segments = [];
+    var current = [list[0]];
+    for (var index = 1; index < list.length; index += 1) {
+        if (manhattanDefenseDistance(list[index - 1], list[index]) === 1) {
+            current.push(list[index]);
+            continue;
+        }
+        segments.push(current);
+        current = [list[index]];
+    }
+    if (current.length) segments.push(current);
+    return segments;
+}
+
+function isAxisAlignedWaypointPath(points) {
+    var list = uniquePathCells(points);
+    if (list.length < 2) return false;
+    var hasGap = false;
+    for (var index = 1; index < list.length; index += 1) {
+        var prev = list[index - 1];
+        var next = list[index];
+        var distance = manhattanDefenseDistance(prev, next);
+        if (distance <= 0) return false;
+        if (prev.col !== next.col && prev.row !== next.row) return false;
+        if (distance > 1) hasGap = true;
+    }
+    return hasGap;
+}
+
+function hasNonAxisDefenseStep(points) {
+    var list = uniquePathCells(points);
+    for (var index = 1; index < list.length; index += 1) {
+        var prev = list[index - 1];
+        var next = list[index];
+        if (prev.col !== next.col && prev.row !== next.row) return true;
+    }
+    return false;
+}
+
+function isContiguousDefensePath(points) {
+    var list = uniquePathCells(points);
+    if (list.length < 2) return false;
+    for (var index = 1; index < list.length; index += 1) {
+        if (manhattanDefenseDistance(list[index - 1], list[index]) !== 1) return false;
+    }
+    return true;
+}
+
+function orientContiguousDefensePath(cells, start, objective) {
+    var list = uniquePathCells(cells);
+    if (list.length < 2) return list;
+    var forwardScore = manhattanDefenseDistance(list[0], start) + manhattanDefenseDistance(list[list.length - 1], objective);
+    var reverseScore = manhattanDefenseDistance(list[list.length - 1], start) + manhattanDefenseDistance(list[0], objective);
+    return reverseScore < forwardScore ? list.slice().reverse() : list;
+}
+
+function buildDefenseCellBucket(points) {
+    var list = uniquePathCells(points);
+    var bucket = {};
+    list.forEach(function (cell) {
+        bucket[cellKey(cell)] = cloneCellPoint(cell);
+    });
+    for (var index = 1; index < list.length; index += 1) {
+        var prev = list[index - 1];
+        var next = list[index];
+        if (prev.col !== next.col && prev.row !== next.row) continue;
+        buildManhattanBridge(prev, next).forEach(function (cell) {
+            bucket[cellKey(cell)] = cloneCellPoint(cell);
+        });
+    }
+    return bucket;
+}
+
+function findNearestDefenseCellKey(bucket, target) {
+    var keys = Object.keys(bucket || {});
+    if (!keys.length) return '';
+    return keys.reduce(function (bestKey, currentKey) {
+        if (!bestKey) return currentKey;
+        var bestCell = bucket[bestKey];
+        var currentCell = bucket[currentKey];
+        var bestDistance = manhattanDefenseDistance(bestCell, target);
+        var currentDistance = manhattanDefenseDistance(currentCell, target);
+        if (currentDistance !== bestDistance) return currentDistance < bestDistance ? currentKey : bestKey;
+        if ((Number(currentCell.col) || 0) !== (Number(bestCell.col) || 0)) {
+            return (Number(currentCell.col) || 0) > (Number(bestCell.col) || 0) ? currentKey : bestKey;
+        }
+        return (Number(currentCell.row) || 0) < (Number(bestCell.row) || 0) ? currentKey : bestKey;
+    }, '');
+}
+
+function rebuildDefensePathFromCellBucket(cells, start, objective) {
+    var bucket = buildDefenseCellBucket(cells);
+    var startKey = cellKey(start);
+    if (!bucket[startKey]) bucket[startKey] = cloneCellPoint(start);
+    var queue = [startKey];
+    var visited = {};
+    visited[startKey] = '';
+    while (queue.length) {
+        var currentKey = queue.shift();
+        var current = bucket[currentKey];
+        [
+            { col: current.col + 1, row: current.row },
+            { col: current.col - 1, row: current.row },
+            { col: current.col, row: current.row + 1 },
+            { col: current.col, row: current.row - 1 }
+        ].forEach(function (next) {
+            var nextKey = cellKey(next);
+            if (!bucket[nextKey] || Object.prototype.hasOwnProperty.call(visited, nextKey)) return;
+            visited[nextKey] = currentKey;
+            queue.push(nextKey);
+        });
+    }
+    var targetKey = Object.keys(visited).reduce(function (bestKey, currentKey) {
+        if (!bestKey) return currentKey;
+        var bestCell = bucket[bestKey];
+        var currentCell = bucket[currentKey];
+        var bestDistance = manhattanDefenseDistance(bestCell, objective);
+        var currentDistance = manhattanDefenseDistance(currentCell, objective);
+        if (currentDistance !== bestDistance) return currentDistance < bestDistance ? currentKey : bestKey;
+        if ((Number(currentCell.col) || 0) !== (Number(bestCell.col) || 0)) {
+            return (Number(currentCell.col) || 0) > (Number(bestCell.col) || 0) ? currentKey : bestKey;
+        }
+        return (Number(currentCell.row) || 0) < (Number(bestCell.row) || 0) ? currentKey : bestKey;
+    }, '');
+    if (!Object.prototype.hasOwnProperty.call(visited, targetKey)) return [];
+    var ordered = [];
+    var traceKey = targetKey;
+    while (traceKey) {
+        ordered.push(cloneCellPoint(bucket[traceKey]));
+        traceKey = visited[traceKey];
+    }
+    ordered.reverse();
+    if (!sameCellPoint(ordered[ordered.length - 1], objective)) {
+        ordered = ordered.concat(buildManhattanBridge(ordered[ordered.length - 1], objective).slice(1));
+    }
+    return uniquePathCells(ordered);
+}
+
+function defenseBucketNeighborCount(bucket, cell) {
+    if (!bucket || !cell) return 0;
+    var neighbors = 0;
+    [
+        { col: cell.col + 1, row: cell.row },
+        { col: cell.col - 1, row: cell.row },
+        { col: cell.col, row: cell.row + 1 },
+        { col: cell.col, row: cell.row - 1 }
+    ].forEach(function (next) {
+        if (bucket[cellKey(next)]) neighbors += 1;
+    });
+    return neighbors;
+}
+
+function pickDefenseEntryCell(cells, objective, preferredStart) {
+    if (preferredStart) return cloneCellPoint(preferredStart);
+    var bucket = buildDefenseCellBucket(cells);
+    var keys = Object.keys(bucket).filter(function (key) {
+        return !sameCellPoint(bucket[key], objective);
+    });
+    if (!keys.length) return cloneCellPoint(objective);
+    var endpointKeys = keys.filter(function (key) {
+        return defenseBucketNeighborCount(bucket, bucket[key]) <= 1;
+    });
+    var candidateKeys = endpointKeys.length ? endpointKeys : keys;
+    var bestKey = candidateKeys.reduce(function (best, current) {
+        if (!best) return current;
+        var bestCell = bucket[best];
+        var currentCell = bucket[current];
+        var bestDistance = manhattanDefenseDistance(bestCell, objective);
+        var currentDistance = manhattanDefenseDistance(currentCell, objective);
+        if (currentDistance !== bestDistance) return currentDistance > bestDistance ? current : best;
+        if ((Number(currentCell.col) || 0) !== (Number(bestCell.col) || 0)) {
+            return (Number(currentCell.col) || 0) < (Number(bestCell.col) || 0) ? current : best;
+        }
+        return (Number(currentCell.row) || 0) < (Number(bestCell.row) || 0) ? current : best;
+    }, '');
+    return cloneCellPoint(bucket[bestKey] || objective);
+}
+
+function sanitizeDesignedDefensePath(path, map, preferredStart) {
+    var cells = uniquePathCells(path && Array.isArray(path.cells) ? path.cells : []);
+    if (cells.length < 2) return cells;
+    var objective = cloneCellPoint(map && map.objectivePoint ? map.objectivePoint : cells[cells.length - 1]);
+    if (isContiguousDefensePath(cells)) return orientContiguousDefensePath(cells, preferredStart || cells[0], objective);
+    if (isAxisAlignedWaypointPath(cells)) return cells;
+    var entryCell = pickDefenseEntryCell(cells, objective, preferredStart);
+    var rebuilt = rebuildDefensePathFromCellBucket(cells, entryCell, objective);
+    return rebuilt.length >= 2 ? rebuilt : cells;
+}
+
+function canonicalizeDefensePathCells(cells) {
+    var list = uniquePathCells(cells);
+    if (list.length < 2) return list;
+    if (list.length <= 4) return expandDefenseWaypointPath(list);
+    if (isAxisAlignedWaypointPath(list)) return expandDefenseWaypointPath(list);
+    if (hasNonAxisDefenseStep(list)) return list;
+    var segments = splitContiguousPathSegments(list).filter(function (segment) {
+        return segment && segment.length >= 2;
+    });
+    if (!segments.length) return expandDefenseWaypointPath([list[0], list[list.length - 1]]);
+    if (segments.length === 1) return segments[0];
+    return segments.reduce(function (best, segment) {
+        return !best || segment.length > best.length ? segment : best;
+    }, null) || [];
+}
+
+function reorderDefensePathCellsTowardObjective(cells, start, objective, grid) {
+    var list = uniquePathCells(cells);
+    if (!grid || list.length < 2) return list;
+    var cols = Math.max(4, Number(grid.cols) || DEFAULT_GRID_COLS);
+    var rows = Math.max(4, Number(grid.rows) || DEFAULT_GRID_ROWS);
+    var safeStart = {
+        col: clamp(Number(start && start.col) || 0, 0, cols - 1),
+        row: clamp(Number(start && start.row) || 0, 0, rows - 1)
+    };
+    var safeObjective = {
+        col: clamp(Number(objective && objective.col) || Math.max(0, cols - 1), 0, cols - 1),
+        row: clamp(Number(objective && objective.row) || Math.floor(rows / 2), 0, rows - 1)
+    };
+    return orderEditorPathCellsDefense(list, safeStart, safeObjective, cols, rows);
+}
+
+function defensePathOverlapRatio(left, right) {
+    var leftKeys = new Set((left && Array.isArray(left.cells) ? left.cells : []).map(cellKey));
+    var rightKeys = new Set((right && Array.isArray(right.cells) ? right.cells : []).map(cellKey));
+    if (!leftKeys.size || !rightKeys.size) return 0;
+    var shared = 0;
+    leftKeys.forEach(function (key) {
+        if (rightKeys.has(key)) shared += 1;
+    });
+    return shared / Math.max(1, Math.min(leftKeys.size, rightKeys.size));
+}
+
+function longestDefensePath(paths) {
+    return (Array.isArray(paths) ? paths : []).reduce(function (best, path) {
+        var length = path && Array.isArray(path.cells) ? path.cells.length : 0;
+        if (!best) return path;
+        var bestLength = Array.isArray(best.cells) ? best.cells.length : 0;
+        if (best && best.id === 'path-main' && path.id !== 'path-main') return best;
+        if (path && path.id === 'path-main' && best.id !== 'path-main') return path;
+        if (length > bestLength) return path;
+        return best;
+    }, null);
+}
+
+function preferredBranchOffsets(baseCells, grid, count) {
+    var desired = Math.max(0, Number(count) || 0);
+    if (!desired || !Array.isArray(baseCells) || !baseCells.length || !grid) return [];
+    var minRow = baseCells.reduce(function (minValue, cell) {
+        return Math.min(minValue, Number(cell.row) || 0);
+    }, Infinity);
+    var maxRow = baseCells.reduce(function (maxValue, cell) {
+        return Math.max(maxValue, Number(cell.row) || 0);
+    }, -Infinity);
+    var candidates = [-4, 4, -3, 3, -2, 2, -5, 5];
+    return candidates.filter(function (offset) {
+        return minRow + offset >= 0 && maxRow + offset < Number(grid.rows || 0);
+    }).slice(0, desired);
+}
+
+function buildBranchDefensePath(baseCells, grid, offsetRows) {
+    var points = uniquePathCells(baseCells);
+    if (!grid || points.length < 4 || !offsetRows) return [];
+    var splitIndex = Math.max(1, Math.floor(points.length * 0.26));
+    var mergeIndex = Math.max(splitIndex + 2, Math.floor(points.length * 0.72));
+    var shifted = points.slice(0, mergeIndex + 1).map(function (cell) {
+        return {
+            col: Number(cell.col) || 0,
+            row: clamp((Number(cell.row) || 0) + offsetRows, 0, Math.max(0, Number(grid.rows || 1) - 1))
+        };
+    });
+    if (shifted.every(function (cell, index) { return sameCellPoint(cell, points[index]); })) return [];
+    var bridgeToMain = buildManhattanBridge(shifted[shifted.length - 1], points[mergeIndex]).slice(1);
+    return uniquePathCells(shifted.concat(bridgeToMain, points.slice(mergeIndex + 1)));
+}
+
+function normalizeDefensePathList(paths, map) {
+    var objective = map && map.objectivePoint ? cloneCellPoint(map.objectivePoint) : null;
+    var spawnLookup = {};
+    if (map && Array.isArray(map.spawnPoints)) {
+        map.spawnPoints.forEach(function (spawn) {
+            if (!spawn || !spawn.pathId || spawnLookup[spawn.pathId]) return;
+            spawnLookup[spawn.pathId] = cloneCellPoint(spawn);
+        });
+    }
+    var candidates = (Array.isArray(paths) ? paths : [])
+        .filter(function (path) {
+            return path && Array.isArray(path.cells) && path.cells.length > 1;
+        })
+        .map(function (path) {
+            var cells = canonicalizeDefensePathCells(path.cells);
+            if (cells.length < 2) return null;
+            var start = spawnLookup[path.id] || cells[0];
+            var ordered = isContiguousDefensePath(cells)
+                ? orientContiguousDefensePath(cells, start, objective)
+                : rebuildDefensePathFromCellBucket(cells, start, objective);
+            if (ordered.length < 2) {
+                ordered = reorderDefensePathCellsTowardObjective(cells, start, objective, map && map.grid);
+            }
+            if (ordered.length < 2) return null;
+            return {
+                id: String(path.id || 'path-main'),
+                name: String(path.name || path.id || '敌人路径'),
+                cells: ordered
+            };
+        })
+        .filter(Boolean)
+        .sort(function (left, right) {
+            if (left.id === 'path-main' && right.id !== 'path-main') return -1;
+            if (right.id === 'path-main' && left.id !== 'path-main') return 1;
+            return right.cells.length - left.cells.length || left.id.localeCompare(right.id, 'zh-Hans-CN');
+        });
+    var accepted = [];
+    var seenSignatures = {};
+    var seenStarts = {};
+    candidates.forEach(function (path) {
+        var signature = path.cells.map(cellKey).join('|');
+        var startKey = cellKey(path.cells[0]);
+        if (seenSignatures[signature] || seenStarts[startKey]) return;
+        if (accepted.some(function (other) { return defensePathOverlapRatio(path, other) >= 0.92; })) return;
+        seenSignatures[signature] = true;
+        seenStarts[startKey] = true;
+        accepted.push(path);
+    });
+    return accepted;
+}
+
+function desiredDesignedRouteCount(level) {
+    return Number(level && level.difficulty) >= 4 ? 3 : 2;
+}
+
+function buildDesignedDefensePaths(level) {
+    var map = level && level.map;
+    if (!map || !map.grid) return [];
+    var existing = normalizeDefensePathList(map.enemyPaths, map);
+    var desiredCount = desiredDesignedRouteCount(level);
+    var active = [];
+    var fallbackPaths = normalizeDefensePathList([{ id: 'path-main', name: '主敌人路径', cells: map.roads }], map);
+    var mainPath = longestDefensePath(existing) || fallbackPaths[0] || { id: 'path-main', name: '主敌人路径', cells: uniquePathCells(map.roads) };
+    if (mainPath && Array.isArray(mainPath.cells) && mainPath.cells.length >= 2 && mainPath.cells.length < 4) {
+        var expandedMainCells = buildManhattanBridge(mainPath.cells[0], mainPath.cells[mainPath.cells.length - 1]);
+        if (expandedMainCells.length >= 4) {
+            mainPath = {
+                id: mainPath.id,
+                name: mainPath.name,
+                cells: expandedMainCells
+            };
+        }
+    }
+    if (mainPath && Array.isArray(mainPath.cells) && mainPath.cells.length > 1) active.push(mainPath);
+    existing.forEach(function (path) {
+        if (active.length >= desiredCount) return;
+        if (active.some(function (item) { return item.id === path.id; })) return;
+        active.push(path);
+    });
+    if (!active.length || !Array.isArray(active[0].cells) || active[0].cells.length < 2) return existing.slice(0, desiredCount);
+    var offsets = preferredBranchOffsets(active[0].cells, map.grid, desiredCount - active.length);
+    offsets.forEach(function (offset, index) {
+        if (active.length >= desiredCount) return;
+        var branchCells = reorderDefensePathCellsTowardObjective(
+            buildBranchDefensePath(active[0].cells, map.grid, offset),
+            { col: active[0].cells[0].col, row: clamp(active[0].cells[0].row + offset, 0, Math.max(0, Number(map.grid.rows || 1) - 1)) },
+            map.objectivePoint,
+            map.grid
+        );
+        if (branchCells.length < 2) return;
+        active.push({
+            id: 'path-route-' + String(active.length + 1),
+            name: index === 0 ? '侧翼支路' : '外环支路',
+            cells: branchCells
+        });
+    });
+    return active.slice(0, desiredCount).map(function (path) {
+        var preferredStart = Array.isArray(map.spawnPoints)
+            ? map.spawnPoints.find(function (spawn) {
+                return spawn && String(spawn.pathId || '') === String(path.id || '');
+            })
+            : null;
+        return {
+            id: path.id,
+            name: path.name,
+            cells: sanitizeDesignedDefensePath(path, map, preferredStart)
+        };
+    });
+}
+
+function buildDesignedSpawnPoints(paths) {
+    return (Array.isArray(paths) ? paths : []).map(function (path, index) {
+        var firstCell = Array.isArray(path.cells) && path.cells.length ? path.cells[0] : { col: 0, row: 0 };
+        return {
+            id: 'spawn-route-' + String(index + 1),
+            name: index === 0 ? '主入口' : '分路入口 ' + String(index),
+            col: Number(firstCell.col) || 0,
+            row: Number(firstCell.row) || 0,
+            pathId: String(path.id || 'path-main')
+        };
+    });
+}
+
+function buildWaveSummaryFromRules(rules) {
+    var waveMap = {};
+    (Array.isArray(rules) ? rules : []).forEach(function (rule) {
+        var waveNumber = Math.max(1, Math.round(Number(rule.waveNumber) || 1));
+        if (!waveMap[waveNumber]) {
+            waveMap[waveNumber] = { waveNumber: waveNumber, theme: 'Wave ' + String(waveNumber), enemyPool: [], count: 0, reward: 0 };
+        }
+        if (rule.enemyTypeId && waveMap[waveNumber].enemyPool.indexOf(rule.enemyTypeId) === -1) {
+            waveMap[waveNumber].enemyPool.push(rule.enemyTypeId);
+        }
+        waveMap[waveNumber].count += Math.max(1, Math.round(Number(rule.count) || 1));
+        waveMap[waveNumber].reward += Math.max(0, Math.round(Number(rule.reward) || 0));
+    });
+    return Object.keys(waveMap)
+        .map(function (key) { return waveMap[key]; })
+        .sort(function (left, right) { return left.waveNumber - right.waveNumber; });
+}
+
+function buildDesignedWaveRules(level, spawnPoints) {
+    var routes = Array.isArray(spawnPoints) ? spawnPoints : [];
+    if (!routes.length) return [];
+    var enemyIds = (Array.isArray(level.enemyTypes) ? level.enemyTypes : [])
+        .map(function (enemy) { return String(enemy && enemy.id || '').trim(); })
+        .filter(Boolean);
+    if (!enemyIds.length) enemyIds = ['enemy-drone'];
+    var totalWaves = Math.max(12, Math.min(20, 10 + Math.max(1, Number(level.difficulty) || 1) * 2));
+    var threeRouteStart = routes.length >= 3 ? Math.max(8, Math.ceil(totalWaves * 0.58)) : totalWaves + 1;
+    var twoRouteStart = routes.length >= 2 ? Math.max(3, Math.ceil(totalWaves * 0.25)) : totalWaves + 1;
+    var rules = [];
+    for (var waveNumber = 1; waveNumber <= totalWaves; waveNumber += 1) {
+        var activeRouteCount = 1;
+        if (waveNumber >= twoRouteStart) activeRouteCount = Math.min(routes.length, 2);
+        if (waveNumber >= threeRouteStart) activeRouteCount = Math.min(routes.length, 3);
+        for (var routeIndex = 0; routeIndex < activeRouteCount; routeIndex += 1) {
+            var route = routes[routeIndex];
+            var enemyTier = Math.min(enemyIds.length - 1, Math.floor((waveNumber - 1) / 3) + routeIndex);
+            rules.push({
+                id: 'wave-' + String(waveNumber) + '-route-' + String(routeIndex + 1),
+                waveNumber: waveNumber,
+                enemyTypeId: enemyIds[enemyTier],
+                count: Math.max(6, 5 + Math.round(Number(level.difficulty) || 1) + Math.floor(waveNumber * 0.9) + routeIndex * 2),
+                interval: Math.max(0.45, Number((1.22 - waveNumber * 0.03 - routeIndex * 0.04).toFixed(2))),
+                spawnPointId: String(route.id || ''),
+                pathId: String(route.pathId || 'path-main'),
+                reward: 30 + waveNumber * 8 + routeIndex * 4,
+                overrideModelPath: '',
+                overrideModelScale: 1
+            });
+        }
+    }
+    return rules;
+}
+
+function buildDefenseReservedCellKeys(paths, spawnPoints, objective, roads) {
+    var reserved = {};
+    (Array.isArray(paths) ? paths : []).forEach(function (path) {
+        (Array.isArray(path && path.cells) ? path.cells : []).forEach(function (cell) {
+            reserved[cellKey(cell)] = true;
+        });
+    });
+    (Array.isArray(spawnPoints) ? spawnPoints : []).forEach(function (spawn) {
+        reserved[cellKey(spawn)] = true;
+    });
+    (Array.isArray(roads) ? roads : []).forEach(function (cell) {
+        reserved[cellKey(cell)] = true;
+    });
+    if (objective) reserved[cellKey(objective)] = true;
+    return reserved;
+}
+
+function hasDefenseObstacleOverlap(obstacles, paths, spawnPoints, objective, roads) {
+    var reserved = buildDefenseReservedCellKeys(paths, spawnPoints, objective, roads);
+    return (Array.isArray(obstacles) ? obstacles : []).some(function (cell) {
+        return !!reserved[cellKey(cell)];
+    });
+}
+
+function sanitizeDefenseObstacles(obstacles, paths, spawnPoints, objective, roads) {
+    var reserved = buildDefenseReservedCellKeys(paths, spawnPoints, objective, roads);
+    return uniquePathCells(Array.isArray(obstacles) ? obstacles : []).filter(function (cell) {
+        return !reserved[cellKey(cell)];
+    });
+}
+
+function shouldUpgradeDesignedTowerDefense(level) {
+    if (!level || level.status !== 'designed') return false;
+    var towerDefense = level.modeProfiles && level.modeProfiles.towerDefense;
+    if (!towerDefense || towerDefense.enabled === false) return false;
+    var rawPaths = level.map && Array.isArray(level.map.enemyPaths)
+        ? level.map.enemyPaths.filter(function (path) {
+            return path && Array.isArray(path.cells) && path.cells.length > 1;
+        })
+        : [];
+    var paths = normalizeDefensePathList(rawPaths, level.map);
+    var spawnPoints = level.map && Array.isArray(level.map.spawnPoints) ? level.map.spawnPoints : [];
+    var waveRules = Array.isArray(level.waveRules) ? level.waveRules : [];
+    var spawnKeys = {};
+    var hasDuplicateSpawn = spawnPoints.some(function (spawn) {
+        var key = cellKey(spawn);
+        if (spawnKeys[key]) return true;
+        spawnKeys[key] = true;
+        return false;
+    });
+    var objectivePoint = level.map && level.map.objectivePoint ? level.map.objectivePoint : null;
+    return (
+        paths.length < 2 ||
+        spawnPoints.length < 2 ||
+        spawnPoints.length !== paths.length ||
+        rawPaths.length !== paths.length ||
+        rawPaths.some(function (path) {
+            return hasNonAxisDefenseStep(path && Array.isArray(path.cells) ? path.cells : []);
+        }) ||
+        hasDuplicateSpawn ||
+        hasDefenseObstacleOverlap(level.map && level.map.obstacles, paths, spawnPoints, objectivePoint, level.map && level.map.roads) ||
+        waveRules.length < 8 ||
+        waveRules.some(function (rule) {
+            return !String(rule && rule.spawnPointId || '').trim() || !String(rule && rule.pathId || '').trim();
+        })
+    );
+}
+
+function upgradeDesignedTowerDefenseLevel(level) {
+    if (!shouldUpgradeDesignedTowerDefense(level)) return;
+    var activePaths = buildDesignedDefensePaths(level);
+    if (!activePaths.length) return;
+    var spawnPoints = buildDesignedSpawnPoints(activePaths);
+    level.map.enemyPaths = activePaths;
+    level.map.spawnPoints = spawnPoints;
+    level.map.enemyExits = spawnPoints;
+    var roadByKey = {};
+    level.map.roads = uniquePathCells((Array.isArray(level.map.roads) ? level.map.roads : []).concat(
+        activePaths.flatMap(function (path) {
+            return Array.isArray(path.cells) ? path.cells : [];
+        })
+    )).filter(function (cell) {
+        var key = String(cell.col) + ',' + String(cell.row);
+        if (roadByKey[key]) return false;
+        roadByKey[key] = true;
+        return true;
+    });
+    level.map.obstacles = sanitizeDefenseObstacles(level.map.obstacles, activePaths, spawnPoints, level.map.objectivePoint, level.map.roads);
+    level.waveRules = buildDesignedWaveRules(level, spawnPoints);
+    var towerDefense = level.modeProfiles && level.modeProfiles.towerDefense ? level.modeProfiles.towerDefense : { enabled: true };
+    towerDefense.enabled = towerDefense.enabled !== false;
+    towerDefense.spawnRoutes = activePaths.map(function (path, index) {
+        return {
+            id: 'route-' + String(index + 1),
+            label: index === 0 ? '主路线' : index === 1 ? '侧翼路线' : '外环路线',
+            entry: spawnPoints[index] ? spawnPoints[index].name : ('入口 ' + String(index + 1)),
+            exit: level.map.objectivePoint && level.map.objectivePoint.name ? level.map.objectivePoint.name : '防守核心'
+        };
+    });
+    towerDefense.waves = buildWaveSummaryFromRules(level.waveRules);
+    towerDefense.maxWaves = towerDefense.waves.length;
+    level.modeProfiles.towerDefense = towerDefense;
 }
 
 // ---------------------------------------------------------------------------
@@ -1867,6 +2551,8 @@ export function normalizeLevel(level) {
         uiModules: Array.isArray(source.uiModules) ? source.uiModules : [],
         extensions: source.extensions && typeof source.extensions === 'object' ? source.extensions : {}
     };
+    maybePromoteLegacyBoardImage(normalized, normalized.map);
+    upgradeDesignedTowerDefenseLevel(normalized);
     normalized.location.regionLabel = normalized.location.regionLabel || buildRegionLabel(normalized.location, source.region);
     return normalized;
 }

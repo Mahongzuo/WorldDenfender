@@ -79,6 +79,13 @@ function boardSpriteLayersHtml(env, level) {
         .join('');
 }
 
+function hasLegacyBaseBoardImageLayer(level) {
+    var layers = level && level.map && Array.isArray(level.map.boardImageLayers) ? level.map.boardImageLayers : [];
+    return layers.some(function (layer) {
+        return layer && layer.legacyBoardBase === true;
+    });
+}
+
 function boardCellMatchesSelection(env, level, col, row) {
     var selectedObject = env.getSelectedObject();
     if (!selectedObject) return false;
@@ -196,7 +203,7 @@ export function renderMap(refs, env) {
     refs.mapGrid.style.setProperty('--jinan-map-texture', 'url("' + JINAN_MAP_TEXTURE_URL + '")');
     refs.mapGrid.style.gridTemplateColumns = '';
     refs.mapGrid.style.gridTemplateRows = '';
-    refs.mapGrid.classList.toggle('map-grid--jinan-texture', isJinanLevel(level));
+    refs.mapGrid.classList.toggle('map-grid--jinan-texture', isJinanLevel(level) && !hasLegacyBaseBoardImageLayer(level));
 
     var floorHtml = [];
     var pathOverlayHtml = [];
