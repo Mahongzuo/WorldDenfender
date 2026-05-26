@@ -164,6 +164,8 @@ export function uniqueCatalogId(items, seed, slugifyFn) {
  * @returns {boolean}
  */
 export function isJinanLevel(level) {
+    var sceneRemake = level && level.extensions && level.extensions.sceneRemake;
+    if (sceneRemake && sceneRemake.disableJinanRegionalFlatPreset === true) return false;
     var haystack = [
         level && level.id,
         level && level.name,

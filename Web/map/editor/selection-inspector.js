@@ -264,6 +264,9 @@ function syncBoardLayerFieldFromInspector(refs, env, input) {
 function updateSelectedField(env, input) {
     var target = env.findSelectedObject(env.getLevel());
     if (!target) return;
+    if (target.kind === 'actor' && typeof env.recordActorUndo === 'function') {
+        env.recordActorUndo();
+    }
     var path = input.getAttribute('data-inspect-field');
     var next =
         input.type === 'number'

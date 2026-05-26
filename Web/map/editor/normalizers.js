@@ -150,6 +150,11 @@ function levelLooksLikeJinan(level) {
     return /济南|泉城|370100|shandong|cn-370100|shandong_370100/i.test(haystack);
 }
 
+function levelDisablesJinanBoardFallback(level) {
+    var sceneRemake = level && level.extensions && level.extensions.sceneRemake;
+    return !!(sceneRemake && sceneRemake.disableJinanRegionalFlatPreset === true);
+}
+
 function hasFullCoverBoardImageLayer(layers) {
     return Array.isArray(layers) && layers.some(function (layer) {
         return layer && Number(layer.widthPct) >= 100;
@@ -181,7 +186,7 @@ function maybePromoteLegacyBoardImage(level, map) {
     var theme = map.theme && typeof map.theme === 'object' ? map.theme : null;
     var legacyBoardTextureUrl = theme ? String(theme.boardTextureUrl || '').trim() : '';
     var promotedUrl = legacyBoardTextureUrl;
-    if (!promotedUrl && level.status === 'designed' && levelLooksLikeJinan(level)) {
+    if (!promotedUrl && level.status === 'designed' && levelLooksLikeJinan(level) && !levelDisablesJinanBoardFallback(level)) {
         promotedUrl = JINAN_MAP_TEXTURE_URL;
     }
     if (promotedUrl && !hasLegacyBaseBoardImageLayer(map.boardImageLayers) && Array.isArray(map.boardImageLayers)) {

@@ -447,6 +447,7 @@ export interface MapDefinition {
   name: string;
   description: string;
   editorStatus?: string;
+  disableJinanRegionalFlatPreset?: boolean;
   cols?: number;
   rows?: number;
   theme: MapTheme;

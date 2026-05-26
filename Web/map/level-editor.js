@@ -79,6 +79,12 @@ import {
 } from './editor/preview-layer.js';
 import { renderLevelContentBrowser as _renderLevelContentBrowser } from './editor/level-content-browser.js';
 import { bindEditorEvents as _bindEditorEvents } from './editor/editor-events.js';
+import { bindLevelContextMenu as _bindLevelContextMenu } from './editor/level-context-menu.js';
+import {
+    summarizeLevelDeleteAssets,
+    formatLevelDeleteConfirmMessage,
+    deleteProjectFiles
+} from './editor/level-assets.js';
 import { ctx } from './editor/context.js';
 import {
     ensureLevelCutscenesForLevel,
@@ -90,13 +96,30 @@ import {
     renderThemeBoardImageWorkbench as _renderThemeBoardImageWorkbench,
     bindThemeBoardImageWorkbenchEvents as _bindThemeBoardImageWorkbenchEvents
 } from './editor/theme-board-image-workbench.js';
+import {
+    readEditorSession,
+    persistEditorSession,
+    syncLevelIdInUrl,
+    applyEditorSessionUi
+} from './editor/session-persistence.js';
+import {
+    pushActorUndoSnapshot,
+    popActorUndoSnapshot,
+    setUndoApplying,
+    isUndoApplying,
+    clearActorUndoStack
+} from './editor/undo-history.js';
 
+    var savedEditorSession = readEditorSession();
     var state = null;
-    var selectedLevelId = new URLSearchParams(window.location.search).get('levelId') || '';
+    var selectedLevelId =
+        new URLSearchParams(window.location.search).get('levelId') ||
+        (savedEditorSession && savedEditorSession.levelId) ||
+        '';
     var selectedObject = null;
     var activeTool = 'select';
-    var activeStatusFilter = 'all';
-    var activeWorkbench = 'level';
+    var activeStatusFilter = (savedEditorSession && savedEditorSession.activeStatusFilter) || 'all';
+    var activeWorkbench = (savedEditorSession && savedEditorSession.activeWorkbench) || 'level';
     var activeGlobalSettingsTab = 'levels';
     var globalCutsceneEditLevelId = '';
     var activeThemeScope = 'defense';
@@ -113,7 +136,7 @@ import {
         statusTone: 'idle',
         lastResult: null
     };
-    var activeEditorMode = 'defense';
+    var activeEditorMode = (savedEditorSession && savedEditorSession.activeEditorMode) || 'defense';
     var activeGameplayTab = 'enemies';
     var selectedGameplayEntryId = '';
     var selectedGameplayAssetId = '';
@@ -121,7 +144,8 @@ import {
     var selectedModelId = '';
     var modelAssetPreviewApi = null;
     var modelPreviewInitGeneration = 0;
-    var viewportViewMode = 'board';
+    var viewportViewMode = (savedEditorSession && savedEditorSession.viewportViewMode) || 'board';
+    var actorUndoCoalesceUntil = 0;
     var previewApi = null;
     var gameplayAssetPreviewApi = null;
     var previewInitGeneration = 0;
@@ -511,6 +535,65 @@ import {
         _applyShellPanelCollapseUi(refs, shellLayoutEnv());
     }
 
+    function persistEditorSessionState() {
+        persistEditorSession({
+            levelId: selectedLevelId,
+            activeStatusFilter: activeStatusFilter,
+            activeWorkbench: activeWorkbench,
+            activeEditorMode: activeEditorMode,
+            viewportViewMode: viewportViewMode
+        });
+        syncLevelIdInUrl(selectedLevelId);
+    }
+
+    function recordActorUndo(force) {
+        var level = getLevel();
+        if (!level || isUndoApplying()) return;
+        var now = Date.now();
+        if (!force && now < actorUndoCoalesceUntil) return;
+        actorUndoCoalesceUntil = force ? 0 : now + 350;
+        pushActorUndoSnapshot(selectedLevelId, level.map.actors);
+    }
+
+    function undoLastActorChange() {
+        var level = getLevel();
+        if (!level) return false;
+        var prev = popActorUndoSnapshot(selectedLevelId);
+        if (!prev) return false;
+        setUndoApplying(true);
+        level.map.actors = prev;
+        if (selectedObject && selectedObject.kind === 'actor') {
+            var stillSelected = level.map.actors.some(function (item) {
+                return item.id === selectedObject.id;
+            });
+            if (!stillSelected) selectedObject = null;
+        }
+        setUndoApplying(false);
+        actorUndoCoalesceUntil = 0;
+        markDirty('已撤销模型修改');
+        renderAll();
+        syncPreviewIfOpen();
+        return true;
+    }
+
+    function restoreEditorSessionAfterLoad() {
+        applyEditorSessionUi(refs, {
+            activeStatusFilter: activeStatusFilter,
+            activeWorkbench: activeWorkbench,
+            activeEditorMode: activeEditorMode,
+            viewportViewMode: viewportViewMode
+        });
+        syncLayoutToolButtons();
+        document.querySelectorAll('[data-tool]').forEach(function (item) {
+            item.classList.toggle('active', item.getAttribute('data-tool') === activeTool);
+        });
+        if (refs.activeToolLabel) refs.activeToolLabel.textContent = '当前工具：' + getToolLabel(activeTool, activeEditorMode);
+        if (viewportViewMode === 'preview') {
+            wireViewportViewMode('preview');
+        }
+        persistEditorSessionState();
+    }
+
     function init() {
         _prefetchCesiumIonTokenForEditor();
         initGeoMappingToggle();
@@ -810,6 +893,7 @@ import {
             selectedLevelId = pickLevelId(state.levels, selectedLevelId);
             await refreshGameModelsCatalog();
             renderAll();
+            restoreEditorSessionAfterLoad();
             isDirty = generated > 0 || synced > 0 || geoSynced > 0 || gameplaySynced > 0;
             _persistLocalBackup(state);
             setStatus(generated + synced + geoSynced + gameplaySynced > 0 ? '已同步 ' + gameplaySynced + ' 个运行时玩法条目、' + synced + ' 个城市布局、' + geoSynced + ' 个真实地图坐标，生成 ' + generated + ' 个骨架，保存后写入项目' : '配置已加载', generated + synced + geoSynced + gameplaySynced > 0 ? 'dirty' : 'success');
@@ -819,6 +903,7 @@ import {
             selectedLevelId = pickLevelId(state.levels, selectedLevelId);
             await refreshGameModelsCatalog();
             renderAll();
+            restoreEditorSessionAfterLoad();
             isDirty = false;
             setStatus('项目读取失败，已载入本地备份: ' + error.message, 'error');
         }
@@ -846,6 +931,7 @@ import {
             _persistLocalBackup(state);
             await refreshGameModelsCatalog();
             renderAll();
+            persistEditorSessionState();
             setStatus('已保存到 Web/data/level-editor-state.json', 'success');
         } catch (error) {
             _persistLocalBackup(state);
@@ -1137,23 +1223,70 @@ import {
         _renderGlobalCutsceneOverview(refs, globalSettingsEnv());
     }
 
-    function deleteLevelById(levelId) {
-        if (!state || !levelId) return;
+    function removeLevelFromState(levelId) {
+        if (!state || !levelId) return false;
         var idx = state.levels.findIndex(function (l) {
             return l.id === levelId;
         });
-        if (idx < 0) return;
-        var name = state.levels[idx].name || levelId;
-        if (!window.confirm('确定删除关卡「' + name + '」？此操作不可撤销。')) return;
+        if (idx < 0) return false;
         state.levels.splice(idx, 1);
         if (selectedLevelId === levelId) {
             selectedLevelId = state.levels[0] ? state.levels[0].id : '';
+            selectedObject = null;
         }
         if (globalCutsceneEditLevelId === levelId) {
             globalCutsceneEditLevelId = '';
         }
+        clearActorUndoStack(levelId);
+        return true;
+    }
+
+    function deleteLevelById(levelId) {
+        if (!state || !levelId) return;
+        var level = findLevelById(state.levels, levelId);
+        if (!level) return;
+        var name = level.name || levelId;
+        if (!window.confirm('确定删除关卡「' + name + '」？\n\n仅移除编辑器中的关卡数据，磁盘上的模型/配图文件将保留。\n\n删除后请点击「保存」写入项目 JSON。')) return;
+        if (!removeLevelFromState(levelId)) return;
         markDirty('已删除关卡');
         renderAll();
+        persistEditorSessionState();
+    }
+
+    async function deleteLevelWithAssets(levelId) {
+        if (!state || !levelId) return;
+        var level = findLevelById(state.levels, levelId);
+        if (!level) return;
+        var summary = summarizeLevelDeleteAssets(level, state.levels);
+        var name = level.name || levelId;
+        if (!window.confirm(formatLevelDeleteConfirmMessage(name, summary))) return;
+
+        var deletedCount = 0;
+        var failedCount = 0;
+        if (summary.exclusivePaths.length) {
+            try {
+                var result = await deleteProjectFiles(summary.exclusivePaths);
+                deletedCount = (result.deleted || []).length;
+                failedCount = (result.failed || []).length;
+            } catch (error) {
+                if (!window.confirm('资源文件删除失败：' + error.message + '\n\n仍要删除关卡数据吗？')) return;
+            }
+        }
+
+        if (!removeLevelFromState(levelId)) return;
+        markDirty('已删除关卡及关联资源');
+        renderAll();
+        persistEditorSessionState();
+
+        if (summary.exclusivePaths.length) {
+            if (failedCount > 0) {
+                setStatus('已删除关卡；' + deletedCount + ' 个文件已移除，' + failedCount + ' 个删除失败', 'dirty');
+            } else {
+                setStatus('已删除关卡及 ' + deletedCount + ' 个关联资源，请保存项目', 'dirty');
+            }
+        } else {
+            setStatus('已删除关卡（无独占资源文件），请保存项目', 'dirty');
+        }
     }
 
     function focusLevelInEditor(levelId) {
@@ -1170,6 +1303,7 @@ import {
             return el.getAttribute('data-level-id') === levelId;
         });
         if (treeBtn && typeof treeBtn.scrollIntoView === 'function') treeBtn.scrollIntoView({ block: 'nearest' });
+        persistEditorSessionState();
     }
 
     function renderGlobalScreenUiForm() {
@@ -2023,7 +2157,8 @@ import {
             renderPreviewSceneOutline: renderPreviewSceneOutline,
             renderOverview: renderOverview,
             renderAll: renderAll,
-            renderContentBrowser: renderContentBrowser
+            renderContentBrowser: renderContentBrowser,
+            recordActorUndo: recordActorUndo
         };
     }
 
@@ -2131,6 +2266,7 @@ import {
         if (next === 'preview') initPreviewLayer();
         syncViewportPanels();
         syncEditorCtx();
+        persistEditorSessionState();
     }
 
     function fallbackBrowsableAssetId(asset) {
@@ -2438,6 +2574,7 @@ import {
         var level = getLevel();
         var template = findActorTemplate(templateId);
         if (!level || !template) return;
+        recordActorUndo();
         var actor = {
             id: uid('actor'),
             templateId: template.id,
@@ -2494,6 +2631,7 @@ import {
             );
             return;
         }
+        recordActorUndo();
         var actor = {
             id: uid('actor'),
             templateId: '',
@@ -2518,6 +2656,7 @@ import {
     }
 
     function moveActor(actorId, col, row) {
+        recordActorUndo();
         _moveActor(mapEditEnv(), actorId, col, row);
     }
 
@@ -2526,6 +2665,12 @@ import {
     }
 
     function eraseCellAt(col, row) {
+        var level = getLevel();
+        if (level && level.map.actors.some(function (item) {
+            return Number(item.col) === Number(col) && Number(item.row) === Number(row);
+        })) {
+            recordActorUndo();
+        }
         _eraseCellAt(mapEditEnv(), col, row);
     }
 
@@ -2862,6 +3007,7 @@ import {
         renderAll();
         syncPreviewIfOpen({ preserveView: false });
         syncEditorCtx();
+        persistEditorSessionState();
     }
 
     function selectObject(kind, id) {
@@ -2883,6 +3029,7 @@ import {
     function deleteSelection() {
         var level = getLevel();
         if (!level || !selectedObject) return;
+        if (selectedObject.kind === 'actor') recordActorUndo();
         var layout = ensureExplorationLayout(level.map);
         if (selectedObject.kind === 'actor') level.map.actors = level.map.actors.filter(function (item) { return item.id !== selectedObject.id; });
         if (selectedObject.kind === 'exploreBoss' && Array.isArray(level.map.exploreBosses)) level.map.exploreBosses = level.map.exploreBosses.filter(function (item) { return item.id !== selectedObject.id; });
@@ -3322,7 +3469,8 @@ import {
             renderOverview: renderOverview,
             schedulePreviewRefresh: schedulePreviewRefresh,
             renderBoardImagesPanel: renderBoardImagesPanel,
-            boardImagesEnv: boardImagesEnv
+            boardImagesEnv: boardImagesEnv,
+            recordActorUndo: recordActorUndo
         };
     }
 
@@ -3369,9 +3517,13 @@ import {
             renderLevelTree: renderLevelTree,
             applyMapSize: applyMapSize,
             deleteSelection: deleteSelection,
+            undoLastActorChange: undoLastActorChange,
+            deleteLevelById: deleteLevelById,
+            deleteLevelWithAssets: deleteLevelWithAssets,
             bindWaveEditorUi: bindWaveEditorUi,
             setActiveWorkbench: function (value) {
                 activeWorkbench = value || 'level';
+                persistEditorSessionState();
             },
             getActiveWorkbench: function () {
                 return activeWorkbench;
@@ -3434,10 +3586,12 @@ import {
             uploadNewModelFromInspector: uploadNewModelFromInspector,
             setActiveStatusFilter: function (value) {
                 activeStatusFilter = value || 'all';
+                persistEditorSessionState();
             },
             setActiveEditorMode: function (value) {
                 activeEditorMode = value || 'defense';
                 syncLayoutToolButtons();
+                persistEditorSessionState();
             },
             getActiveTool: function () {
                 return activeTool;

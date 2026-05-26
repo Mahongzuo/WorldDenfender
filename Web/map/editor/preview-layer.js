@@ -107,6 +107,9 @@ export function initPreviewLayer(refs, env) {
                 onActorModified: function () {
                     onPreviewActorCommitted(env);
                 },
+                onActorTransformDragStart: function () {
+                    if (typeof env.recordActorUndo === 'function') env.recordActorUndo(true);
+                },
                 onDropCatalogModel: function (payload) {
                     onDropCatalogModelInPreview(env, payload);
                 },

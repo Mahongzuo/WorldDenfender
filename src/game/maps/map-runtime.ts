@@ -26,6 +26,9 @@ const JINAN_REGIONAL_FALLBACK_BOARD_URL = "/Arts/Maps/jinan_full_map.png";
  * 选关入口可能没带 `city=jinan`，编辑器 id 常为 CN_shandong…。
  */
 function mapEligibleForJinanRegionalFlatPreset(map: MapDefinition, currentCity: string): boolean {
+  if (map.disableJinanRegionalFlatPreset === true) {
+    return false;
+  }
   if (currentCity === "jinan") {
     return true;
   }

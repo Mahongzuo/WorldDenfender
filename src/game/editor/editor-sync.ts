@@ -954,6 +954,10 @@ export function editorLevelToRuntimeMap(
     name: `${level.name || "编辑器关卡"}${mode === "explore" ? " · 探索" : ""}`,
     description: level.description || "由关卡编辑器同步生成的运行时地图。",
     ...(level.status ? { editorStatus: level.status } : {}),
+    ...((level as { extensions?: { sceneRemake?: { disableJinanRegionalFlatPreset?: boolean } } }).extensions?.sceneRemake
+      ?.disableJinanRegionalFlatPreset
+      ? { disableJinanRegionalFlatPreset: true }
+      : {}),
     cols: sourceCols,
     rows: sourceRows,
     geo: levelGeo,

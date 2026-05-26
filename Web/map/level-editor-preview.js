@@ -77,6 +77,7 @@ export function createPreview(options) {
         };
   var onSelectActor = options.onSelectActor;
   var onActorModified = options.onActorModified;
+  var onActorTransformDragStart = options.onActorTransformDragStart;
   var onTransformModeChange = options.onTransformModeChange;
   var getGlobalModelPathScales =
     typeof options.getGlobalModelPathScales === 'function'
@@ -157,7 +158,9 @@ export function createPreview(options) {
   var transform = new TransformControls(camera, renderer.domElement);
   transform.addEventListener('dragging-changed', function (e) {
     orbit.enabled = !e.value;
-    if (!e.value) {
+    if (e.value) {
+      if (onActorTransformDragStart) onActorTransformDragStart();
+    } else {
       syncSelectedFromScene(false);
     }
   });
@@ -676,6 +679,8 @@ export function createPreview(options) {
   }
 
   function isJinanLevel(level) {
+    var sceneRemake = level && level.extensions && level.extensions.sceneRemake;
+    if (sceneRemake && sceneRemake.disableJinanRegionalFlatPreset === true) return false;
     var text = [
       level && level.id,
       level && level.name,

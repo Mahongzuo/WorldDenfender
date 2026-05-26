@@ -1,7 +1,7 @@
 import { Buffer } from "node:buffer";
 import { exec, spawn } from "node:child_process";
 import { createReadStream, existsSync, statSync } from "node:fs";
-import { cp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, readdir, writeFile, unlink } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { runInNewContext } from "node:vm";
@@ -48,6 +48,23 @@ function sanitizeProjectSegment(name) {
 
 function buildPublicUrl(...segments) {
   return `/${segments.map((segment) => encodeURIComponent(segment)).join("/")}`;
+}
+
+function resolvePublicProjectAbsPath(rawInput) {
+  const raw = String(rawInput ?? "")
+    .trim()
+    .replace(/\\/g, "/");
+  if (!raw || raw.includes("..")) return null;
+  const cwd = process.cwd();
+  const publicRoot = path.resolve(cwd, "public");
+  let rel = raw.replace(/^\/+/, "");
+  if (/^public\//i.test(rel)) {
+    rel = rel.replace(/^public\//i, "");
+  }
+  const abs = path.normalize(path.resolve(publicRoot, rel.split("/").join(path.sep)));
+  const relFromPublic = path.relative(publicRoot, abs);
+  if (relFromPublic.startsWith("..") || path.isAbsolute(relFromPublic)) return null;
+  return abs;
 }
 
 function ensureUniqueFilename(directory, baseName, extension) {
@@ -1512,6 +1529,47 @@ export default defineConfig({
           } catch (error) {
             sendJson(response, 500, {
               error: error instanceof Error ? error.message : "failed to load runtime city gameplay",
+            });
+          }
+        });
+
+        /** 删除 public/ 下的项目资源（关卡编辑器右键删除关联文件） */
+        server.middlewares.use("/api/delete-project-files", async (request, response) => {
+          if (request.method !== "POST") {
+            sendJson(response, 405, { error: "Method not allowed" });
+            return;
+          }
+          try {
+            const body = await readJsonBody(request);
+            const paths = Array.isArray(body.paths) ? body.paths : [];
+            const deleted = [];
+            const missing = [];
+            const failed = [];
+            for (const entry of paths) {
+              const abs = resolvePublicProjectAbsPath(entry);
+              if (!abs) {
+                failed.push({ path: String(entry ?? ""), error: "Invalid path" });
+                continue;
+              }
+              try {
+                await unlink(abs);
+                deleted.push(String(entry).replace(/\\/g, "/"));
+              } catch (error) {
+                const code = error && typeof error === "object" ? error.code : "";
+                if (code === "ENOENT") {
+                  missing.push(String(entry).replace(/\\/g, "/"));
+                } else {
+                  failed.push({
+                    path: String(entry).replace(/\\/g, "/"),
+                    error: error instanceof Error ? error.message : "delete failed",
+                  });
+                }
+              }
+            }
+            sendJson(response, 200, { deleted, missing, failed });
+          } catch (error) {
+            sendJson(response, 500, {
+              error: error instanceof Error ? error.message : "failed to delete project files",
             });
           }
         });

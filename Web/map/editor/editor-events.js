@@ -1,4 +1,5 @@
 import { readDragPayload } from './utils.js';
+import { bindLevelContextMenu } from './level-context-menu.js';
 
 export function bindEditorEvents(refs, env) {
     env.mountExploreGameplayFieldTemplates();
@@ -359,6 +360,15 @@ export function bindEditorEvents(refs, env) {
             return;
         }
 
+        if ((event.ctrlKey || event.metaKey) && !event.shiftKey && (event.key === 'z' || event.key === 'Z')) {
+            if (env.getActiveWorkbench() !== 'level') return;
+            event.preventDefault();
+            if (typeof env.undoLastActorChange === 'function') {
+                env.undoLastActorChange();
+            }
+            return;
+        }
+
         if (event.key !== 'Delete') return;
         if (env.getActiveWorkbench() !== 'level' || !env.getSelectedObject()) return;
         event.preventDefault();
@@ -368,4 +378,5 @@ export function bindEditorEvents(refs, env) {
     env.bindEraserToolControls(refs);
     env.bindBoardImageGlobalHandlers(refs);
     env.ensureBoardImagesPanelDelegated(refs);
+    bindLevelContextMenu(refs, env);
 }
