@@ -6,6 +6,7 @@ export function bindEditorEvents(refs, env) {
     if (refs.inspectorPanelBody) {
         refs.inspectorPanelBody.addEventListener('input', env.onExploreGameplayFieldInput);
         refs.inspectorPanelBody.addEventListener('change', env.onExploreGameplayFieldInput);
+        refs.inspectorPanelBody.addEventListener('click', env.onExploreGameplayFieldInput);
     }
     if (refs.toggleGeoMapping) {
         refs.toggleGeoMapping.addEventListener('change', function () {

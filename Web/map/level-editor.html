@@ -1208,6 +1208,20 @@
         <section class="inspector-section explore-map-gameplay-section" aria-label="探索地图玩法数值">
             <h3>探索地图玩法（本关）</h3>
             <p class="section-hint">写入 <code>explorationLayout.gameplay</code>，主游戏同步为 <code>exploreGameplay</code>。可调移动线速度（不影响 Mixamo 动画剪辑速度）、普攻与 E/R CD、钱币掉落节奏与野外敌人属性。画布上用<strong>障碍 / 可走路线 / 安全区</strong>工具编辑格子；<strong>探索点与 Actor</strong>可放置交互点与道具模型。<strong>角色与掉落道具模型及缩放</strong>见本节上方「掉落与角色」。安全区内<strong>商店商品与定价</strong>目前仍在客户端 UI 中固定，未纳入此处 JSON。</p>
+            <div class="explore-gameplay-presets">
+                <button type="button" class="mini-button" data-explore-preset="easy">轻松试玩</button>
+                <button type="button" class="mini-button" data-explore-preset="standard">标准生存</button>
+                <button type="button" class="mini-button" data-explore-preset="hard">高压挑战</button>
+            </div>
+            <h4 class="explore-gameplay-subtitle">局内节奏</h4>
+            <div class="form-grid three">
+                <label class="field-block"><span>启用肉鸽波次</span><select data-explore-gp="roguelikeWaveMode"><option value="true">开启</option><option value="false">关闭</option></select></label>
+                <label class="field-block"><span>首波延迟（秒）</span><input type="number" data-explore-gp="firstWaveDelaySec" min="0.5" max="30" step="0.5"></label>
+                <label class="field-block"><span>波间升级时间（秒）</span><input type="number" data-explore-gp="wavePauseSec" min="1" max="60" step="0.5"></label>
+                <label class="field-block"><span>总波次</span><input type="number" data-explore-gp="totalWaves" min="1" max="100" step="1"></label>
+                <label class="field-block"><span>Boss 解锁波次</span><input type="number" data-explore-gp="bossUnlockWave" min="1" max="100" step="1"></label>
+            </div>
+            <h4 class="explore-gameplay-subtitle">玩家动作</h4>
             <div class="form-grid three">
                 <label class="field-block"><span>步行速度（世界）</span><input type="number" data-explore-gp="moveSpeedWalk" min="0.5" max="80" step="0.1"></label>
                 <label class="field-block"><span>奔跑速度（世界）</span><input type="number" data-explore-gp="moveSpeedRun" min="0.5" max="120" step="0.1"></label>
@@ -1216,6 +1230,7 @@
                 <label class="field-block"><span>R 技能冷却（秒）</span><input type="number" data-explore-gp="skillRCooldownSec" min="1" max="600" step="0.5"></label>
                 <label class="field-block"><span>钱币掉落批量周期（秒）</span><input type="number" data-explore-gp="moneyDropRespawnIntervalSec" min="1" max="3600" step="0.5"></label>
             </div>
+            <h4 class="explore-gameplay-subtitle">敌人强度</h4>
             <details class="explore-gameplay-details">
                 <summary>野外敌人 / 生成节奏（高级）</summary>
                 <div class="form-grid three">
@@ -1231,6 +1246,11 @@
                     <label class="field-block"><span>敌人攻击间隔（秒）</span><input type="number" data-explore-gp="enemyAttackCooldown" min="0.2" max="60" step="0.1"></label>
                 </div>
             </details>
+            <h4 class="explore-gameplay-subtitle">波次编排</h4>
+            <p class="section-hint">直接写入 <code>map.exploreWaveRules</code>。未配置的波次会使用运行时默认刷怪曲线。</p>
+            <div class="explore-wave-rule-panel" data-explore-wave-rule-panel></div>
+            <h4 class="explore-gameplay-subtitle">Boss 与胜利</h4>
+            <p class="section-hint">Boss、刷怪点、金币和道具仍在画布中放置。肉鸽波次清空后会触发非重生 Boss；击败全部非重生 Boss 后完成探索目标。</p>
         </section>
     </template>
 

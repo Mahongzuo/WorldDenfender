@@ -1193,6 +1193,43 @@ input[type="range"].audio-volume-slider {
     font-size: 12px;
 }
 
+.explore-gameplay-presets,
+.explore-wave-rule-toolbar,
+.explore-wave-rule-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.explore-gameplay-presets {
+    margin: 10px 0 14px;
+}
+
+.explore-gameplay-subtitle {
+    margin: 16px 0 10px;
+    color: var(--editor-text);
+    font-size: 13px;
+}
+
+.explore-wave-rule-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.explore-wave-rule-card {
+    padding: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.045);
+}
+
+.explore-wave-rule-head {
+    justify-content: space-between;
+    margin-bottom: 10px;
+}
+
 .level-tree {
     flex: 1;
     min-height: 0;

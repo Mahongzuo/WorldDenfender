@@ -1221,6 +1221,11 @@ export function normalizeExplorePickups(pickups) {
 // ---------------------------------------------------------------------------
 
 export var EXPLORE_GAMEPLAY_STORE_KEYS = [
+    'roguelikeWaveMode',
+    'firstWaveDelaySec',
+    'wavePauseSec',
+    'totalWaves',
+    'bossUnlockWave',
     'moveSpeedWalk',
     'moveSpeedRun',
     'attackCooldownSec',
@@ -1243,9 +1248,15 @@ export function normalizeExploreGameplayNormalized(raw) {
     var src = raw && typeof raw === 'object' ? raw : {};
     var out = {};
     EXPLORE_GAMEPLAY_STORE_KEYS.forEach(function (key) {
+        if (key === 'roguelikeWaveMode') {
+            if (typeof src[key] === 'boolean') out[key] = src[key];
+            else if (src[key] === 'true' || src[key] === '1') out[key] = true;
+            else if (src[key] === 'false' || src[key] === '0') out[key] = false;
+            return;
+        }
         var v = Number(src[key]);
         if (!Number.isFinite(v)) return;
-        out[key] = key === 'enemyMaxConcurrent' ? Math.round(v) : v;
+        out[key] = key === 'enemyMaxConcurrent' || key === 'totalWaves' || key === 'bossUnlockWave' ? Math.round(v) : v;
     });
     return out;
 }

@@ -3214,19 +3214,166 @@ import {
             refs.inspectorPanelBody.querySelectorAll('[data-explore-gp]').forEach(function (el) {
                 var key = el.getAttribute('data-explore-gp');
                 if (!key || merged[key] === undefined || merged[key] === null) return;
+                if (el.tagName === 'SELECT') {
+                    el.value = key === 'roguelikeWaveMode' ? String(!!merged[key]) : String(merged[key]);
+                    return;
+                }
                 var v =
-                    key === 'enemyMaxConcurrent'
+                    key === 'enemyMaxConcurrent' || key === 'totalWaves' || key === 'bossUnlockWave'
                         ? String(Math.round(merged[key]))
                         : String(Number(merged[key]));
                 el.value = v;
+            });
+            refs.inspectorPanelBody.querySelectorAll('.explore-map-gameplay-section').forEach(function (section) {
+                renderExploreWaveRulePanel(section, level);
             });
         } finally {
             exploreGameplayFieldSilent -= 1;
         }
     }
 
+    function explorePresetValues(name) {
+        if (name === 'easy') {
+            return {
+                roguelikeWaveMode: true, firstWaveDelaySec: 4, wavePauseSec: 10, totalWaves: 6, bossUnlockWave: 6,
+                attackCooldownSec: 0.32, skillECooldownSec: 7, skillRCooldownSec: 14,
+                enemyMaxConcurrent: 8, enemyBaseHp: 30, enemyHpPerLevel: 8, enemyBaseDamage: 4, enemyDamagePerLevel: 1,
+                exploreEnemySpawnIntervalSec: 9, enemyAggroRange: 8, enemyAttackCooldown: 1.8
+            };
+        }
+        if (name === 'hard') {
+            return {
+                roguelikeWaveMode: true, firstWaveDelaySec: 2, wavePauseSec: 6, totalWaves: 12, bossUnlockWave: 12,
+                attackCooldownSec: 0.36, skillECooldownSec: 9, skillRCooldownSec: 18,
+                enemyMaxConcurrent: 22, enemyBaseHp: 55, enemyHpPerLevel: 16, enemyBaseDamage: 7, enemyDamagePerLevel: 2.2,
+                exploreEnemySpawnIntervalSec: 5, enemyAggroRange: 11, enemyAttackCooldown: 1.35
+            };
+        }
+        return {
+            roguelikeWaveMode: true, firstWaveDelaySec: 3, wavePauseSec: 8, totalWaves: 10, bossUnlockWave: 10,
+            attackCooldownSec: 0.35, skillECooldownSec: 8, skillRCooldownSec: 16,
+            enemyMaxConcurrent: 15, enemyBaseHp: 40, enemyHpPerLevel: 12, enemyBaseDamage: 5, enemyDamagePerLevel: 1.5,
+            exploreEnemySpawnIntervalSec: 8, enemyAggroRange: 9, enemyAttackCooldown: 1.6
+        };
+    }
+
+    function renderExploreWaveRulePanel(section, level) {
+        var panel = section && section.querySelector ? section.querySelector('[data-explore-wave-rule-panel]') : null;
+        if (!panel) return;
+        if (!level) {
+            panel.innerHTML = '<div class="empty-state">请选择关卡后编辑探索波次。</div>';
+            return;
+        }
+        var map = level.map || {};
+        var rules = Array.isArray(map.exploreWaveRules) ? map.exploreWaveRules : [];
+        var spawners = Array.isArray(map.exploreSpawners) ? map.exploreSpawners : [];
+        var enemies = getAvailableEnemyTypes(level);
+        function spawnerOptions(selected) {
+            return ['<option value="">全部刷怪点</option>'].concat(spawners.map(function (sp) {
+                var id = String(sp.id || '');
+                var label = sp.name || id || '刷怪点';
+                return '<option value="' + escapeAttr(id) + '"' + (id === selected ? ' selected' : '') + '>' + escapeHtml(label) + '</option>';
+            })).join('');
+        }
+        function enemyOptions(selected) {
+            return ['<option value="">默认敌人</option>'].concat(enemies.map(function (enemy) {
+                var id = String(enemy.id || '');
+                return '<option value="' + escapeAttr(id) + '"' + (id === selected ? ' selected' : '') + '>' + escapeHtml(enemy.name || id) + '</option>';
+            })).join('');
+        }
+        panel.innerHTML = [
+            '<div class="explore-wave-rule-toolbar">',
+            '  <button type="button" class="mini-button" data-explore-wave-action="add">新增波次规则</button>',
+            '</div>',
+            rules.length ? rules.map(function (rule, index) {
+                return [
+                    '<div class="explore-wave-rule-card">',
+                    '  <div class="explore-wave-rule-head"><strong>规则 #' + String(index + 1) + '</strong><button type="button" class="mini-button danger" data-explore-wave-action="remove" data-explore-wave-index="' + String(index) + '">删除</button></div>',
+                    '  <div class="form-grid three">',
+                    '    <label class="field-block"><span>波次</span><input type="number" min="1" step="1" data-explore-wave-field="waveNumber" data-explore-wave-index="' + String(index) + '" value="' + escapeAttr(String(rule.waveNumber || 1)) + '"></label>',
+                    '    <label class="field-block"><span>刷怪点</span><select data-explore-wave-field="spawnerId" data-explore-wave-index="' + String(index) + '">' + spawnerOptions(String(rule.spawnerId || '')) + '</select></label>',
+                    '    <label class="field-block"><span>敌人类型</span><select data-explore-wave-field="enemyTypeId" data-explore-wave-index="' + String(index) + '">' + enemyOptions(String(rule.enemyTypeId || '')) + '</select></label>',
+                    '    <label class="field-block"><span>元素</span><select data-explore-wave-field="element" data-explore-wave-index="' + String(index) + '"><option value="">默认</option><option value="force">力</option><option value="thermal">热</option><option value="light">光</option><option value="electric">电</option><option value="sound">声</option></select></label>',
+                    '    <label class="field-block"><span>数量</span><input type="number" min="1" step="1" data-explore-wave-field="count" data-explore-wave-index="' + String(index) + '" value="' + escapeAttr(String(rule.count || 1)) + '"></label>',
+                    '    <label class="field-block"><span>间隔（秒）</span><input type="number" min="0.1" step="0.1" data-explore-wave-field="interval" data-explore-wave-index="' + String(index) + '" value="' + escapeAttr(String(rule.interval || 1)) + '"></label>',
+                    '    <label class="field-block"><span>HP 覆盖</span><input type="number" min="0" step="1" data-explore-wave-field="overrideHp" data-explore-wave-index="' + String(index) + '" value="' + escapeAttr(String(rule.overrideHp || '')) + '"></label>',
+                    '    <label class="field-block"><span>攻击覆盖</span><input type="number" min="0" step="1" data-explore-wave-field="overrideAttack" data-explore-wave-index="' + String(index) + '" value="' + escapeAttr(String(rule.overrideAttack || '')) + '"></label>',
+                    '    <label class="field-block"><span>金币奖励</span><input type="number" min="0" step="1" data-explore-wave-field="overrideRewardMoney" data-explore-wave-index="' + String(index) + '" value="' + escapeAttr(String(rule.overrideRewardMoney || '')) + '"></label>',
+                    '  </div>',
+                    '</div>'
+                ].join('');
+            }).join('') : '<div class="empty-state">未手写规则时使用默认肉鸽刷怪曲线。</div>'
+        ].join('');
+        rules.forEach(function (rule, index) {
+            var select = panel.querySelector('[data-explore-wave-field="element"][data-explore-wave-index="' + String(index) + '"]');
+            if (select) select.value = String(rule.element || '');
+        });
+    }
+
+    function ensureExploreWaveRules(level) {
+        if (!level.map) level.map = {};
+        if (!Array.isArray(level.map.exploreWaveRules)) level.map.exploreWaveRules = [];
+        return level.map.exploreWaveRules;
+    }
+
+    function updateExploreWaveRule(section, input) {
+        var level = getLevel();
+        if (!level) return;
+        var rules = ensureExploreWaveRules(level);
+        var index = Number(input.getAttribute('data-explore-wave-index'));
+        var field = input.getAttribute('data-explore-wave-field') || '';
+        var rule = rules[index];
+        if (!rule || !field) return;
+        var stringFields = { spawnerId: true, enemyTypeId: true, element: true };
+        if (stringFields[field]) {
+            if (input.value) rule[field] = input.value;
+            else delete rule[field];
+        } else {
+            var numeric = Number(input.value);
+            if (Number.isFinite(numeric) && numeric > 0) rule[field] = field === 'interval' ? numeric : Math.round(numeric);
+            else delete rule[field];
+        }
+        markDirty('已更新探索波次规则');
+        renderExploreWaveRulePanel(section, level);
+    }
+
     function onExploreGameplayFieldInput(ev) {
         if (exploreGameplayFieldSilent > 0) return;
+        var sectionForAction = ev.target && ev.target.closest ? ev.target.closest('.explore-map-gameplay-section') : null;
+        var presetButton = ev.target && ev.target.closest ? ev.target.closest('[data-explore-preset]') : null;
+        if (presetButton && sectionForAction) {
+            var levelForPreset = getLevel();
+            if (!levelForPreset) return;
+            var layoutForPreset = ensureExplorationLayout(levelForPreset.map);
+            layoutForPreset.gameplay = Object.assign({}, layoutForPreset.gameplay || {}, explorePresetValues(presetButton.getAttribute('data-explore-preset') || 'standard'));
+            markDirty('已应用探索玩法预设');
+            renderExploreGameplayPanels();
+            renderOverview();
+            return;
+        }
+        var waveActionButton = ev.target && ev.target.closest ? ev.target.closest('[data-explore-wave-action]') : null;
+        if (waveActionButton && sectionForAction) {
+            var levelForWave = getLevel();
+            if (!levelForWave) return;
+            var rules = ensureExploreWaveRules(levelForWave);
+            var action = waveActionButton.getAttribute('data-explore-wave-action') || '';
+            if (action === 'add') {
+                rules.push({ id: uid('explore-wave'), waveNumber: Math.max(1, rules.length + 1), count: 6, interval: 1 });
+                markDirty('已新增探索波次规则');
+            } else if (action === 'remove') {
+                rules.splice(Number(waveActionButton.getAttribute('data-explore-wave-index')), 1);
+                markDirty('已删除探索波次规则');
+            }
+            renderExploreWaveRulePanel(sectionForAction, levelForWave);
+            renderOverview();
+            return;
+        }
+        var waveField = ev.target && ev.target.closest ? ev.target.closest('[data-explore-wave-field]') : null;
+        if (waveField && sectionForAction && (ev.type === 'input' || ev.type === 'change')) {
+            updateExploreWaveRule(sectionForAction, waveField);
+            renderOverview();
+            return;
+        }
         var el = ev.target && ev.target.closest ? ev.target.closest('[data-explore-gp]') : null;
         if (!el) return;
         var section = el.closest('.explore-map-gameplay-section');

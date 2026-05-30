@@ -27,6 +27,11 @@ export function mergeExploreGameplayDisplay(rawGp) {
         return Math.min(max, Math.max(0, v));
     }
     var B = {
+        roguelikeWaveMode: true,
+        firstWaveDelaySec: 3,
+        wavePauseSec: 8,
+        totalWaves: 10,
+        bossUnlockWave: 10,
         moveSpeedWalk: 5.5,
         moveSpeedRun: 10,
         attackCooldownSec: 0.42,
@@ -45,6 +50,11 @@ export function mergeExploreGameplayDisplay(rawGp) {
         enemyAttackCooldown: 1.5
     };
     return {
+        roguelikeWaveMode: typeof r.roguelikeWaveMode === 'boolean' ? r.roguelikeWaveMode : B.roguelikeWaveMode,
+        firstWaveDelaySec: clampPos(B.firstWaveDelaySec, 'firstWaveDelaySec', 30),
+        wavePauseSec: clampPos(B.wavePauseSec, 'wavePauseSec', 60),
+        totalWaves: Math.min(100, Math.max(1, Math.round(finiteOr(B.totalWaves, Number(r.totalWaves))))),
+        bossUnlockWave: Math.min(100, Math.max(1, Math.round(finiteOr(B.bossUnlockWave, Number(r.bossUnlockWave))))),
         moveSpeedWalk: clampPos(B.moveSpeedWalk, 'moveSpeedWalk', 80),
         moveSpeedRun: clampPos(B.moveSpeedRun, 'moveSpeedRun', 120),
         attackCooldownSec: clampPos(B.attackCooldownSec, 'attackCooldownSec', 30),
@@ -76,6 +86,10 @@ export function readExploreGameplayRawFromDomSection(sectionEl) {
     sectionEl.querySelectorAll('[data-explore-gp]').forEach(function (inp) {
         var key = inp.getAttribute('data-explore-gp');
         if (!key) return;
+        if (key === 'roguelikeWaveMode') {
+            flat[key] = inp.type === 'checkbox' ? !!inp.checked : String(inp.value) === 'true';
+            return;
+        }
         var raw = inp.value;
         var n = key === 'enemyMaxConcurrent' ? parseInt(raw, 10) : parseFloat(raw);
         if (!Number.isFinite(n)) return;

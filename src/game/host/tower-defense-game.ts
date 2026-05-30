@@ -50,6 +50,7 @@ import {
 import { ExploreCombatRuntime, type ExploreCombatHost } from "../explore/explore-combat-runtime";
 import { buildExploreInventoryGridHtml, ExploreInventory } from "../explore/explore-inventory";
 import { ExplorePlayerProgress } from "../explore/explore-player-progress";
+import { getModuleDef } from "../explore/explore-skill-modules";
 import { resolveExploreGameplay, type ResolvedExploreGameplay } from "../explore/explore-gameplay-settings";
 import { getExploreMoveIntent, orientPlayerToMovement } from "../explore/explore-runtime";
 import { tickExploreSession } from "../explore/explore-session";
@@ -251,9 +252,13 @@ export class TowerDefenseGame {
   private exploreXpBar!: HTMLElement;
   private exploreHpBar!: HTMLElement;
   private exploreHpText!: HTMLElement;
+  private exploreWaveState!: HTMLElement;
+  private exploreModuleSummary!: HTMLElement;
   private exploreSkillAttackCd!: HTMLElement;
   private exploreSkillECd!: HTMLElement;
   private exploreSkillRCd!: HTMLElement;
+  private exploreUpgradePanel!: HTMLElement;
+  private exploreUpgradeChoices!: HTMLElement;
   private inventoryPanel!: HTMLElement;
   private inventoryGrid!: HTMLElement;
 
@@ -540,6 +545,11 @@ export class TowerDefenseGame {
     this.requiredElement("#defenseStandardCompleteBtn").addEventListener("click", () => this.completeDefenseStandardVictory());
     this.requiredElement("#gameVictoryRestartBtn").addEventListener("click", () => this.restartAfterVictory());
     this.requiredElement("#gameVictoryMapBtn").addEventListener("click", () => this.returnHomeFromVictory());
+    this.exploreUpgradeChoices.addEventListener("click", (event) => {
+      const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-explore-upgrade-choice]");
+      if (!button?.dataset.exploreUpgradeChoice) return;
+      this.chooseExploreUpgrade(button.dataset.exploreUpgradeChoice);
+    });
     this.requiredElement("#shopCloseBtn").addEventListener("click", () => this.closeSafeZoneShop());
     this.requiredElement("#shopItems").addEventListener("click", (e) => {
       const btn = (e.target as HTMLElement).closest<HTMLButtonElement>(".shop-item-buy");
@@ -1346,6 +1356,23 @@ export class TowerDefenseGame {
         this.scheduleExploreBossVictoryCutscene();
         this.maybePresentFinalVictory();
       },
+      onExploreWaveBegin: (wave) => {
+        this.hideExploreUpgradePanel();
+        this.showToast(`第 ${wave} 波开始`, true);
+      },
+      onExploreWaveClear: (wave) => {
+        this.showToast(`第 ${wave} 波清理完成，选择一个升级`, true);
+      },
+      onExploreUpgradeChoice: () => {
+        this.showExploreUpgradePanel();
+      },
+      onExploreAllWavesCleared: () => {
+        this.showToast("所有生存波次已清空，Boss 战即将开始", true);
+      },
+      onExploreBossPhaseBegin: () => {
+        this.hideExploreUpgradePanel();
+        this.showToast("最终 Boss 已出现，击败它完成探索目标", true);
+      },
       orientHudToCamera: (obj) => this.hudBillboardOrient.orient(this.camera, this.mode, this.cameraMode, obj),
     };
   }
@@ -1813,6 +1840,7 @@ export class TowerDefenseGame {
       // Clear explore enemies and projectiles
       this.exploreCombat.resetEncounter();
       this.exploreProgress.hp = this.exploreProgress.maxHp;
+      this.hideExploreUpgradePanel();
       this.spawnPlacedExplorePickups(map);
     }
 
@@ -1894,6 +1922,7 @@ export class TowerDefenseGame {
     // 恢复塔防 groups 到正常 Y；将探索 groups 沉到地下避免串台
     this.sinkGroupsForModeIsolation("defense");
     this.exploreHud.setAttribute("aria-hidden", "true");
+    this.hideExploreUpgradePanel();
     this.safeZoneShopPanel.setAttribute("aria-hidden", "true");
     this.inSafeZone = false;
     this.gameRootEl.classList.remove("game-root--explore");
@@ -2656,6 +2685,11 @@ export class TowerDefenseGame {
   }
 
   private updateExplore(dt: number): void {
+    if (this.exploreCombat.isUpgradePending()) {
+      this.updateExploreHud();
+      this.showExploreUpgradePanel();
+      return;
+    }
     tickExploreSession({
       dt,
       movePlayer: (d) => this.movePlayer(d),
@@ -2680,6 +2714,38 @@ export class TowerDefenseGame {
     });
     this.captureExploreBossProgress();
     this.maybePresentFinalVictory();
+  }
+
+  private showExploreUpgradePanel(): void {
+    const choices = this.exploreProgress.pendingUpgradeChoices;
+    if (!choices.length) {
+      this.exploreUpgradePanel.setAttribute("aria-hidden", "true");
+      return;
+    }
+    this.exploreUpgradeChoices.innerHTML = choices.map((choice) => {
+      const current = this.exploreProgress.equippedModules.find((item) => item.moduleId === choice.id);
+      const nextLevel = (current?.level ?? 0) + 1;
+      const rarity = Math.max(1, Math.round(choice.rarity || 1));
+      return `
+        <button type="button" class="explore-upgrade-choice explore-upgrade-choice--r${rarity}" data-explore-upgrade-choice="${choice.id}">
+          <span class="explore-upgrade-choice__icon">${choice.icon || "MOD"}</span>
+          <strong>${choice.name}</strong>
+          <em>${choice.slot} · Lv.${nextLevel} · R${rarity}</em>
+          <span>${choice.description}</span>
+        </button>
+      `;
+    }).join("");
+    this.exploreUpgradePanel.setAttribute("aria-hidden", "false");
+  }
+
+  private hideExploreUpgradePanel(): void {
+    this.exploreUpgradePanel.setAttribute("aria-hidden", "true");
+  }
+
+  private chooseExploreUpgrade(moduleId: string): void {
+    this.exploreCombat.confirmUpgradeChoice(moduleId);
+    this.hideExploreUpgradePanel();
+    this.updateExploreHud();
   }
 
   private captureExploreBossProgress(): void {
@@ -3011,6 +3077,34 @@ export class TowerDefenseGame {
       c.getSkillECooldown() > 0 ? `${(c.getSkillECooldown() / eMax) * 100}%` : "0%";
     this.exploreSkillRCd.style.height =
       c.getSkillRCooldown() > 0 ? `${(c.getSkillRCooldown() / rMax) * 100}%` : "0%";
+    const timers = c.getWaveTimers();
+    const alive = c.getAliveEnemyCount();
+    if (!c.isWaveMode()) {
+      this.exploreWaveState.textContent = c.allPermanentBossesCleared()
+        ? "Explore objective complete"
+        : `Free explore · enemies ${alive}`;
+    } else if (c.isBossPhaseActive()) {
+      this.exploreWaveState.textContent = `Boss phase · enemies ${alive}`;
+    } else if (timers.upgradePending) {
+      this.exploreWaveState.textContent = `Wave ${timers.wave} clear · choose upgrade`;
+    } else if (timers.waveActive) {
+      this.exploreWaveState.textContent = `Wave ${timers.wave} · alive ${alive} · queued ${Math.max(0, timers.spawnRemaining)}`;
+    } else if (timers.allWavesCleared) {
+      this.exploreWaveState.textContent = "Survival waves cleared";
+    } else {
+      this.exploreWaveState.textContent = `Next wave in ${Math.max(0, Math.ceil(timers.nextWaveDelay))}s`;
+    }
+    const modules = p.equippedModules
+      .map((item) => {
+        const def = getModuleDef(item.moduleId);
+        return def ? `${def.name} Lv.${item.level}` : "";
+      })
+      .filter(Boolean)
+      .slice(0, 3);
+    const extra = Math.max(0, p.equippedModules.length - modules.length);
+    this.exploreModuleSummary.textContent = modules.length
+      ? `${modules.join(" / ")}${extra ? ` +${extra}` : ""}`
+      : "尚未选择模组";
     this.selectedElement.textContent = `探索属性：${c.getPlayerElementLabel()}（1-5 切换）`;
   }
 
@@ -3392,4 +3486,3 @@ export class TowerDefenseGame {
     clearSceneGroup(group);
   }
 }
-

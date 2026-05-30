@@ -45,9 +45,13 @@ export interface GameUiShellRefs {
   exploreXpBar: HTMLElement;
   exploreHpBar: HTMLElement;
   exploreHpText: HTMLElement;
+  exploreWaveState: HTMLElement;
+  exploreModuleSummary: HTMLElement;
   exploreSkillAttackCd: HTMLElement;
   exploreSkillECd: HTMLElement;
   exploreSkillRCd: HTMLElement;
+  exploreUpgradePanel: HTMLElement;
+  exploreUpgradeChoices: HTMLElement;
   inventoryPanel: HTMLElement;
   inventoryGrid: HTMLElement;
   gameOverPanel: HTMLElement;
@@ -235,6 +239,10 @@ export function renderGameUiShell(app: HTMLElement, requiredElement: RequiredEle
               <span class="explore-hp-text" id="exploreHpText">100 / 100</span>
             </div>
           </div>
+          <div class="explore-run-status">
+            <strong id="exploreWaveState">第 0 波准备中</strong>
+            <span id="exploreModuleSummary">尚未选择模组</span>
+          </div>
           <div class="explore-hud-skills">
             <div class="explore-skill" title="基础攻击 · 左键">
               <span class="explore-skill-icon">⚡</span>
@@ -251,6 +259,16 @@ export function renderGameUiShell(app: HTMLElement, requiredElement: RequiredEle
               <span class="explore-skill-key">R</span>
               <div class="explore-skill-cd" id="exploreSkillRCd" style="height:0%"></div>
             </div>
+          </div>
+        </section>
+        <section class="explore-upgrade-panel" id="exploreUpgradePanel" aria-hidden="true">
+          <div class="explore-upgrade-card">
+            <div class="explore-upgrade-head">
+              <span>波次奖励</span>
+              <h2>选择一个生存模组</h2>
+              <p>选中的模组将应用于本次探索。选择后下一波开始。</p>
+            </div>
+            <div class="explore-upgrade-choices" id="exploreUpgradeChoices"></div>
           </div>
         </section>
         <section class="inventory-panel" id="inventoryPanel" aria-hidden="true">
@@ -356,9 +374,13 @@ export function renderGameUiShell(app: HTMLElement, requiredElement: RequiredEle
     exploreXpBar: requiredElement("#exploreXpBar"),
     exploreHpBar: requiredElement("#exploreHpBar"),
     exploreHpText: requiredElement("#exploreHpText"),
+    exploreWaveState: requiredElement("#exploreWaveState"),
+    exploreModuleSummary: requiredElement("#exploreModuleSummary"),
     exploreSkillAttackCd: requiredElement("#exploreSkillAttackCd"),
     exploreSkillECd: requiredElement("#exploreSkillECd"),
     exploreSkillRCd: requiredElement("#exploreSkillRCd"),
+    exploreUpgradePanel: requiredElement("#exploreUpgradePanel"),
+    exploreUpgradeChoices: requiredElement("#exploreUpgradeChoices"),
     inventoryPanel: requiredElement("#inventoryPanel"),
     inventoryGrid: requiredElement("#inventoryGrid"),
     gameOverPanel: requiredElement("#gameOverPanel"),

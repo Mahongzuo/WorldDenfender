@@ -361,7 +361,7 @@ export class ExploreCombatRuntime {
         break;
       }
       case "spawnEnemy":
-        this.spawnWaveEnemy(effect.spawnerId);
+        this.spawnWaveEnemy(effect.spawnerId, effect.waveRuleId);
         break;
       case "showUpgradeChoice":
         this.waveTimers = { ...this.waveTimers, upgradePending: true };
@@ -380,8 +380,9 @@ export class ExploreCombatRuntime {
   }
 
   /** 肉鸽波次：从刷怪点生成一只怪 */
-  private spawnWaveEnemy(spawnerId?: string): void {
+  private spawnWaveEnemy(spawnerId?: string, waveRuleId?: string): void {
     const obstacleKeys = this.host.getObstacleCellKeys();
+    const waveRule = waveRuleId ? this.waveRules.find((rule) => rule.id === waveRuleId) : undefined;
     // 找到活跃的刷怪点
     const candidates = spawnerId
       ? this.spawnerStates.filter((s) => s.placement.id === spawnerId)
@@ -396,12 +397,12 @@ export class ExploreCombatRuntime {
     if (!candidates.length && this.spawnerStates.length) {
       // 回退：用任意刷怪点
       const fallback = this.spawnerStates[Math.floor(Math.random() * this.spawnerStates.length)];
-      this.spawnSpawnerEnemy(fallback, obstacleKeys);
+      this.spawnSpawnerEnemy(fallback, obstacleKeys, waveRule);
       return;
     }
     if (!candidates.length) return;
     const chosen = candidates[Math.floor(Math.random() * candidates.length)];
-    this.spawnSpawnerEnemy(chosen, obstacleKeys);
+    this.spawnSpawnerEnemy(chosen, obstacleKeys, waveRule);
   }
 
   fireBasicAttack(): void {
@@ -914,7 +915,11 @@ export class ExploreCombatRuntime {
     }
   }
 
-  private spawnSpawnerEnemy(state: RuntimeSpawnerState, obstacleKeys: ReadonlySet<string>): boolean {
+  private spawnSpawnerEnemy(
+    state: RuntimeSpawnerState,
+    obstacleKeys: ReadonlySet<string>,
+    waveRule?: ExploreWaveRule,
+  ): boolean {
     if (this.enemies.length >= this.gameplay.enemyMaxConcurrent + this.bossPlacements.length) {
       return false;
     }
@@ -932,16 +937,27 @@ export class ExploreCombatRuntime {
     if (!spawnCell) {
       return false;
     }
-    const element = p.element ?? "electric";
-    const visual = this.createEnemyVisual(element, false, p.modelScale ?? 1);
+    const element = waveRule?.element ?? p.element ?? "electric";
+    const visual = this.createEnemyVisual(element, false, waveRule?.overrideModelScale ?? p.modelScale ?? 1);
     visual.group.position.copy(this.host.worldCellToWorld(spawnCell));
     this.enemyGroup.add(visual.group);
-    void this.trySwapProceduralForGltf(visual.group, visual.proceduralRoot, p.modelPath?.trim(), false);
+    void this.trySwapProceduralForGltf(
+      visual.group,
+      visual.proceduralRoot,
+      waveRule?.overrideModelPath?.trim() || p.modelPath?.trim(),
+      false,
+    );
     // 肉鸽模式：敌人属性同时按波次和等级缩放
     const waveScale = this.gameplay.roguelikeWaveMode ? 1 + this.waveTimers.wave * 0.12 : 1;
-    const maxHp = Math.round((this.gameplay.enemyBaseHp + this.progress.level * this.gameplay.enemyHpPerLevel) * waveScale);
-    const enemySpeed = Math.min(5, (this.gameplay.enemyBaseSpeed + this.progress.level * this.gameplay.enemySpeedPerLevel) * (1 + this.waveTimers.wave * 0.015));
-    const enemyDmg = Math.round((this.gameplay.enemyBaseDamage + this.progress.level * this.gameplay.enemyDamagePerLevel) * waveScale);
+    const maxHp = Math.round(waveRule?.overrideHp && waveRule.overrideHp > 0
+      ? waveRule.overrideHp
+      : (this.gameplay.enemyBaseHp + this.progress.level * this.gameplay.enemyHpPerLevel) * waveScale);
+    const enemySpeed = Math.min(5, waveRule?.overrideSpeed && waveRule.overrideSpeed > 0
+      ? waveRule.overrideSpeed
+      : (this.gameplay.enemyBaseSpeed + this.progress.level * this.gameplay.enemySpeedPerLevel) * (1 + this.waveTimers.wave * 0.015));
+    const enemyDmg = Math.round(waveRule?.overrideAttack && waveRule.overrideAttack > 0
+      ? waveRule.overrideAttack
+      : (this.gameplay.enemyBaseDamage + this.progress.level * this.gameplay.enemyDamagePerLevel) * waveScale);
     const baseRewardMoney = p.rewards?.[0]?.money ?? 12;
     const baseRewardXp = p.rewards?.[0]?.xp ?? 10;
     this.enemies.push({
@@ -954,8 +970,12 @@ export class ExploreCombatRuntime {
       maxHp,
       element,
       sourceSpawnerId: p.id,
-      rewardMoney: Math.round(baseRewardMoney * (1 + this.waveTimers.wave * 0.05)),
-      rewardXp: Math.round(baseRewardXp * (1 + this.waveTimers.wave * 0.08)),
+      rewardMoney: waveRule?.overrideRewardMoney != null
+        ? Math.round(waveRule.overrideRewardMoney)
+        : Math.round(baseRewardMoney * (1 + this.waveTimers.wave * 0.05)),
+      rewardXp: waveRule?.overrideRewardXp != null
+        ? Math.round(waveRule.overrideRewardXp)
+        : Math.round(baseRewardXp * (1 + this.waveTimers.wave * 0.08)),
       rewardItems: p.rewards?.filter((reward) => reward.itemName),
       speed: enemySpeed,
       attackDamage: enemyDmg,

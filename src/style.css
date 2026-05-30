@@ -1500,6 +1500,32 @@ button { color: inherit; font: inherit; }
   isolation: isolate;
   box-shadow: 0 2px 6px rgb(0 0 0 / 0.5);
 }
+
+.explore-run-status {
+  width: 210px;
+  min-height: 44px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+.explore-run-status strong {
+  font-size: 12px;
+  line-height: 1.2;
+}
+.explore-run-status span {
+  font-size: 10px;
+  line-height: 1.25;
+  color: rgba(255, 255, 255, 0.72);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .explore-hp-label {
   color: #ff6b9d;
   font-weight: 800;
@@ -1578,6 +1604,114 @@ button { color: inherit; font: inherit; }
   background: rgba(0, 0, 0, 0.62);
   transition: height 0.1s linear;
   z-index: 1;
+}
+
+.explore-upgrade-panel {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(7, 10, 16, 0.72);
+  backdrop-filter: blur(10px);
+  z-index: 260;
+}
+.explore-upgrade-panel[aria-hidden="true"] { display: none; }
+.explore-upgrade-card {
+  width: min(820px, 100%);
+  padding: 22px;
+  border-radius: 8px;
+  background: rgba(18, 24, 33, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.42);
+}
+.explore-upgrade-head {
+  margin-bottom: 16px;
+  color: #fff;
+}
+.explore-upgrade-head span {
+  display: block;
+  margin-bottom: 5px;
+  color: #79e2ff;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.explore-upgrade-head h2 {
+  margin: 0 0 6px;
+  font-size: 24px;
+}
+.explore-upgrade-head p {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 13px;
+}
+.explore-upgrade-choices {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.explore-upgrade-choice {
+  min-height: 190px;
+  padding: 16px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.07);
+  color: #fff;
+  text-align: left;
+  cursor: pointer;
+}
+.explore-upgrade-choice:hover {
+  border-color: #79e2ff;
+  background: rgba(121, 226, 255, 0.14);
+}
+.explore-upgrade-choice__icon {
+  display: inline-flex;
+  min-width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 12px;
+  border-radius: 50%;
+  background: rgba(121, 226, 255, 0.18);
+  font-weight: 900;
+  font-size: 12px;
+}
+.explore-upgrade-choice strong,
+.explore-upgrade-choice em,
+.explore-upgrade-choice span:not(.explore-upgrade-choice__icon) {
+  display: block;
+}
+.explore-upgrade-choice strong {
+  margin-bottom: 6px;
+  font-size: 16px;
+}
+.explore-upgrade-choice em {
+  margin-bottom: 12px;
+  color: #ffd36a;
+  font-style: normal;
+  font-size: 12px;
+}
+.explore-upgrade-choice span:not(.explore-upgrade-choice__icon) {
+  color: rgba(255, 255, 255, 0.74);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+@media (max-width: 760px) {
+  .explore-hud {
+    width: calc(100% - 18px);
+    gap: 8px;
+    padding-inline: 10px;
+  }
+  .explore-run-status {
+    width: 150px;
+  }
+  .explore-upgrade-choices {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* ===== 背包面板 ===== */

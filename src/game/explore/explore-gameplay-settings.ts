@@ -49,10 +49,10 @@ const BASE: ResolvedExploreGameplay = {
   enemyAttackCooldown: 1.6,
   /* ── 肉鸽波次默认 ── */
   roguelikeWaveMode: true,
-  wavePauseSec: 6,
-  firstWaveDelaySec: 4,
-  totalWaves: 20,
-  bossUnlockWave: 15,
+  wavePauseSec: 8,
+  firstWaveDelaySec: 3,
+  totalWaves: 10,
+  bossUnlockWave: 10,
 };
 
 function finiteOr(def: number, v: unknown): number {
