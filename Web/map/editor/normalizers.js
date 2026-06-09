@@ -1721,6 +1721,7 @@ export function defaultGameAssetConfig() {
         customAnimationUrls: Object.assign({}, DEFAULT_GAME_ASSET_ANIMATION_URLS),
         modelScales: { moneyDrop: 1, player: 1, machine: 1, cannon: 1, frost: 1, mine: 1, beacon: 1, stellar: 1, qinqiong: 1, liqingzhao: 1, bianque: 1 },
         globalModelPathScales: {},
+        modelAnimationProfiles: {},
         playerExploreTransform: {
             offsetMeters: { x: 0, y: 0, z: 0 },
             rotationDeg: { x: 0, y: 0, z: 0 }
@@ -1768,6 +1769,51 @@ export function normalizeGameAssetConfig(raw) {
     };
     d.globalAudio = normalizeGlobalAudio(src.globalAudio);
     d.globalScreenUi = normalizeGlobalScreenUi(src.globalScreenUi);
+    d.modelAnimationProfiles = {};
+    if (src.modelAnimationProfiles && typeof src.modelAnimationProfiles === 'object') {
+        Object.keys(src.modelAnimationProfiles).forEach(function (key) {
+            var rawProfile = src.modelAnimationProfiles[key];
+            if (!rawProfile || typeof rawProfile !== 'object') return;
+            var nk = String(key || '').trim().replace(/\\/g, '/');
+            if (!nk) return;
+            var states = {};
+            if (rawProfile.states && typeof rawProfile.states === 'object') {
+                Object.keys(rawProfile.states).forEach(function (stateId) {
+                    var st = rawProfile.states[stateId];
+                    if (!st || typeof st !== 'object') return;
+                    states[String(stateId)] = {
+                        clipName: String(st.clipName || ''),
+                        loop: st.loop !== false,
+                        speed: Number.isFinite(Number(st.speed)) && Number(st.speed) > 0 ? Number(st.speed) : 1
+                    };
+                });
+            }
+            var transitions = [];
+            if (Array.isArray(rawProfile.transitions)) {
+                rawProfile.transitions.forEach(function (tr) {
+                    if (!tr || typeof tr !== 'object') return;
+                    transitions.push({
+                        from: String(tr.from || '*'),
+                        to: String(tr.to || ''),
+                        trigger: String(tr.trigger || 'auto')
+                    });
+                });
+            }
+            var clipOverrides = {};
+            if (rawProfile.clipOverrides && typeof rawProfile.clipOverrides === 'object') {
+                Object.keys(rawProfile.clipOverrides).forEach(function (clipKey) {
+                    var url = String(rawProfile.clipOverrides[clipKey] || '').trim();
+                    if (url) clipOverrides[String(clipKey)] = url;
+                });
+            }
+            d.modelAnimationProfiles[nk] = {
+                defaultState: String(rawProfile.defaultState || ''),
+                states: states,
+                transitions: transitions,
+                clipOverrides: clipOverrides
+            };
+        });
+    }
     return d;
 }
 

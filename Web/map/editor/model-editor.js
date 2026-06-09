@@ -82,6 +82,7 @@ function renderModelDetail(refs, env, asset) {
     if (refs.modelPreviewEmpty) refs.modelPreviewEmpty.classList.toggle('view-hidden', !!asset);
     if (refs.modelPreviewHost) refs.modelPreviewHost.classList.toggle('view-hidden', !asset);
     if (refs.modelPreviewMeta) refs.modelPreviewMeta.textContent = asset ? asset.name + ' · 模型预览' : '未绑定模型';
+    if (refs.modelPreviewRefit) refs.modelPreviewRefit.disabled = !asset;
 
     if (!asset) {
         env.disposeModelAssetPreview();

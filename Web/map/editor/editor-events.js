@@ -166,6 +166,11 @@ export function bindEditorEvents(refs, env) {
             }
         });
     }
+    if (refs.modelPreviewRefit) {
+        refs.modelPreviewRefit.addEventListener('click', function () {
+            if (typeof env.refitModelPreview === 'function') env.refitModelPreview();
+        });
+    }
 
     refs.statusFilters.addEventListener('click', function (event) {
         var button = event.target.closest('[data-status-filter]');

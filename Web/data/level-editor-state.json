@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "savedAt": "2026-05-26T07:34:36.161Z",
+  "savedAt": "2026-06-09T04:24:21.890Z",
   "catalog": {
     "gameTypes": [],
     "phaseTypes": [],
@@ -364,6 +364,140 @@
           "stats": {},
           "assetRefs": {
             "modelPath": "/Soldier.glb",
+            "animationPaths": {
+              "idle": "",
+              "walk": "",
+              "run": "",
+              "attack": "",
+              "skillE": "",
+              "skillR": ""
+            }
+          },
+          "cityCode": "370100",
+          "cityName": "济南",
+          "updatedAt": ""
+        },
+        {
+          "id": "qinqiong",
+          "name": "秦琼·门神",
+          "summary": "道路门神，阻挡2名敌人并近战反击。主动技能：不动如山。",
+          "tags": [
+            "济南",
+            "melee",
+            "S"
+          ],
+          "rarity": "S",
+          "placement": "",
+          "element": "force",
+          "functionTags": [
+            "singleTarget",
+            "paralysis"
+          ],
+          "effects": [],
+          "cleanseEffects": [],
+          "effectDurationSec": 2,
+          "stats": {
+            "hp": 780,
+            "attack": 74,
+            "cost": 260,
+            "range": 1.2,
+            "fireRate": 1.15,
+            "healAmount": 0,
+            "healRange": 0,
+            "splash": 0,
+            "maxBlockCount": 2
+          },
+          "assetRefs": {
+            "imagePath": "/Arts/Cards/char_qinqiong.png",
+            "animationPaths": {
+              "idle": "",
+              "walk": "",
+              "run": "",
+              "attack": "",
+              "skillE": "",
+              "skillR": ""
+            }
+          },
+          "cityCode": "370100",
+          "cityName": "济南",
+          "updatedAt": ""
+        },
+        {
+          "id": "liqingzhao",
+          "name": "李清照·易安",
+          "summary": "超远水墨群攻，持续压低敌军速度。主动技能：漱玉天潮。",
+          "tags": [
+            "济南",
+            "mage",
+            "S"
+          ],
+          "rarity": "S",
+          "placement": "",
+          "element": "sound",
+          "functionTags": [
+            "areaAttack",
+            "damageOverTime"
+          ],
+          "effects": [],
+          "cleanseEffects": [],
+          "effectDurationSec": 2,
+          "stats": {
+            "hp": 180,
+            "attack": 140,
+            "cost": 300,
+            "range": 7.2,
+            "fireRate": 0.62,
+            "healAmount": 0,
+            "healRange": 0,
+            "splash": 2.35,
+            "maxBlockCount": 0
+          },
+          "assetRefs": {
+            "imagePath": "/Arts/Cards/char_liqingzhao.png",
+            "animationPaths": {
+              "idle": "",
+              "walk": "",
+              "run": "",
+              "attack": "",
+              "skillE": "",
+              "skillR": ""
+            }
+          },
+          "cityCode": "370100",
+          "cityName": "济南",
+          "updatedAt": ""
+        },
+        {
+          "id": "bianque",
+          "name": "扁鹊·神医",
+          "summary": "神医支援，持续治疗友军。主动技能：青囊济世。",
+          "tags": [
+            "济南",
+            "healer",
+            "S"
+          ],
+          "rarity": "S",
+          "placement": "",
+          "element": "thermal",
+          "functionTags": [
+            "healing"
+          ],
+          "effects": [],
+          "cleanseEffects": [],
+          "effectDurationSec": 2,
+          "stats": {
+            "hp": 260,
+            "attack": 0,
+            "cost": 240,
+            "range": 4.8,
+            "fireRate": 0.85,
+            "healAmount": 90,
+            "healRange": 4.8,
+            "splash": 0,
+            "maxBlockCount": 0
+          },
+          "assetRefs": {
+            "imagePath": "/Arts/Cards/char_bianque.png",
             "animationPaths": {
               "idle": "",
               "walk": "",
@@ -83193,14 +83327,14 @@
             "category": "model",
             "icon": "M",
             "modelId": "",
-            "col": 10,
-            "row": 7,
+            "col": 14,
+            "row": 6,
             "rotation": 0,
             "scale": 1.28,
             "worldOffsetMeters": {
-              "x": 0.7909435396586684,
+              "x": -0.6299040548106456,
               "y": 0.13088156778928628,
-              "z": 0
+              "z": 0.6093565804719923
             },
             "modelPath": "/GameModels/Buildings/voxel-shanghai-oriental-pearl.gltf",
             "team": "neutral",
@@ -83225,13 +83359,13 @@
             "icon": "M",
             "modelId": "",
             "col": 22,
-            "row": 4,
+            "row": 2,
             "rotation": 0,
             "scale": 1.35,
             "worldOffsetMeters": {
               "x": 0,
               "y": 0,
-              "z": 0
+              "z": -0.08411284109396178
             },
             "modelPath": "/GameModels/Buildings/voxel-shanghai-tower.gltf",
             "team": "neutral",
@@ -83256,13 +83390,13 @@
             "icon": "M",
             "modelId": "",
             "col": 18,
-            "row": 4,
+            "row": 1,
             "rotation": 0,
             "scale": 1.18,
             "worldOffsetMeters": {
               "x": 0,
               "y": 0,
-              "z": 0
+              "z": 0.9062345465287684
             },
             "modelPath": "/GameModels/Buildings/voxel-shanghai-world-financial-center.gltf",
             "team": "neutral",
@@ -83287,13 +83421,13 @@
             "icon": "M",
             "modelId": "",
             "col": 16,
-            "row": 5,
+            "row": 1,
             "rotation": 0,
             "scale": 1.12,
             "worldOffsetMeters": {
               "x": 0,
               "y": 0,
-              "z": 0
+              "z": 0.5212888542348679
             },
             "modelPath": "/GameModels/Buildings/voxel-shanghai-jinmao-tower.gltf",
             "team": "neutral",
@@ -83504,13 +83638,13 @@
             "icon": "M",
             "modelId": "",
             "col": 13,
-            "row": 3,
+            "row": 2,
             "rotation": -5,
             "scale": 1,
             "worldOffsetMeters": {
               "x": 0,
               "y": 0,
-              "z": 0
+              "z": -0.22519071281262804
             },
             "modelPath": "/GameModels/Buildings/voxel-shanghai-ruined-skyscraper.gltf",
             "team": "neutral",
@@ -83628,13 +83762,13 @@
             "icon": "M",
             "modelId": "",
             "col": 10,
-            "row": 3,
+            "row": 2,
             "rotation": -5,
             "scale": 0.68,
             "worldOffsetMeters": {
               "x": 0,
               "y": 0,
-              "z": 0
+              "z": -0.22146520659635804
             },
             "modelPath": "/GameModels/Buildings/voxel-shanghai-ruined-skyscraper.gltf",
             "team": "neutral",

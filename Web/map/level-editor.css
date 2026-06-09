@@ -741,7 +741,8 @@ textarea:focus {
 }
 
 #gameplayWorkbench.workbench-surface,
-#modelWorkbench.workbench-surface {
+#modelWorkbench.workbench-surface,
+#animationWorkbench.workbench-surface {
     display: flex;
     flex-direction: column;
     gap: 16px;
@@ -1114,6 +1115,12 @@ textarea:focus {
     gap: 12px;
     overflow: hidden;
     position: relative;
+    min-height: 0;
+}
+
+.viewport-panel > .workbench-surface:not(.view-hidden) {
+    flex: 1 1 auto;
+    min-height: 0;
 }
 
 body.editor-shell--resizing {
@@ -3005,6 +3012,39 @@ input[type="range"].audio-volume-slider {
     min-height: 260px;
 }
 
+#animationWorkbench .gameplay-preview-surface {
+    --preview-media-height: clamp(160px, 28vh, 260px);
+    flex: 0 0 auto;
+}
+
+#animationWorkbench #animationPreviewHost {
+    height: var(--preview-media-height);
+    max-height: var(--preview-media-height);
+    min-height: 160px;
+}
+
+#animationWorkbench .gameplay-column-list .compact-list {
+    min-height: 220px;
+}
+
+#animationWorkbench .gameplay-column-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+}
+
+#animationWorkbench .gameplay-column-editor > .panel-head,
+#animationWorkbench .gameplay-preview-surface,
+#animationWorkbench .animation-editor-block {
+    flex-shrink: 0;
+}
+
 .gameplay-column {
     min-height: 0;
     padding: 16px;
@@ -3939,6 +3979,106 @@ label.game-asset-upload {
 
 .animation-editor-block .anim-btn input {
     display: none;
+}
+
+.animation-preview-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-top: 10px;
+    padding: 0 4px 8px;
+}
+
+.animation-scale-field {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    min-width: 140px;
+}
+
+.animation-scale-field span {
+    font-size: 11px;
+    color: var(--editor-muted);
+    white-space: nowrap;
+}
+
+.animation-scale-field input[type='number'] {
+    width: 88px;
+    min-width: 72px;
+}
+
+.animation-preview-scale-hint {
+    margin: 4px 4px 0;
+    font-size: 11px;
+}
+
+.animation-speed-field {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    min-width: 160px;
+}
+
+.animation-speed-field span {
+    font-size: 11px;
+    color: var(--editor-muted);
+    white-space: nowrap;
+}
+
+.animation-speed-field input[type='range'] {
+    flex: 1;
+    min-width: 80px;
+}
+
+.animation-clip-panel .animation-clip-row {
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.animation-clip-panel .animation-clip-row:last-child {
+    border-bottom: none;
+}
+
+.animation-clip-row__head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.animation-clip-row__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.animation-state-table-wrap {
+    overflow-x: auto;
+    margin-top: 8px;
+}
+
+.animation-state-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+
+.animation-state-table th,
+.animation-state-table td {
+    padding: 6px 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    text-align: left;
+    vertical-align: middle;
+}
+
+.animation-state-table input[type='text'],
+.animation-state-table input[type='number'],
+.animation-state-table select {
+    width: 100%;
+    min-width: 72px;
 }
 
 @media (max-width: 1180px) {

@@ -2,6 +2,11 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+import {
+  configureLevelStyleOrbitControls,
+  centerPreviewObjectOnGround,
+  framePreviewCameraToObject,
+} from './editor/asset-preview-orbit.js';
 
 const gltfLoader = new GLTFLoader();
 const objLoader = new OBJLoader();
@@ -35,7 +40,7 @@ export function createGameplayAssetPreview(options) {
   var scene = new THREE.Scene();
   scene.background = new THREE.Color(0x08111b);
 
-  var camera = new THREE.PerspectiveCamera(42, 1, 0.1, 120);
+  var camera = new THREE.PerspectiveCamera(55, 1, 0.05, 10000);
   camera.position.set(2.6, 2.2, 3.8);
 
   var renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
@@ -65,16 +70,15 @@ export function createGameplayAssetPreview(options) {
   scene.add(ground);
 
   var controls = new OrbitControls(camera, renderer.domElement);
-  controls.enableDamping = true;
-  controls.enablePan = false;
-  controls.minDistance = 1.8;
-  controls.maxDistance = 10;
-  controls.autoRotate = true;
-  controls.autoRotateSpeed = 1.6;
+  configureLevelStyleOrbitControls(controls, camera);
   controls.target.set(0, 0.25, 0);
 
   var stage = new THREE.Group();
   scene.add(stage);
+
+  var modelRoot = null;
+  var autoFitScale = 1;
+  var pathScaleMultiplier = 1;
 
   function resize() {
     var width = host.clientWidth || 1;
@@ -93,28 +97,46 @@ export function createGameplayAssetPreview(options) {
       var child = stage.children.pop();
       if (child) stage.remove(child);
     }
+    modelRoot = null;
+    autoFitScale = 1;
+    pathScaleMultiplier = 1;
+  }
+
+  function applyModelScale() {
+    if (!modelRoot) return;
+    modelRoot.scale.setScalar(autoFitScale * pathScaleMultiplier);
   }
 
   function frameObject(object) {
-    var box = new THREE.Box3().setFromObject(object);
-    var size = box.getSize(new THREE.Vector3());
-    var center = box.getCenter(new THREE.Vector3());
-    object.position.sub(center);
-    object.position.y -= box.min.y;
-    var maxSide = Math.max(size.x, size.y, size.z) || 1;
-    var scale = 1.8 / maxSide;
-    object.scale.setScalar(scale);
-    controls.target.set(0, 0.55, 0);
-    camera.position.set(2.6, 2.2, 3.8);
-    controls.update();
+    var centered = centerPreviewObjectOnGround(object);
+    autoFitScale = 1.8 / centered.maxSide;
+    applyModelScale();
+    framePreviewCameraToObject(object, camera, controls, {
+      displayScale: autoFitScale * pathScaleMultiplier,
+    });
   }
 
-  async function setAsset(path, pathScaleMultiplier) {
+  function setPathScaleMultiplier(mult) {
+    pathScaleMultiplier =
+      mult != null && Number.isFinite(Number(mult)) && Number(mult) > 0 ? Number(mult) : 1;
+    if (!modelRoot) return;
+    applyModelScale();
+    framePreviewCameraToObject(modelRoot, camera, controls, {
+      displayScale: autoFitScale * pathScaleMultiplier,
+    });
+  }
+
+  function refitModelFrame() {
+    if (!modelRoot) return;
+    frameObject(modelRoot);
+  }
+
+  async function setAsset(path, pathScale) {
     clearStage();
     if (!path) return;
-    var mult =
-      pathScaleMultiplier != null && Number.isFinite(Number(pathScaleMultiplier)) && Number(pathScaleMultiplier) > 0
-        ? Number(pathScaleMultiplier)
+    pathScaleMultiplier =
+      pathScale != null && Number.isFinite(Number(pathScale)) && Number(pathScale) > 0
+        ? Number(pathScale)
         : 1;
     var url = resolveAssetPath(path);
     try {
@@ -124,11 +146,12 @@ export function createGameplayAssetPreview(options) {
           if (child.isMesh) {
             child.castShadow = true;
             child.receiveShadow = true;
+            if (child.geometry && !child.geometry.boundingBox) child.geometry.computeBoundingBox();
           }
         });
-        stage.add(gltfRoot);
-        frameObject(gltfRoot);
-        gltfRoot.scale.multiplyScalar(mult);
+        modelRoot = gltfRoot;
+        stage.add(modelRoot);
+        frameObject(modelRoot);
         return;
       }
       if (/\.obj(\?|$)/i.test(url)) {
@@ -137,26 +160,29 @@ export function createGameplayAssetPreview(options) {
           if (child.isMesh) {
             child.castShadow = true;
             child.receiveShadow = true;
+            if (child.geometry && !child.geometry.boundingBox) child.geometry.computeBoundingBox();
           }
         });
-        stage.add(objRoot);
-        frameObject(objRoot);
-        objRoot.scale.multiplyScalar(mult);
+        modelRoot = objRoot;
+        stage.add(modelRoot);
+        frameObject(modelRoot);
         return;
       }
       var fallback = new THREE.Mesh(
         new THREE.BoxGeometry(1.5, 1.5, 1.5),
         new THREE.MeshNormalMaterial({ wireframe: false })
       );
-      stage.add(fallback);
-      frameObject(fallback);
+      modelRoot = fallback;
+      stage.add(modelRoot);
+      frameObject(modelRoot);
     } catch (error) {
       var errorMesh = new THREE.Mesh(
         new THREE.IcosahedronGeometry(1, 0),
         new THREE.MeshStandardMaterial({ color: 0xef4444, roughness: 0.55, metalness: 0.12 })
       );
-      stage.add(errorMesh);
-      frameObject(errorMesh);
+      modelRoot = errorMesh;
+      stage.add(modelRoot);
+      frameObject(modelRoot);
       console.warn('[GameplayAssetPreview]', error);
     }
   }
@@ -172,6 +198,8 @@ export function createGameplayAssetPreview(options) {
 
   return {
     setAsset: setAsset,
+    setPathScaleMultiplier: setPathScaleMultiplier,
+    refitModelFrame: refitModelFrame,
     dispose: function () {
       disposed = true;
       if (observer) observer.disconnect();

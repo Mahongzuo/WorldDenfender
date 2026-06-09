@@ -45,6 +45,7 @@
                 <button class="workspace-button active" data-workbench="level">关卡编辑器</button>
                 <button class="workspace-button" data-workbench="gameplay">卡片/玩法编辑器</button>
                 <button class="workspace-button" data-workbench="model">模型编辑器</button>
+                <button class="workspace-button" data-workbench="animation">动画编辑器</button>
                 <button class="workspace-button" data-workbench="theme">棋盘主题</button>
                 <button class="workspace-button" data-workbench="globalSettings">全局设置</button>
             </div>
@@ -407,6 +408,10 @@
                             </div>
                             <div id="modelPreviewEmpty" class="empty-state">请在左侧列表选择一个模型以预览。</div>
                             <div id="modelPreviewHost" class="gameplay-asset-preview-host view-hidden" aria-label="模型预览"></div>
+                            <div class="animation-preview-controls model-preview-controls">
+                                <button type="button" id="modelPreviewRefit" class="mini-button" title="重新居中并适配相机">重新取景</button>
+                            </div>
+                            <p class="section-hint animation-preview-scale-hint">左键旋转、滚轮缩放、右键平移，与关卡三维预览一致。</p>
                             <div
                                 id="modelPreviewResizeHandle"
                                 class="preview-resize-handle"
@@ -445,6 +450,84 @@
                             </div>
                             <p class="section-hint">上传后会覆盖当前模型文件，保持同名同路径；新文件将保存到 <code>public/GameModels/分类目录/</code>。</p>
                         </form>
+                    </div>
+                </section>
+            </section>
+
+            <section id="animationWorkbench" class="workbench-surface view-hidden" aria-hidden="true">
+                <section class="level-strip model-strip">
+                    <div>
+                        <div class="eyebrow">Animation Editor</div>
+                        <h2 id="animationEditorTitle">模型动画编辑器</h2>
+                        <p id="animationEditorMeta">自动扫描项目中带骨骼/内嵌动画的 GLB/GLTF；可预览、导入替换动画并配置状态机。</p>
+                    </div>
+                    <div id="animationOverviewStats" class="overview-stats"></div>
+                </section>
+
+                <section class="mode-ribbon mode-ribbon--split model-ribbon" aria-label="动画模型分类筛选">
+                    <div class="mode-ribbon-inner" id="animationCategoryTabs" aria-label="动画模型分类">
+                        <button class="mode-button active" data-animation-category="all">全部</button>
+                        <button class="mode-button" data-animation-category="Enemy">敌人</button>
+                        <button class="mode-button" data-animation-category="Tower">防御塔</button>
+                        <button class="mode-button" data-animation-category="Buildings">建筑</button>
+                        <button class="mode-button" data-animation-category="Props">地形/阻挡物/地板</button>
+                        <button class="mode-button" data-animation-category="Charactor">角色</button>
+                    </div>
+                    <div class="mode-ribbon-inner model-search-wrap">
+                        <label class="field-block model-search-field">
+                            <span>模型搜索</span>
+                            <input id="animationSearch" type="search" placeholder="模型名 / 路径 / 剪辑名">
+                        </label>
+                        <button type="button" id="btnRefreshAnimatableModels" class="mini-button">重新扫描</button>
+                    </div>
+                </section>
+
+                <section class="gameplay-layout">
+                    <div class="gameplay-column gameplay-column-list panel-surface">
+                        <div class="panel-head panel-head-tight">
+                            <div>
+                                <div class="eyebrow">Animatable Models</div>
+                                <h2>骨骼模型列表</h2>
+                            </div>
+                            <span id="animationListCount" class="panel-tag"></span>
+                        </div>
+                        <div id="animationEntryList" class="compact-list"></div>
+                    </div>
+                    <div class="gameplay-column gameplay-column-editor panel-surface">
+                        <div class="panel-head panel-head-tight">
+                            <div>
+                                <div class="eyebrow">Preview & Animation</div>
+                                <h2 id="animationDetailTitle">动画详情</h2>
+                            </div>
+                            <span id="animationDetailMeta" class="panel-tag">未选择</span>
+                        </div>
+                        <section class="gameplay-preview-surface panel-surface">
+                            <div class="panel-head panel-head-tight">
+                                <div>
+                                    <div class="eyebrow">Preview</div>
+                                    <h2>动画预览</h2>
+                                </div>
+                                <span id="animationPreviewMeta" class="panel-tag">未绑定模型</span>
+                            </div>
+                            <div id="animationPreviewEmpty" class="empty-state">请在左侧列表选择一个带骨骼的模型以预览动画。</div>
+                            <div id="animationPreviewHost" class="gameplay-asset-preview-host view-hidden" aria-label="动画预览"></div>
+                            <div class="animation-preview-controls">
+                                <button type="button" id="animationPreviewPlay" class="mini-button active">播放</button>
+                                <button type="button" id="animationPreviewPause" class="mini-button">暂停</button>
+                                <label class="field-block animation-speed-field">
+                                    <span>速度</span>
+                                    <input id="animationPreviewSpeed" type="range" min="0.1" max="3" step="0.1" value="1">
+                                </label>
+                                <label class="field-block animation-scale-field">
+                                    <span>模型缩放</span>
+                                    <input id="animationDetailGlobalScale" type="number" min="0.01" max="1000" step="0.01" value="1" title="与模型路径绑定，预览与游戏中与实例缩放相乘">
+                                </label>
+                                <button type="button" id="animationPreviewRefit" class="mini-button" title="重新居中并适配相机">重新取景</button>
+                            </div>
+                            <p class="section-hint animation-preview-scale-hint">左键旋转、滚轮缩放、右键平移，与关卡三维预览一致。调整「模型缩放」可实时改变预览大小。</p>
+                        </section>
+                        <div id="animationClipPanel" class="animation-editor-block"></div>
+                        <div id="animationStateMachinePanel" class="animation-editor-block"></div>
                     </div>
                 </section>
             </section>
@@ -1183,6 +1266,14 @@
                         </label>
                     </div>
                     <p class="section-hint">新模型会写入 <code>public/GameModels/分类目录/</code>，扫描后自动出现在列表中。</p>
+                </section>
+            </div>
+
+            <div id="animationInspectorWorkspace" class="view-hidden" aria-hidden="true">
+                <section class="inspector-section">
+                    <h3>动画编辑器</h3>
+                    <p class="section-hint">左侧列出项目中所有带骨骼或内嵌动画的模型。导入的动画文件保存在该模型同级目录下的 <code>animations/</code> 文件夹。</p>
+                    <p class="section-hint">状态机配置写入 <code>gameAssetConfig.modelAnimationProfiles</code>，与关卡 JSON 一并保存。</p>
                 </section>
             </div>
 

@@ -52,6 +52,11 @@ import {
     replaceSelectedModel as _replaceSelectedModel,
     uploadNewModelFromInspector as _uploadNewModelFromInspector
 } from './editor/model-editor.js';
+import {
+    renderAnimationEditor as _renderAnimationEditor,
+    bindAnimationEditorUi as _bindAnimationEditorUi,
+    readAnimationProfileFromDom as _readAnimationProfileFromDom
+} from './editor/animation-editor.js';
 import { renderSelectionInspector as _renderSelectionInspector } from './editor/selection-inspector.js';
 import { bindWaveEditorUi as _bindWaveEditorUi, renderWaveList as _renderWaveList } from './editor/wave-editor.js';
 import {
@@ -142,8 +147,15 @@ import {
     var selectedGameplayAssetId = '';
     var activeModelCategory = 'all';
     var selectedModelId = '';
+    var activeAnimationCategory = 'all';
+    var selectedAnimationModelId = '';
+    /** @type {Array<object>} */
+    var animatableModelsCatalog = [];
     var modelAssetPreviewApi = null;
+    var modelPreviewCurrentUrl = '';
     var modelPreviewInitGeneration = 0;
+    var animationAssetPreviewApi = null;
+    var animationPreviewInitGeneration = 0;
     var viewportViewMode = (savedEditorSession && savedEditorSession.viewportViewMode) || 'board';
     var actorUndoCoalesceUntil = 0;
     var previewApi = null;
@@ -317,12 +329,35 @@ import {
         modelPreviewHost: document.getElementById('modelPreviewHost'),
         modelPreviewMeta: document.getElementById('modelPreviewMeta'),
         modelPreviewResizeHandle: document.getElementById('modelPreviewResizeHandle'),
+        modelPreviewRefit: document.getElementById('modelPreviewRefit'),
         modelUploadReplace: document.getElementById('modelUploadReplace'),
         modelInspectorWorkspace: document.getElementById('modelInspectorWorkspace'),
         modelInspectorStats: document.getElementById('modelInspectorStats'),
         modelInspectorUpload: document.getElementById('modelInspectorUpload'),
         modelInspectorUploadName: document.getElementById('modelInspectorUploadName'),
         modelInspectorUploadCategory: document.getElementById('modelInspectorUploadCategory'),
+        animationWorkbench: document.getElementById('animationWorkbench'),
+        animationEditorTitle: document.getElementById('animationEditorTitle'),
+        animationEditorMeta: document.getElementById('animationEditorMeta'),
+        animationOverviewStats: document.getElementById('animationOverviewStats'),
+        animationCategoryTabs: document.getElementById('animationCategoryTabs'),
+        animationSearch: document.getElementById('animationSearch'),
+        btnRefreshAnimatableModels: document.getElementById('btnRefreshAnimatableModels'),
+        animationEntryList: document.getElementById('animationEntryList'),
+        animationListCount: document.getElementById('animationListCount'),
+        animationDetailTitle: document.getElementById('animationDetailTitle'),
+        animationDetailMeta: document.getElementById('animationDetailMeta'),
+        animationPreviewEmpty: document.getElementById('animationPreviewEmpty'),
+        animationPreviewHost: document.getElementById('animationPreviewHost'),
+        animationPreviewMeta: document.getElementById('animationPreviewMeta'),
+        animationPreviewPlay: document.getElementById('animationPreviewPlay'),
+        animationPreviewPause: document.getElementById('animationPreviewPause'),
+        animationPreviewSpeed: document.getElementById('animationPreviewSpeed'),
+        animationDetailGlobalScale: document.getElementById('animationDetailGlobalScale'),
+        animationPreviewRefit: document.getElementById('animationPreviewRefit'),
+        animationClipPanel: document.getElementById('animationClipPanel'),
+        animationStateMachinePanel: document.getElementById('animationStateMachinePanel'),
+        animationInspectorWorkspace: document.getElementById('animationInspectorWorkspace'),
         themeWorkbench: document.getElementById('themeWorkbench'),
         themeWorkbenchTitle: document.getElementById('themeWorkbenchTitle'),
         themeWorkbenchMeta: document.getElementById('themeWorkbenchMeta'),
@@ -447,8 +482,13 @@ import {
         ctx.selectedGameplayAssetId = selectedGameplayAssetId;
         ctx.activeModelCategory = activeModelCategory;
         ctx.selectedModelId = selectedModelId;
+        ctx.activeAnimationCategory = activeAnimationCategory;
+        ctx.selectedAnimationModelId = selectedAnimationModelId;
+        ctx.animatableModelsCatalog = animatableModelsCatalog;
         ctx.modelAssetPreviewApi = modelAssetPreviewApi;
         ctx.modelPreviewInitGeneration = modelPreviewInitGeneration;
+        ctx.animationAssetPreviewApi = animationAssetPreviewApi;
+        ctx.animationPreviewInitGeneration = animationPreviewInitGeneration;
         ctx.viewportViewMode = viewportViewMode;
         ctx.previewApi = previewApi;
         ctx.gameplayAssetPreviewApi = gameplayAssetPreviewApi;
@@ -723,6 +763,7 @@ import {
 
     function bindEvents() {
         _bindEditorEvents(refs, editorEventsEnv());
+        _bindAnimationEditorUi(refs, animationEditorEnv());
     }
 
     function gameAssetEnv() {
@@ -753,6 +794,21 @@ import {
             state.gameModelsCatalog = [];
         }
         hydrateActorModelPathsFromCatalog();
+    }
+
+    async function refreshAnimatableModelsCatalog() {
+        try {
+            var r = await fetch('/api/game-models/animatable-catalog', { cache: 'no-store' });
+            if (!r.ok) {
+                animatableModelsCatalog = [];
+                return;
+            }
+            var data = await r.json();
+            animatableModelsCatalog = Array.isArray(data.entries) ? data.entries : [];
+        } catch (e) {
+            console.warn('[AnimatableModels catalog]', e);
+            animatableModelsCatalog = [];
+        }
     }
 
     async function uploadFileToProjectUrl(file, options) {
@@ -892,6 +948,7 @@ import {
             var synced = syncBuiltInCityLayouts(false);
             selectedLevelId = pickLevelId(state.levels, selectedLevelId);
             await refreshGameModelsCatalog();
+            await refreshAnimatableModelsCatalog();
             renderAll();
             restoreEditorSessionAfterLoad();
             isDirty = generated > 0 || synced > 0 || geoSynced > 0 || gameplaySynced > 0;
@@ -902,6 +959,7 @@ import {
             state = normalizeState(backup || { version: ENGINE_VERSION, catalog: {}, levels: [] });
             selectedLevelId = pickLevelId(state.levels, selectedLevelId);
             await refreshGameModelsCatalog();
+            await refreshAnimatableModelsCatalog();
             renderAll();
             restoreEditorSessionAfterLoad();
             isDirty = false;
@@ -917,6 +975,9 @@ import {
     async function saveState() {
         try {
             setStatus('正在保存到项目文件…', 'idle');
+            if (activeWorkbench === 'animation') {
+                _readAnimationProfileFromDom(refs, animationEditorEnv());
+            }
             hydrateActorModelPathsFromCatalog();
             hydrateLevelEnemyTypesFromCityGameplay();
             var response = await fetch(API_URL, {
@@ -930,6 +991,7 @@ import {
             isDirty = false;
             _persistLocalBackup(state);
             await refreshGameModelsCatalog();
+            await refreshAnimatableModelsCatalog();
             renderAll();
             persistEditorSessionState();
             setStatus('已保存到 Web/data/level-editor-state.json', 'success');
@@ -1189,6 +1251,7 @@ import {
         renderOverview();
         renderGameplayEditor();
         renderModelEditor();
+        renderAnimationEditor();
         renderThemeEditor();
         syncViewportPanels();
         renderContentBrowser();
@@ -1422,6 +1485,7 @@ import {
     function renderWorkbenchShell() {
         var gameplay = activeWorkbench === 'gameplay';
         var model = activeWorkbench === 'model';
+        var animation = activeWorkbench === 'animation';
         var level = activeWorkbench === 'level';
         var theme = activeWorkbench === 'theme';
         var globalSettings = activeWorkbench === 'globalSettings';
@@ -1434,6 +1498,10 @@ import {
         if (refs.modelWorkbench) {
             refs.modelWorkbench.classList.toggle('view-hidden', !model);
             refs.modelWorkbench.setAttribute('aria-hidden', model ? 'false' : 'true');
+        }
+        if (refs.animationWorkbench) {
+            refs.animationWorkbench.classList.toggle('view-hidden', !animation);
+            refs.animationWorkbench.setAttribute('aria-hidden', animation ? 'false' : 'true');
         }
         if (refs.themeWorkbench) {
             refs.themeWorkbench.classList.toggle('view-hidden', !theme);
@@ -1457,6 +1525,10 @@ import {
             refs.modelInspectorWorkspace.classList.toggle('view-hidden', !model);
             refs.modelInspectorWorkspace.setAttribute('aria-hidden', model ? 'false' : 'true');
         }
+        if (refs.animationInspectorWorkspace) {
+            refs.animationInspectorWorkspace.classList.toggle('view-hidden', !animation);
+            refs.animationInspectorWorkspace.setAttribute('aria-hidden', animation ? 'false' : 'true');
+        }
         if (refs.themeInspectorWorkspace) {
             refs.themeInspectorWorkspace.classList.toggle('view-hidden', !theme);
             refs.themeInspectorWorkspace.setAttribute('aria-hidden', theme ? 'false' : 'true');
@@ -1475,6 +1547,8 @@ import {
                 refs.levelSummary.textContent = '按当前关卡/城市维护敌人、防御塔、卡片、角色、技能与项目资源目录。';
             } else if (model) {
                 refs.levelSummary.textContent = '统一管理项目模型资产，按分类浏览、预览和上传替换。';
+            } else if (animation) {
+                refs.levelSummary.textContent = '编辑带骨骼模型的动画剪辑与状态机，实时预览；导入动画保存到模型目录下的 animations/。';
             } else if (theme) {
                 refs.levelSummary.textContent = '编辑当前关卡的棋盘颜色、贴图与半透明参数，与主游戏运行时地图一致。';
             } else if (globalSettings) {
@@ -1486,6 +1560,7 @@ import {
         }
         if (!gameplay) disposeGameplayAssetPreview();
         if (!model) disposeModelAssetPreview();
+        if (!animation) disposeAnimationAssetPreview();
         if (globalSettings) refreshGlobalSettingsWorkbench();
     }
 
@@ -2026,6 +2101,86 @@ import {
         _renderModelEditor(refs, modelEditorEnv());
     }
 
+    function renderAnimationEditor() {
+        _renderAnimationEditor(refs, animationEditorEnv());
+    }
+
+    function ensureAnimationAssetPreview(modelUrl, pathScaleMultiplier, externalClipUrls) {
+        if (!refs.animationPreviewHost) return;
+        if (!modelUrl) return;
+        var mult =
+            pathScaleMultiplier != null && Number.isFinite(Number(pathScaleMultiplier)) && Number(pathScaleMultiplier) > 0
+                ? Number(pathScaleMultiplier)
+                : 1;
+        if (!animationAssetPreviewApi) {
+            var generation = (animationPreviewInitGeneration += 1);
+            import('./animation-asset-preview.js').then(function (mod) {
+                if (generation !== animationPreviewInitGeneration || !refs.animationPreviewHost) return;
+                animationAssetPreviewApi = mod.createAnimationAssetPreview({ host: refs.animationPreviewHost });
+                void animationAssetPreviewApi.setModel(modelUrl, mult, externalClipUrls);
+            }).catch(function (error) {
+                setStatus('动画预览初始化失败: ' + error.message, 'error');
+            });
+            return;
+        }
+        void animationAssetPreviewApi.setModel(modelUrl, mult, externalClipUrls);
+    }
+
+    function disposeAnimationAssetPreview() {
+        if (animationAssetPreviewApi && animationAssetPreviewApi.dispose) {
+            animationAssetPreviewApi.dispose();
+            animationAssetPreviewApi = null;
+        }
+    }
+
+    function updateAnimationPreviewScale(modelUrl, scale) {
+        if (!modelUrl) return;
+        var mult = clampGlobalPathModelScale(Number(scale) || 1);
+        if (refs.animationDetailGlobalScale) refs.animationDetailGlobalScale.value = String(mult);
+        if (animationAssetPreviewApi && typeof animationAssetPreviewApi.setPathScaleMultiplier === 'function') {
+            animationAssetPreviewApi.setPathScaleMultiplier(mult);
+            return;
+        }
+        var entry = animatableModelsCatalog.find(function (asset) {
+            return String(asset.publicUrl || '') === String(modelUrl || '') || asset.id === selectedAnimationModelId;
+        });
+        var externalUrls = entry
+            ? (entry.externalAnimations || []).map(function (ext) {
+                  return ext.publicUrl;
+              })
+            : [];
+        ensureAnimationAssetPreview(modelUrl, mult, externalUrls);
+    }
+
+    function commitAnimationWorkbenchGlobalScale() {
+        if (!state || !state.gameAssetConfig) return;
+        if (!refs.animationDetailGlobalScale) return;
+        var entry = animatableModelsCatalog.find(function (asset) {
+            return asset.id === selectedAnimationModelId;
+        });
+        if (!entry) return;
+        var rawUrl = String(entry.publicUrl || '').trim();
+        if (!rawUrl) return;
+        state.gameAssetConfig.globalModelPathScales = state.gameAssetConfig.globalModelPathScales || {};
+        var nk = canonicalModelPathScaleKey(rawUrl);
+        if (!nk) return;
+        var v = clampGlobalPathModelScale(Number(refs.animationDetailGlobalScale.value) || 1);
+        refs.animationDetailGlobalScale.value = String(v);
+        state.gameAssetConfig.globalModelPathScales[nk] = v;
+        markDirty('已更新模型全局缩放');
+        updateAnimationPreviewScale(rawUrl, v);
+        if (viewportViewMode === 'preview' && previewApi && typeof previewApi.refresh === 'function') {
+            var prevSelActor = selectedObject && selectedObject.kind === 'actor' ? selectedObject.id : null;
+            previewApi.refresh({ preserveView: true, selectActorId: prevSelActor });
+        }
+    }
+
+    function refitAnimationPreview() {
+        if (animationAssetPreviewApi && typeof animationAssetPreviewApi.refitModelFrame === 'function') {
+            animationAssetPreviewApi.refitModelFrame();
+        }
+    }
+
     function ensureModelAssetPreview(modelUrl, pathScaleMultiplier) {
         if (!refs.modelPreviewHost) return;
         if (!modelUrl) return;
@@ -2033,6 +2188,12 @@ import {
             pathScaleMultiplier != null && Number.isFinite(Number(pathScaleMultiplier)) && Number(pathScaleMultiplier) > 0
                 ? Number(pathScaleMultiplier)
                 : 1;
+        var sameModel = modelPreviewCurrentUrl === String(modelUrl);
+        if (modelAssetPreviewApi && sameModel && typeof modelAssetPreviewApi.setPathScaleMultiplier === 'function') {
+            modelAssetPreviewApi.setPathScaleMultiplier(mult);
+            return;
+        }
+        modelPreviewCurrentUrl = String(modelUrl);
         if (!modelAssetPreviewApi) {
             var generation = (modelPreviewInitGeneration += 1);
             import('./gameplay-asset-preview.js').then(function (mod) {
@@ -2045,6 +2206,20 @@ import {
             return;
         }
         modelAssetPreviewApi.setAsset(modelUrl, mult);
+    }
+
+    function refitModelPreview() {
+        if (modelAssetPreviewApi && typeof modelAssetPreviewApi.refitModelFrame === 'function') {
+            modelAssetPreviewApi.refitModelFrame();
+        }
+    }
+
+    function disposeModelAssetPreview() {
+        if (modelAssetPreviewApi && modelAssetPreviewApi.dispose) {
+            modelAssetPreviewApi.dispose();
+            modelAssetPreviewApi = null;
+        }
+        modelPreviewCurrentUrl = '';
     }
 
     function commitModelWorkbenchGlobalScale() {
@@ -3195,13 +3370,6 @@ import {
         }
     }
 
-    function disposeModelAssetPreview() {
-        if (modelAssetPreviewApi && modelAssetPreviewApi.dispose) {
-            modelAssetPreviewApi.dispose();
-            modelAssetPreviewApi = null;
-        }
-    }
-
     function renderExploreGameplayPanels() {
         if (!refs.inspectorPanelBody) return;
         var level = getLevel();
@@ -3680,6 +3848,7 @@ import {
             },
             disposeGameplayAssetPreview: disposeGameplayAssetPreview,
             disposeModelAssetPreview: disposeModelAssetPreview,
+            disposeAnimationAssetPreview: disposeAnimationAssetPreview,
             renderAll: renderAll,
             setActiveThemeScope: function (value) {
                 activeThemeScope = value === 'explore' ? 'explore' : 'defense';
@@ -3729,6 +3898,8 @@ import {
                 selectedModelId = value || '';
             },
             renderModelEditor: renderModelEditor,
+            renderAnimationEditor: renderAnimationEditor,
+            refitModelPreview: refitModelPreview,
             replaceSelectedModel: replaceSelectedModel,
             uploadNewModelFromInspector: uploadNewModelFromInspector,
             setActiveStatusFilter: function (value) {
@@ -3875,6 +4046,7 @@ import {
                 ensureBoardImagesPanelDelegated(refsArg, boardImagesEnv());
             },
             ensureModelAssetPreview: ensureModelAssetPreview,
+            refitModelPreview: refitModelPreview,
             commitModelWorkbenchGlobalScale: commitModelWorkbenchGlobalScale
         };
     }
@@ -3949,6 +4121,43 @@ import {
             disposeModelAssetPreview: disposeModelAssetPreview,
             setStatus: setStatus,
             refreshGameModelsCatalog: refreshGameModelsCatalog,
+            markDirty: markDirty
+        };
+    }
+
+    function animationEditorEnv() {
+        return {
+            getState: function () {
+                return state;
+            },
+            getActiveWorkbench: function () {
+                return activeWorkbench;
+            },
+            getActiveAnimationCategory: function () {
+                return activeAnimationCategory;
+            },
+            setActiveAnimationCategory: function (value) {
+                activeAnimationCategory = value || 'all';
+            },
+            getSelectedAnimationModelId: function () {
+                return selectedAnimationModelId;
+            },
+            setSelectedAnimationModelId: function (value) {
+                selectedAnimationModelId = value || '';
+            },
+            getAnimatableModelEntries: function () {
+                return animatableModelsCatalog;
+            },
+            refreshAnimatableModelsCatalog: refreshAnimatableModelsCatalog,
+            ensureAnimationAssetPreview: ensureAnimationAssetPreview,
+            disposeAnimationAssetPreview: disposeAnimationAssetPreview,
+            getAnimationPreviewApi: function () {
+                return animationAssetPreviewApi;
+            },
+            updateAnimationPreviewScale: updateAnimationPreviewScale,
+            commitAnimationWorkbenchGlobalScale: commitAnimationWorkbenchGlobalScale,
+            refitAnimationPreview: refitAnimationPreview,
+            setStatus: setStatus,
             markDirty: markDirty
         };
     }

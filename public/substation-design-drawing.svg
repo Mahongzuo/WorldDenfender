@@ -1,0 +1,260 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000">
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#24445f" stroke-width="1" opacity="0.45"/>
+    </pattern>
+    <pattern id="gridFine" width="10" height="10" patternUnits="userSpaceOnUse">
+      <path d="M 10 0 L 0 0 0 10" fill="none" stroke="#1a3247" stroke-width="0.8" opacity="0.35"/>
+    </pattern>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="1.3" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="6" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L6,3 L0,6 Z" fill="#9ed2ff"/>
+    </marker>
+    <style>
+      .bg { fill: #0a1520; }
+      .frame { fill: none; stroke: #9ed2ff; stroke-width: 2; }
+      .thin { stroke: #9ed2ff; stroke-width: 1.4; fill: none; }
+      .dash { stroke-dasharray: 8 8; }
+      .title { fill: #ecf6ff; font: 700 34px "Microsoft YaHei", "Noto Sans SC", sans-serif; letter-spacing: 2px; }
+      .subtitle { fill: #9ed2ff; font: 500 16px "Microsoft YaHei", "Noto Sans SC", sans-serif; }
+      .label { fill: #d3ecff; font: 500 16px "Microsoft YaHei", "Noto Sans SC", sans-serif; }
+      .small { fill: #9ed2ff; font: 400 13px "Microsoft YaHei", "Noto Sans SC", sans-serif; }
+      .tiny { fill: #7fb6df; font: 400 11px "Microsoft YaHei", "Noto Sans SC", sans-serif; }
+      .box { fill: rgba(14, 31, 45, 0.72); stroke: #7fb6df; stroke-width: 1.8; }
+      .accent { fill: #1d4d73; stroke: #9ed2ff; stroke-width: 2; }
+      .accent2 { fill: #123149; stroke: #9ed2ff; stroke-width: 1.6; }
+      .equipment { fill: #17344b; stroke: #c7ebff; stroke-width: 2; }
+      .bus { stroke: #dff4ff; stroke-width: 6; stroke-linecap: round; }
+      .cable { stroke: #9ed2ff; stroke-width: 3; fill: none; }
+      .detail { stroke: #7fb6df; stroke-width: 1.2; fill: none; }
+    </style>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1600" height="1000"/>
+  <rect x="0" y="0" width="1600" height="1000" fill="url(#grid)"/>
+  <rect x="0" y="0" width="1600" height="1000" fill="url(#gridFine)" opacity="0.5"/>
+
+  <!-- outer frame -->
+  <rect x="28" y="28" width="1544" height="944" class="frame"/>
+  <rect x="44" y="44" width="1512" height="912" class="thin dash" opacity="0.75"/>
+
+  <!-- header -->
+  <text x="80" y="92" class="title">110kV 变电站电气总平面布置图</text>
+  <text x="82" y="122" class="subtitle">国标风格示意 · 站区平面布置 · 设备代号 · 尺寸标注</text>
+
+  <!-- north arrow -->
+  <g transform="translate(1460 70)">
+    <circle cx="0" cy="0" r="34" fill="rgba(14,31,45,0.8)" stroke="#9ed2ff" stroke-width="1.6"/>
+    <path d="M0,-24 L8,0 L0,-7 L-8,0 Z" fill="#ecf6ff" filter="url(#glow)"/>
+    <line x1="0" y1="0" x2="0" y2="24" class="thin"/>
+    <text x="-5" y="46" class="small">N</text>
+  </g>
+
+  <!-- main site plan -->
+  <g transform="translate(80 180)">
+    <rect x="0" y="0" width="1040" height="720" rx="10" class="box"/>
+    <text x="24" y="34" class="label">站区平面布置</text>
+    <text x="24" y="58" class="tiny">围墙内占地约 160m × 110m，采用双母线分段接线方案</text>
+
+    <!-- boundary and access road -->
+    <rect x="34" y="90" width="972" height="596" rx="6" fill="none" stroke="#6ea9d4" stroke-width="2"/>
+    <path d="M76 666 L950 666" class="thin"/>
+    <path d="M76 650 L180 650" class="thin"/>
+    <text x="76" y="696" class="small">主进站道路</text>
+
+    <!-- dimension chain -->
+    <g opacity="0.95">
+      <path d="M34 716 L1006 716" class="thin"/>
+      <path d="M34 706 L34 726 M1006 706 L1006 726" class="thin"/>
+      <path d="M170 706 L170 726 M410 706 L410 726 M650 706 L650 726 M860 706 L860 726" class="thin"/>
+      <text x="92" y="748" class="small">40m</text>
+      <text x="316" y="748" class="small">60m</text>
+      <text x="556" y="748" class="small">50m</text>
+      <text x="770" y="748" class="small">30m</text>
+      <path d="M109 742 L109 730" class="thin"/>
+      <path d="M350 742 L350 730" class="thin"/>
+      <path d="M590 742 L590 730" class="thin"/>
+      <path d="M800 742 L800 730" class="thin"/>
+      <path d="M34 716 L1006 716" class="thin dash" opacity="0.4"/>
+      <text x="720" y="698" class="tiny">总长约 160m</text>
+    </g>
+
+    <!-- control building -->
+    <g transform="translate(70 120)">
+      <rect width="220" height="120" rx="8" class="accent"/>
+      <rect x="14" y="14" width="192" height="92" rx="6" fill="none" stroke="#bfe6ff" stroke-width="1.5"/>
+      <path d="M20 40 L200 40 M20 68 L200 68" class="detail"/>
+      <text x="28" y="31" class="label">综合控制楼 A1</text>
+      <text x="28" y="55" class="tiny">二次设备室 / 继保室 / 通信机房 / 蓄电池室</text>
+      <text x="28" y="84" class="tiny">建筑尺寸：22m × 12m</text>
+    </g>
+
+    <!-- service yard -->
+    <g transform="translate(320 120)">
+      <rect width="260" height="120" rx="8" class="accent2"/>
+      <text x="18" y="31" class="label">主变压器区 T1 / T2</text>
+      <text x="18" y="55" class="tiny">2 台 110/35kV 变压器，油池与事故排油沟</text>
+      <g transform="translate(24 68)">
+        <rect width="84" height="32" rx="6" class="equipment"/>
+        <rect x="96" width="84" height="32" rx="6" class="equipment"/>
+        <path d="M42 32 L42 48 M138 32 L138 48" class="thin"/>
+        <text x="14" y="22" class="small">T1</text>
+        <text x="112" y="22" class="small">T2</text>
+      </g>
+    </g>
+
+    <!-- switchyard -->
+    <g transform="translate(620 120)">
+      <rect width="360" height="470" rx="8" class="accent2"/>
+      <text x="18" y="31" class="label">110kV 开关站 K1</text>
+      <text x="18" y="55" class="tiny">双母线分段，四回线路进出线，预留母联间隔</text>
+
+      <!-- busbars -->
+      <line x1="40" y1="110" x2="320" y2="110" class="bus"/>
+      <line x1="40" y1="170" x2="320" y2="170" class="bus"/>
+      <text x="20" y="104" class="small">I 母线</text>
+      <text x="20" y="164" class="small">II 母线</text>
+      <text x="286" y="97" class="tiny">#B1</text>
+      <text x="286" y="157" class="tiny">#B2</text>
+
+      <!-- bay equipment -->
+      <g transform="translate(56 210)">
+        <g>
+          <rect x="0" y="0" width="42" height="44" rx="5" class="equipment"/>
+          <circle cx="21" cy="22" r="7" fill="none" stroke="#dff4ff" stroke-width="2"/>
+          <path d="M21 44 L21 78" class="cable"/>
+          <path d="M21 0 L21 -42" class="cable"/>
+          <text x="-8" y="102" class="tiny">1L1 线路间隔</text>
+        </g>
+        <g transform="translate(85 0)">
+          <rect x="0" y="0" width="42" height="44" rx="5" class="equipment"/>
+          <circle cx="21" cy="22" r="7" fill="none" stroke="#dff4ff" stroke-width="2"/>
+          <path d="M21 44 L21 78" class="cable"/>
+          <path d="M21 0 L21 -42" class="cable"/>
+          <text x="-8" y="102" class="tiny">1L2 线路间隔</text>
+        </g>
+        <g transform="translate(170 0)">
+          <rect x="0" y="0" width="42" height="44" rx="5" class="equipment"/>
+          <circle cx="21" cy="22" r="7" fill="none" stroke="#dff4ff" stroke-width="2"/>
+          <path d="M21 44 L21 78" class="cable"/>
+          <path d="M21 0 L21 -42" class="cable"/>
+          <text x="-2" y="102" class="tiny">1T1 主变间隔</text>
+        </g>
+        <g transform="translate(255 0)">
+          <rect x="0" y="0" width="42" height="44" rx="5" class="equipment"/>
+          <circle cx="21" cy="22" r="7" fill="none" stroke="#dff4ff" stroke-width="2"/>
+          <path d="M21 44 L21 78" class="cable"/>
+          <path d="M21 0 L21 -42" class="cable"/>
+          <text x="-5" y="102" class="tiny">1QF 母联间隔</text>
+        </g>
+      </g>
+
+      <!-- grounding grid -->
+      <path d="M40 320 L320 320 M40 360 L320 360 M40 400 L320 400" class="detail" opacity="0.8"/>
+      <path d="M72 80 L72 430 M150 80 L150 430 M228 80 L228 430 M306 80 L306 430" class="detail" opacity="0.45"/>
+      <text x="18" y="452" class="tiny">预留检修通道及接地网</text>
+    </g>
+
+    <!-- auxiliary power and capacitor bank -->
+    <g transform="translate(70 300)">
+      <rect width="510" height="150" rx="8" class="accent2"/>
+      <text x="18" y="31" class="label">35kV 配电与无功补偿区 K2</text>
+      <text x="18" y="55" class="tiny">电容器组、避雷器、互感器及馈线柜布置</text>
+      <g transform="translate(18 74)">
+        <rect width="92" height="48" rx="6" class="equipment"/>
+        <rect x="108" width="92" height="48" rx="6" class="equipment"/>
+        <rect x="216" width="92" height="48" rx="6" class="equipment"/>
+        <rect x="324" width="92" height="48" rx="6" class="equipment"/>
+        <path d="M46 48 L46 66 M154 48 L154 66 M262 48 L262 66 M370 48 L370 66" class="cable"/>
+        <text x="12" y="29" class="small">QF-35-1</text>
+        <text x="122" y="29" class="small">QF-35-2</text>
+        <text x="225" y="29" class="small">C1 电容器组</text>
+        <text x="334" y="29" class="small">C2 电容器组</text>
+      </g>
+    </g>
+
+    <!-- device numbering strip -->
+    <g transform="translate(70 478)">
+      <rect width="510" height="118" rx="8" class="box"/>
+      <text x="18" y="31" class="label">设备编号与功能标识</text>
+      <text x="18" y="56" class="tiny">QF 断路器 · QS 隔离开关 · TA 电流互感器 · TV 电压互感器 · LA 避雷器</text>
+      <text x="18" y="83" class="tiny">1L1 / 1L2 为 110kV 线路间隔，1T1 为主变压器间隔，1QF 为母联间隔</text>
+      <text x="18" y="106" class="tiny">35kV 区域：QF-35-1 / QF-35-2 为馈线间隔，C1 / C2 为无功补偿装置</text>
+    </g>
+
+    <!-- yard access and fences -->
+    <path d="M34 90 L1006 90" class="thin dash"/>
+    <path d="M34 686 L1006 686" class="thin dash"/>
+    <path d="M34 90 L34 686" class="thin dash"/>
+    <path d="M1006 90 L1006 686" class="thin dash"/>
+    <text x="14" y="398" class="tiny" transform="rotate(-90 14 398)">围墙控制线</text>
+
+    <!-- electrical connections -->
+    <path d="M290 240 L290 352 L620 352" class="cable" marker-end="url(#arrow)"/>
+    <path d="M580 240 L580 200 L620 200" class="cable" marker-end="url(#arrow)"/>
+    <path d="M290 240 L420 240 L420 318" class="cable" marker-end="url(#arrow)"/>
+    <path d="M705 590 L705 636 L920 636" class="cable" marker-end="url(#arrow)"/>
+    <path d="M260 210 L260 170" class="thin"/>
+    <path d="M360 210 L360 170" class="thin"/>
+    <path d="M470 210 L470 170" class="thin"/>
+    <text x="454" y="342" class="tiny">电缆沟走向</text>
+  </g>
+
+  <!-- legend -->
+  <g transform="translate(1160 180)">
+    <rect x="0" y="0" width="380" height="410" rx="10" class="box"/>
+    <text x="22" y="34" class="label">图例与说明</text>
+    <g transform="translate(22 64)">
+      <rect width="34" height="18" class="accent"/>
+      <text x="52" y="15" class="small">A1 综合控制楼</text>
+      <rect y="40" width="34" height="18" class="accent2"/>
+      <text x="52" y="55" class="small">一次设备区域</text>
+      <line x1="0" y1="98" x2="34" y2="98" class="bus"/>
+      <text x="52" y="104" class="small">I / II 母线</text>
+      <line x1="0" y1="140" x2="34" y2="140" class="cable"/>
+      <text x="52" y="145" class="small">电缆 / 连接线</text>
+      <line x1="0" y1="182" x2="34" y2="182" class="thin dash"/>
+      <text x="52" y="187" class="small">围墙 / 边界控制线</text>
+      <circle cx="17" cy="228" r="10" fill="#17344b" stroke="#c7ebff" stroke-width="2"/>
+      <text x="52" y="233" class="small">QF / QS 节点</text>
+      <rect y="264" width="34" height="18" fill="#1d4d73" stroke="#9ed2ff" stroke-width="2"/>
+      <text x="52" y="279" class="small">T1 / T2 主变压器</text>
+    </g>
+
+    <text x="22" y="356" class="tiny">注：本图为示意性设计图纸，用于构思展示，不作为施工依据。</text>
+    <text x="22" y="378" class="tiny">可按需要继续细化为：平面布置、剖面图、一次系统图或 CAD 风格版本。</text>
+  </g>
+
+  <!-- title block -->
+  <g transform="translate(1160 640)">
+    <rect x="0" y="0" width="380" height="250" rx="10" class="box"/>
+    <text x="18" y="32" class="label">标题栏</text>
+    <g transform="translate(18 54)">
+      <line x1="0" y1="0" x2="344" y2="0" class="thin"/>
+      <line x1="0" y1="48" x2="344" y2="48" class="thin"/>
+      <line x1="0" y1="96" x2="344" y2="96" class="thin"/>
+      <line x1="0" y1="144" x2="344" y2="144" class="thin"/>
+      <line x1="0" y1="192" x2="344" y2="192" class="thin"/>
+      <line x1="210" y1="0" x2="210" y2="192" class="thin"/>
+      <text x="10" y="28" class="small">工程名称</text>
+      <text x="222" y="28" class="small">110kV 变电站电气总平面布置图</text>
+      <text x="10" y="76" class="small">图纸名称</text>
+      <text x="222" y="76" class="small">电气总平面布置图</text>
+      <text x="10" y="124" class="small">图号</text>
+      <text x="222" y="124" class="small">EG-SUB-001</text>
+      <text x="10" y="172" class="small">比例</text>
+      <text x="222" y="172" class="small">1:500</text>
+      <text x="10" y="220" class="small">日期</text>
+      <text x="222" y="220" class="small">2026-06-03</text>
+    </g>
+  </g>
+
+  <!-- footer -->
+  <text x="80" y="948" class="tiny">EarthGuardian · schematic blueprint style · generated for quick concept visualization</text>
+</svg>

@@ -631,6 +631,139 @@ async function collectGameModelEntries(absRoot, publicFolder) {
   return out;
 }
 
+/** @param {string} absPath */
+async function readGltfJsonFromAbsModelPath(absPath) {
+  const ext = path.extname(absPath).toLowerCase();
+  if (ext === ".gltf") {
+    try {
+      const text = await readFile(absPath, "utf8");
+      return JSON.parse(text);
+    } catch {
+      return null;
+    }
+  }
+  if (ext !== ".glb") return null;
+  try {
+    const buf = await readFile(absPath);
+    if (buf.length < 20) return null;
+    if (buf.readUInt32LE(0) !== 0x46546c67) return null;
+    const jsonChunkLength = buf.readUInt32LE(12);
+    const jsonChunkType = buf.readUInt32LE(16);
+    if (jsonChunkType !== 0x4e4f534a) return null;
+    const jsonStr = buf.subarray(20, 20 + jsonChunkLength).toString("utf8");
+    return JSON.parse(jsonStr);
+  } catch {
+    return null;
+  }
+}
+
+/** @param {unknown} gltfJson */
+function extractGltfClipNames(gltfJson) {
+  if (!gltfJson || typeof gltfJson !== "object") return [];
+  const animations = /** @type {{ animations?: Array<{ name?: string }> }} */ (gltfJson).animations;
+  if (!Array.isArray(animations)) return [];
+  return animations.map((anim, index) => {
+    const name = typeof anim?.name === "string" ? anim.name.trim() : "";
+    return name || `Animation_${index}`;
+  });
+}
+
+/** @param {unknown} gltfJson */
+function gltfHasSkins(gltfJson) {
+  if (!gltfJson || typeof gltfJson !== "object") return false;
+  const skins = /** @type {{ skins?: unknown[] }} */ (gltfJson).skins;
+  return Array.isArray(skins) && skins.length > 0;
+}
+
+/** @param {string} animationsAbsDir */
+async function listExternalAnimationFiles(animationsAbsDir, publicFolder) {
+  /** @type {Array<{ name: string; publicUrl: string; relativePath: string }>} */
+  const out = [];
+  let dirents;
+  try {
+    dirents = await readdir(animationsAbsDir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  const animExt = /\.(glb|gltf)$/i;
+  for (const ent of dirents) {
+    if (!ent.isFile() || ent.name.startsWith(".") || !animExt.test(ent.name)) continue;
+    const abs = path.join(animationsAbsDir, ent.name);
+    const relToPublic = path.relative(publicFolder, abs).replace(/\\/g, "/");
+    const segments = relToPublic.split("/").filter(Boolean);
+    out.push({
+      name: path.basename(ent.name, path.extname(ent.name)),
+      publicUrl: buildPublicUrl(...segments),
+      relativePath: relToPublic.replace(/^GameModels\//i, ""),
+    });
+  }
+  out.sort((a, b) => a.name.localeCompare(b.name));
+  return out;
+}
+
+/** @param {string} absRoot @param {string} publicFolder */
+async function collectAnimatableModelEntries(absRoot, publicFolder) {
+  const modelExt = /\.(glb|gltf)$/i;
+  /** @type {Array<{
+   *   id: string;
+   *   relativePath: string;
+   *   publicUrl: string;
+   *   name: string;
+   *   hasSkins: boolean;
+   *   embeddedClipNames: string[];
+   *   externalAnimations: Array<{ name: string; publicUrl: string; relativePath: string }>;
+   *   animationsDir: string;
+   * }>} */
+  const out = [];
+
+  async function walk(currentAbs, relPosix) {
+    let dirents;
+    try {
+      dirents = await readdir(currentAbs, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const ent of dirents) {
+      if (ent.name.startsWith(".") || ent.name.toLowerCase() === "animations") continue;
+      const joined = path.join(currentAbs, ent.name);
+      const nextRel = relPosix ? `${relPosix}/${ent.name}` : ent.name;
+      if (ent.isDirectory()) {
+        await walk(joined, nextRel);
+      } else if (modelExt.test(ent.name)) {
+        const gltfJson = await readGltfJsonFromAbsModelPath(joined);
+        const hasSkins = gltfHasSkins(gltfJson);
+        const embeddedClipNames = extractGltfClipNames(gltfJson);
+        if (!hasSkins && embeddedClipNames.length === 0) continue;
+        const relToPublicPath = path.relative(publicFolder, joined).replace(/\\/g, "/");
+        const segments = relToPublicPath.split("/").filter(Boolean);
+        const publicUrl = buildPublicUrl(...segments);
+        const stem = path.basename(ent.name, path.extname(ent.name));
+        const animationsAbsDir = path.join(path.dirname(joined), "animations");
+        const externalAnimations = await listExternalAnimationFiles(animationsAbsDir, publicFolder);
+        const animDirRel = path
+          .relative(publicFolder, animationsAbsDir)
+          .replace(/\\/g, "/")
+          .replace(/^GameModels\//i, "");
+        out.push({
+          id: gmEntryId(relToPublicPath),
+          relativePath: nextRel.replace(/\\/g, "/"),
+          publicUrl,
+          name: stem,
+          hasSkins,
+          embeddedClipNames,
+          externalAnimations,
+          animationsDir: animDirRel ? `GameModels/${animDirRel}` : "GameModels/animations",
+        });
+      }
+    }
+  }
+
+  await mkdir(absRoot, { recursive: true });
+  await walk(absRoot, "");
+  out.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
+  return out;
+}
+
 const threePackageRoot = path.resolve(__dirname, "node_modules", "three");
 const tilesRendererBuildRoot = path.resolve(__dirname, "node_modules", "3d-tiles-renderer", "build");
 
@@ -1317,6 +1450,109 @@ export default defineConfig({
               error: error instanceof Error ? error.message : "catalog failed",
               root: "/GameModels",
               entries: [],
+            });
+          }
+        });
+
+        server.middlewares.use("/api/game-models/animatable-catalog", async (request, response) => {
+          if (request.method !== "GET") {
+            sendJson(response, 405, { error: "Method not allowed" });
+            return;
+          }
+          try {
+            const entries = await collectAnimatableModelEntries(gameModelsDir, publicDir);
+            sendJson(response, 200, {
+              root: "/GameModels",
+              entries,
+            });
+          } catch (error) {
+            sendJson(response, 500, {
+              error: error instanceof Error ? error.message : "animatable catalog failed",
+              root: "/GameModels",
+              entries: [],
+            });
+          }
+        });
+
+        server.middlewares.use("/api/game-models/model-animations", async (request, response) => {
+          if (request.method !== "GET") {
+            sendJson(response, 405, { error: "Method not allowed" });
+            return;
+          }
+          try {
+            const url = new URL(String(request.url || "/"), "http://localhost");
+            const modelUrl = String(url.searchParams.get("modelUrl") || "").trim();
+            if (!modelUrl) {
+              sendJson(response, 400, { error: "modelUrl is required" });
+              return;
+            }
+            const absPath =
+              resolvePublicProjectAbsPath(modelUrl) ||
+              resolvePublicProjectAbsPath(modelUrl.startsWith("/") ? modelUrl.slice(1) : modelUrl);
+            if (!absPath || !/\.(glb|gltf)$/i.test(absPath)) {
+              sendJson(response, 400, { error: "Invalid model path" });
+              return;
+            }
+            const gltfJson = await readGltfJsonFromAbsModelPath(absPath);
+            const embeddedClipNames = extractGltfClipNames(gltfJson);
+            const hasSkins = gltfHasSkins(gltfJson);
+            const animationsAbsDir = path.join(path.dirname(absPath), "animations");
+            const externalAnimations = await listExternalAnimationFiles(animationsAbsDir, publicDir);
+            sendJson(response, 200, {
+              modelUrl,
+              hasSkins,
+              embeddedClipNames,
+              externalAnimations,
+              animationsDir: path
+                .relative(publicDir, animationsAbsDir)
+                .replace(/\\/g, "/"),
+            });
+          } catch (error) {
+            sendJson(response, 500, {
+              error: error instanceof Error ? error.message : "model animations query failed",
+            });
+          }
+        });
+
+        server.middlewares.use("/api/game-models/upload-animation", async (request, response) => {
+          if (request.method !== "POST") {
+            sendJson(response, 405, { error: "Method not allowed" });
+            return;
+          }
+          try {
+            const body = await readJsonBody(request);
+            const modelUrl = String(body.modelUrl ?? "").trim();
+            const originalName = sanitizeName(String(body.name ?? "animation.glb"));
+            const extension = path.extname(originalName) || ".glb";
+            let basenameStem = sanitizeName(path.basename(originalName, extension));
+            if (!basenameStem) basenameStem = "animation";
+            const replaceExisting = body.replaceExisting !== false;
+            const absModel = resolvePublicProjectAbsPath(modelUrl.startsWith("/") ? modelUrl.slice(1) : modelUrl);
+            if (!absModel || !/\.(glb|gltf)$/i.test(absModel)) {
+              sendJson(response, 400, { error: "Invalid modelUrl" });
+              return;
+            }
+            const targetDir = path.join(path.dirname(absModel), "animations");
+            await mkdir(targetDir, { recursive: true });
+            let fileName = `${basenameStem}${extension.toLowerCase()}`;
+            const targetPath = path.join(targetDir, fileName);
+            if (!replaceExisting && existsSync(targetPath)) {
+              fileName = ensureUniqueFilename(targetDir, basenameStem, extension.toLowerCase());
+            }
+            const absolutePath = path.join(targetDir, fileName);
+            await writeFile(absolutePath, Buffer.from(String(body.content ?? ""), "base64"));
+            const relativeSegments = path.relative(publicDir, absolutePath).split(path.sep).filter(Boolean);
+            const projectPath = path.posix.join("public", ...relativeSegments);
+            const publicUrl = buildPublicUrl(...relativeSegments);
+            sendJson(response, 200, {
+              projectPath,
+              publicUrl,
+              name: path.basename(fileName, path.extname(fileName)),
+              relativePath: relativeSegments.slice(1).join("/"),
+            });
+          } catch (error) {
+            sendJson(response, 500, {
+              error: error instanceof Error ? error.message : "animation upload failed",
             });
           }
         });
